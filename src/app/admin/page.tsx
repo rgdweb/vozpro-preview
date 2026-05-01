@@ -118,43 +118,6 @@ function writeWavString(view: DataView, offset: number, str: string) {
   }
 }
 
-/**
- * Upload directly to PHP server (bypasses Vercel 4.5MB body limit).
- * Gets a one-time token from /api/upload-token, then uploads to PHP.
- */
-async function uploadDirectToPHP(
-  blob: Blob,
-  filename: string,
-  tipo: string = 'track'
-): Promise<{ url: string; arquivo: string }> {
-  // Get upload URL and token
-  const tokenRes = await fetch('/api/upload-token')
-  const tokenData = await tokenRes.json()
-  if (!tokenData.uploadUrl || !tokenData.token) {
-    throw new Error('Erro ao obter token de upload')
-  }
-
-  // Upload directly to PHP (bypasses Vercel body limit!)
-  const formData = new FormData()
-  formData.append('arquivo', blob, filename)
-  formData.append('tipo', tipo)
-
-  const uploadRes = await fetch(tokenData.uploadUrl, {
-    method: 'POST',
-    headers: {
-      'X-Upload-Token': tokenData.token,
-    },
-    body: formData,
-  })
-
-  const uploadData = await uploadRes.json()
-  if (!uploadData.sucesso) {
-    throw new Error(uploadData.erro || 'Erro no upload para o servidor')
-  }
-
-  return { url: uploadData.url, arquivo: uploadData.arquivo }
-}
-
 interface VoiceVariation {
   id: string
   label: string
@@ -537,13 +500,27 @@ export default function AdminDashboard() {
     if (!file) return
 
     try {
-      if (file.size >= 3 * 1024 * 1024) {
-        // Compress large files instantly using OfflineAudioContext
-        toast.info('Comprimindo arquivo...')
+      // Accept common audio formats
+      const validExts = ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.webm']
+      const ext = '.' + file.name.split('.').pop()?.toLowerCase()
+      if (!validExts.includes(ext)) {
+        toast.error('Formato não suportado. Use MP3, WAV, OGG, M4A, FLAC ou WEBM.')
+        return
+      }
+
+      // Only compress large WAV files (uncompressed format benefits from downsampling)
+      // MP3/OGG/M4A are already compressed — converting to WAV would make them BIGGER
+      const isLossless = ['wav', 'flac'].includes(ext.replace('.', ''))
+      const isLarge = file.size >= 3 * 1024 * 1024
+
+      if (isLossless && isLarge) {
+        toast.info('Comprimindo arquivo WAV...')
         const compressed = await compressAudioFile(file)
         setPendingTrackFile({ blob: compressed.blob, name: compressed.name })
         toast.success(`Arquivo pronto (${(compressed.blob.size / (1024 * 1024)).toFixed(1)}MB)`)
       } else {
+        // MP3/OGG/M4A: keep original (already compressed)
+        // Small WAV: keep original (under 3MB, no need to compress)
         setPendingTrackFile({ blob: file, name: file.name })
         toast.success(`Arquivo pronto (${(file.size / (1024 * 1024)).toFixed(1)}MB)`)
       }
@@ -561,42 +538,32 @@ export default function AdminDashboard() {
     }
 
     try {
-      let audioUrl = editingTrackId ? undefined : undefined
+      let audioUrl = ''
       let audioFilename = ''
 
-      // Upload pending file if there is one (directly to PHP, bypassing Vercel limit)
+      // Upload pending file via Vercel proxy (server-to-server, no CORS issues)
       if (pendingTrackFile) {
         setUploadingTrack(true)
-        if (editingTrackId) {
-          toast.info('Enviando novo arquivo...')
-        } else {
-          toast.info('Enviando arquivo...')
+        toast.info('Enviando arquivo...')
+
+        const formData = new FormData()
+        formData.append('file', pendingTrackFile.blob, pendingTrackFile.name)
+
+        const uploadRes = await fetch('/api/upload-track', {
+          method: 'POST',
+          body: formData,
+        })
+
+        const uploadData = await uploadRes.json()
+        if (!uploadRes.ok || (!uploadData.path && !uploadData.url)) {
+          setUploadingTrack(false)
+          toast.error(uploadData.error || 'Erro no upload do arquivo')
+          return
         }
 
-        const result = await uploadDirectToPHP(pendingTrackFile.blob, pendingTrackFile.name, 'track')
-
-        // If editing with new audio, delete old audio from server
-        if (editingTrackId) {
-          const oldTrack = tracks.find(t => t.id === editingTrackId)
-          if (oldTrack?.audioPath) {
-            const oldFilename = oldTrack.audioPath.split('/').pop()
-            if (oldFilename) {
-              try {
-                await fetch('/api/admin/tracks', {
-                  method: 'DELETE',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ filename: oldFilename, tipo: 'track' }),
-                })
-              } catch {
-                // Ignore delete errors — old file cleanup is best-effort
-              }
-            }
-          }
-        }
-
-        audioUrl = result.url
-        audioFilename = result.arquivo
-        setTrackFilePath(result.url)
+        audioUrl = uploadData.path || uploadData.url
+        audioFilename = uploadData.filename || ''
+        setTrackFilePath(audioUrl)
         toast.success('Arquivo enviado!')
         setUploadingTrack(false)
       }

@@ -23,13 +23,13 @@ export async function POST(req: NextRequest) {
     const validTypes = ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp3', 'audio/x-wav', 'audio/flac', 'audio/m4a', 'audio/webm', 'audio/webm;codecs=opus']
     if (!validTypes.includes(file.type) && !file.name.match(/\.(mp3|wav|ogg|m4a|flac|webm)$/i)) {
       return NextResponse.json(
-        { error: 'Formato não suportado. Use MP3, WAV ou OGG.' },
+        { error: 'Formato não suportado. Use MP3, WAV, OGG, M4A, FLAC ou WEBM.' },
         { status: 400 }
       )
     }
 
-    // Upload to PHP hosting
-    const ext = file.name.match(/\.(mp3|wav|ogg)$/i)?.[0] || '.mp3'
+    // Upload to PHP hosting (preserve original extension)
+    const ext = file.name.match(/\.(mp3|wav|ogg|m4a|flac|webm)$/i)?.[0] || '.mp3'
     const uniqueName = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}${ext}`
     const result = await uploadToAudioServer(file, uniqueName, 'track')
 

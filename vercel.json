@@ -1,0 +1,19 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    }
+  ],
+  "functions": {
+    "src/app/api/upload-voice/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/upload-track/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}

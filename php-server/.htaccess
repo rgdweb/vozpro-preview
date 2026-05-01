@@ -1,0 +1,24 @@
+# Aumentar limites de upload para arquivos grandes (trilhas longas)
+php_value upload_max_filesize 50M
+php_value post_max_size 55M
+php_value max_execution_time 120
+php_value max_input_time 120
+
+# Proteger arquivos de configuracao
+<FilesMatch "^(config\.php|uploads\.log)$">
+    Order deny,allow
+    Deny from all
+</FilesMatch>
+
+# Proteger pasta de uploads - apenas acesso via PHP
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    # Bloquear acesso direto a arquivos PHP
+    RewriteRule ^audios/.*\.php$ - [F]
+</IfModule>
+
+# Permitir acesso aos arquivos de audio
+<FilesMatch "\.(wav|mp3|ogg|flac|m4a|webm)$">
+    Order allow,deny
+    Allow from all
+</FilesMatch>

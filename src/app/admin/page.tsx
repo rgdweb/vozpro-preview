@@ -139,6 +139,39 @@ function writeWavString(view: DataView, offset: number, str: string) {
   }
 }
 
+/**
+ * Upload direto ao PHP (bypassa limite 4.5MB do Vercel).
+ * Para arquivos grandes, envia direto navegador→PHP sem perda de qualidade.
+ */
+async function uploadDirectToPHP(
+  blob: Blob,
+  filename: string,
+  tipo: string = 'track'
+): Promise<{ url: string; arquivo: string }> {
+  const tokenRes = await fetch('/api/upload-token')
+  const tokenData = await tokenRes.json()
+  if (!tokenData.uploadUrl || !tokenData.token) {
+    throw new Error('Erro ao obter token de upload')
+  }
+
+  const formData = new FormData()
+  formData.append('arquivo', blob, filename)
+  formData.append('tipo', tipo)
+
+  const uploadRes = await fetch(tokenData.uploadUrl, {
+    method: 'POST',
+    headers: { 'X-Upload-Token': tokenData.token },
+    body: formData,
+  })
+
+  const uploadData = await uploadRes.json()
+  if (!uploadData.sucesso) {
+    throw new Error(uploadData.erro || 'Erro no upload para o servidor')
+  }
+
+  return { url: uploadData.url, arquivo: uploadData.arquivo }
+}
+
 interface VoiceVariation {
   id: string
   label: string
@@ -515,13 +548,12 @@ export default function AdminDashboard() {
   }
 
   // --- TRACK CRUD ---
-  // Select track file (NO upload — just compress if needed and store in state)
+  // Select track file (NO upload — guarda em estado, so envia ao clicar Salvar)
   const handleSelectTrackFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
     try {
-      // Accept common audio formats
       const validExts = ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.webm']
       const ext = '.' + file.name.split('.').pop()?.toLowerCase()
       if (!validExts.includes(ext)) {
@@ -529,27 +561,10 @@ export default function AdminDashboard() {
         return
       }
 
-      const sizeMB = file.size / (1024 * 1024)
-
-      // Formatos ja comprimidos (MP3/OGG/M4A/WEBM): NUNCA comprimir, manter qualidade original
-      // Formatos nao comprimidos (WAV/FLAC): comprimir se > 4MB
-      const isUncompressed = ['wav', 'flac'].includes(ext.replace('.', ''))
-
-      if (isUncompressed && file.size >= MAX_COMPRESSED_SIZE) {
-        // WAV/FLAC grande: comprime para WAV com sample rate inteligente
-        toast.info('Comprimindo arquivo WAV/FLAC...')
-        const compressed = await compressAudioFile(file)
-        setPendingTrackFile({ blob: compressed.blob, name: compressed.name })
-        toast.success(`Arquivo pronto (${(compressed.blob.size / (1024 * 1024)).toFixed(1)}MB)`)
-      } else if (sizeMB > 4.2) {
-        // MP3/OGG/M4A muito grande (>4.2MB): alerta mas envia original (qualidade preservada)
-        setPendingTrackFile({ blob: file, name: file.name })
-        toast.warning(`Arquivo grande (${sizeMB.toFixed(1)}MB). Vai tentar enviar com qualidade original. Se falhar, use um arquivo menor ou converta para WAV.`)
-      } else {
-        // Arquivo normal: envia original, sem perda de qualidade
-        setPendingTrackFile({ blob: file, name: file.name })
-        toast.success(`Arquivo pronto (${sizeMB.toFixed(1)}MB)`)
-      }
+      // Sempre envia original — qualidade 100%, sem compressao
+      setPendingTrackFile({ blob: file, name: file.name })
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1)
+      toast.success(`Arquivo pronto (${sizeMB}MB)`)
     } catch (err) {
       console.error('Error preparing file:', err)
       toast.error('Erro ao processar o arquivo')
@@ -567,29 +582,57 @@ export default function AdminDashboard() {
       let audioUrl = ''
       let audioFilename = ''
 
-      // Upload pending file via Vercel proxy (server-to-server, sem CORS)
-      // Arquivo ja foi comprimido na selecao se necessario, entao sempre < 4MB
       if (pendingTrackFile) {
         setUploadingTrack(true)
-        toast.info('Enviando arquivo...')
+        const fileSizeMB = pendingTrackFile.blob.size / (1024 * 1024)
 
-        const formData = new FormData()
-        formData.append('file', pendingTrackFile.blob, pendingTrackFile.name)
+        if (fileSizeMB < 4) {
+          // Arquivo pequeno: proxy Vercel (confiavel, sem CORS)
+          toast.info('Enviando arquivo...')
 
-        const uploadRes = await fetch('/api/upload-track', {
-          method: 'POST',
-          body: formData,
-        })
+          const formData = new FormData()
+          formData.append('file', pendingTrackFile.blob, pendingTrackFile.name)
 
-        const uploadData = await uploadRes.json()
-        if (!uploadRes.ok || (!uploadData.path && !uploadData.url)) {
-          setUploadingTrack(false)
-          toast.error(uploadData.error || 'Erro no upload do arquivo')
-          return
+          const uploadRes = await fetch('/api/upload-track', {
+            method: 'POST',
+            body: formData,
+          })
+
+          const uploadData = await uploadRes.json()
+          if (uploadRes.ok && (uploadData.path || uploadData.url)) {
+            audioUrl = uploadData.path || uploadData.url
+            audioFilename = uploadData.filename || ''
+          } else {
+            setUploadingTrack(false)
+            toast.error(uploadData.error || 'Erro no upload do arquivo')
+            return
+          }
+        } else {
+          // Arquivo grande: upload direto ao PHP (sem limite de tamanho, qualidade 100%)
+          toast.info('Enviando arquivo grande direto ao servidor...')
+          try {
+            const result = await uploadDirectToPHP(pendingTrackFile.blob, pendingTrackFile.name, 'track')
+            audioUrl = result.url
+            audioFilename = result.arquivo
+          } catch (directErr) {
+            console.error('[Track] Upload direto falhou, tentando proxy Vercel:', directErr)
+            // Fallback: tenta proxy Vercel
+            toast.info('Tentando método alternativo...')
+            const formData = new FormData()
+            formData.append('file', pendingTrackFile.blob, pendingTrackFile.name)
+            const uploadRes = await fetch('/api/upload-track', { method: 'POST', body: formData })
+            const uploadData = await uploadRes.json()
+            if (uploadRes.ok && (uploadData.path || uploadData.url)) {
+              audioUrl = uploadData.path || uploadData.url
+              audioFilename = uploadData.filename || ''
+            } else {
+              setUploadingTrack(false)
+              toast.error('Erro ao enviar arquivo. Tente um arquivo menor.')
+              return
+            }
+          }
         }
 
-        audioUrl = uploadData.path || uploadData.url
-        audioFilename = uploadData.filename || ''
         setTrackFilePath(audioUrl)
         toast.success('Arquivo enviado!')
         setUploadingTrack(false)

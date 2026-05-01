@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminSession } from '@/lib/auth'
 import { db } from '@/lib/db'
+import { deleteFromAudioServer } from '@/lib/audio-server'
 
 // PUT /api/variations/[id] - Update a variation
 export async function PUT(
@@ -22,7 +23,8 @@ export async function PUT(
         ...(body.label !== undefined && { label: body.label.trim() }),
         ...(body.emoji !== undefined && { emoji: body.emoji }),
         ...(body.refAudioPath !== undefined && { refAudioPath: body.refAudioPath }),
-        ...(body.refAudioBlobUrl !== undefined && { refAudioBlobUrl: body.refAudioBlobUrl }),
+        ...(body.refAudioServerUrl !== undefined && { refAudioServerUrl: body.refAudioServerUrl }),
+        ...(body.refAudioFilename !== undefined && { refAudioFilename: body.refAudioFilename }),
         ...(body.refAudioName !== undefined && { refAudioName: body.refAudioName }),
         ...(body.refText !== undefined && { refText: body.refText }),
         ...(body.instruct !== undefined && { instruct: body.instruct }),
@@ -50,6 +52,13 @@ export async function DELETE(
     }
 
     const { id } = await params
+    const variation = await db.voiceVariation.findUnique({ where: { id } })
+
+    // Delete audio from PHP server
+    if (variation?.refAudioFilename) {
+      await deleteFromAudioServer(variation.refAudioFilename, 'ref')
+    }
+
     await db.voiceVariation.delete({ where: { id } })
     return NextResponse.json({ success: true })
   } catch (error) {

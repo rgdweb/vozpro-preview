@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { uploadToBlob } from '@/lib/blob'
+import { uploadToAudioServer } from '@/lib/audio-server'
 
 const HF_SPACE_URL = process.env.HF_SPACE_URL || 'https://k2-fsa-omnivoice.hf.space'
 
-// POST /api/upload-voice - Upload reference audio to HuggingFace Space AND Vercel Blob
+// POST /api/upload-voice - Upload reference audio to PHP hosting AND HuggingFace Space
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData()
@@ -13,55 +13,43 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Nenhum arquivo fornecido' }, { status: 400 })
     }
 
-    // Step 1: Upload the file to Vercel Blob (permanent storage)
+    // Step 1: Upload the file to PHP hosting (permanent storage)
     const ext = file.name.match(/\.(mp3|wav|ogg|m4a|flac|webm)$/i)?.[0] || '.wav'
-    const uniqueName = `ref-voice/${Date.now()}-${Math.random().toString(36).substring(2, 8)}${ext}`
-    const blobResult = await uploadToBlob(uniqueName, file, file.type || 'audio/wav')
-    console.log('[UploadVoice] Saved to Blob:', blobResult.url)
-    // Use the download URL which includes a signed token for private blobs
-    const blobUrl = blobResult.downloadUrl || blobResult.url
+    const uniqueName = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}${ext}`
+    const audioServerResult = await uploadToAudioServer(file, uniqueName, 'ref')
+    console.log('[UploadVoice] Saved to audio server:', audioServerResult.url)
 
     // Step 2: Upload the file to the Gradio Space's upload endpoint
     const uploadForm = new FormData()
     uploadForm.append('files', file)
 
-    const uploadRes = await fetch(`${HF_SPACE_URL}/gradio_api/upload`, {
-      method: 'POST',
-      body: uploadForm,
-    })
-
-    if (!uploadRes.ok) {
-      const errText = await uploadRes.text()
-      console.error('[UploadVoice] HF upload error:', uploadRes.status, errText)
-      // Still return success with blob URL - we will re-upload to HF when generating
-      return NextResponse.json({
-        path: '',
-        blobUrl,
-        blobPathname: blobResult.pathname,
-        url: `${HF_SPACE_URL}/gradio_api/file=`,
-        name: file.name,
+    let hfPath = ''
+    try {
+      const uploadRes = await fetch(`${HF_SPACE_URL}/gradio_api/upload`, {
+        method: 'POST',
+        body: uploadForm,
       })
+
+      if (uploadRes.ok) {
+        const uploadData = await uploadRes.json()
+        if (Array.isArray(uploadData) && uploadData.length > 0) {
+          hfPath = uploadData[0]
+          console.log('[UploadVoice] Also uploaded to HF Space:', hfPath)
+        }
+      } else {
+        const errText = await uploadRes.text()
+        console.error('[UploadVoice] HF upload error:', uploadRes.status, errText)
+      }
+    } catch (err) {
+      console.error('[UploadVoice] HF upload failed, will re-upload on generate:', err)
     }
 
-    const uploadData = await uploadRes.json()
-
-    // Gradio returns an array of file paths
-    if (Array.isArray(uploadData) && uploadData.length > 0) {
-      return NextResponse.json({
-        path: uploadData[0],
-        blobUrl,
-        blobPathname: blobResult.pathname,
-        url: `${HF_SPACE_URL}/gradio_api/file=${uploadData[0]}`,
-        name: file.name,
-      })
-    }
-
-    // HF upload returned unexpected response, but blob is saved
+    // Return success with both URLs
     return NextResponse.json({
-      path: '',
-      blobUrl,
-      blobPathname: blobResult.pathname,
-      url: `${HF_SPACE_URL}/gradio_api/file=`,
+      path: hfPath,                                // HF Space path (temporary, may expire)
+      serverUrl: audioServerResult.url,            // PHP hosting URL (permanent)
+      filename: audioServerResult.filename,        // filename on server (for deletion)
+      url: audioServerResult.url,                  // permanent URL for reference
       name: file.name,
     })
   } catch (error) {

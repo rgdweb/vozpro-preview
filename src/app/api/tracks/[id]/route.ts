@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminSession } from '@/lib/auth'
-import { deleteFromBlob, isBlobUrl } from '@/lib/blob'
 import { db } from '@/lib/db'
 
 // PUT /api/tracks/[id] - Update a track
@@ -16,14 +15,6 @@ export async function PUT(
 
     const { id } = await params
     const body = await req.json()
-
-    // If audioPath is changing, delete the old blob
-    if (body.audioPath) {
-      const existingTrack = await db.track.findUnique({ where: { id } })
-      if (existingTrack?.audioPath && isBlobUrl(existingTrack.audioPath)) {
-        await deleteFromBlob(existingTrack.audioPath)
-      }
-    }
 
     const track = await db.track.update({
       where: { id },
@@ -57,13 +48,6 @@ export async function DELETE(
     }
 
     const { id } = await params
-
-    // Get track to delete blob
-    const track = await db.track.findUnique({ where: { id } })
-    if (track?.audioPath && isBlobUrl(track.audioPath)) {
-      await deleteFromBlob(track.audioPath)
-    }
-
     await db.track.delete({ where: { id } })
     return NextResponse.json({ success: true })
   } catch (error) {

@@ -33,13 +33,13 @@ export async function POST(
 
     const { id } = await params
     const body = await req.json()
-    const { label, emoji, refAudioPath, refAudioBlobUrl, refAudioName, refText, instruct, order } = body
+    const { label, emoji, refAudioPath, serverUrl, filename, refAudioName, refText, instruct, order } = body
 
     if (!label || !label.trim()) {
       return NextResponse.json({ error: 'Label é obrigatório' }, { status: 400 })
     }
 
-    if (!refAudioPath && !refAudioBlobUrl) {
+    if (!refAudioPath && !serverUrl) {
       return NextResponse.json({ error: 'Áudio de referência é obrigatório' }, { status: 400 })
     }
 
@@ -55,7 +55,8 @@ export async function POST(
         label: label.trim(),
         emoji: emoji || '',
         refAudioPath: refAudioPath || '',
-        refAudioBlobUrl: refAudioBlobUrl || '',
+        refAudioServerUrl: serverUrl || '',
+        refAudioFilename: filename || '',
         refAudioName: refAudioName || '',
         refText: refText || '',
         instruct: instruct || '',

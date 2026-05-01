@@ -7,23 +7,25 @@ export const maxDuration = 300
 const HF_SPACE_URL = process.env.HF_SPACE_URL || 'https://k2-fsa-omnivoice.hf.space'
 
 /**
- * Re-upload a reference audio from Vercel Blob to HuggingFace Space.
+ * Upload a reference audio to HuggingFace Space from a URL.
+ * Downloads the audio from the given URL, then uploads it to HF Space.
  * Returns the HF path for Gradio FileData.
  */
-async function reuploadRefAudioToHF(blobUrl: string, fileName: string): Promise<string | null> {
+async function uploadAudioToHF(audioUrl: string, fileName: string): Promise<string | null> {
   try {
-    console.log('[Generate] Re-uploading ref audio to HF Space from Blob...')
-    const headers: Record<string, string> = {}
-    if (process.env.BLOB_READ_WRITE_TOKEN) {
-      headers['Authorization'] = `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`
-    }
-    const audioRes = await fetch(blobUrl, { headers })
+    console.log('[Generate] Downloading ref audio from:', audioUrl.substring(0, 80))
+
+    // Download the audio file
+    const audioRes = await fetch(audioUrl)
     if (!audioRes.ok) {
-      console.error('[Generate] Failed to fetch ref audio from Blob:', audioRes.status)
+      console.error('[Generate] Failed to download ref audio:', audioRes.status)
       return null
     }
 
     const audioBlob = await audioRes.blob()
+    console.log('[Generate] Downloaded audio, size:', audioBlob.size, 'bytes')
+
+    // Upload to HF Space
     const uploadForm = new FormData()
     uploadForm.append('files', audioBlob, fileName)
 
@@ -34,19 +36,19 @@ async function reuploadRefAudioToHF(blobUrl: string, fileName: string): Promise<
 
     if (!uploadRes.ok) {
       const errText = await uploadRes.text()
-      console.error('[Generate] Re-upload to HF failed:', uploadRes.status, errText)
+      console.error('[Generate] Upload to HF failed:', uploadRes.status, errText)
       return null
     }
 
     const uploadData = await uploadRes.json()
     if (Array.isArray(uploadData) && uploadData.length > 0) {
-      console.log('[Generate] Re-upload successful:', uploadData[0])
+      console.log('[Generate] Upload to HF successful:', uploadData[0])
       return uploadData[0]
     }
 
     return null
   } catch (err) {
-    console.error('[Generate] Re-upload error:', err)
+    console.error('[Generate] Upload to HF error:', err)
     return null
   }
 }
@@ -70,7 +72,7 @@ async function submitToGradio(data: unknown[]): Promise<{ eventId: string | null
   return { eventId: submitData.event_id, gradioError: null }
 }
 
-// POST /api/generate - Generate TTS audio with optional track info for client-side mixing
+// POST /api/generate - Generate TTS audio
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -96,8 +98,8 @@ export async function POST(req: NextRequest) {
     }
 
     console.log('[Generate] Variation:', variation.label, '| Voice:', variation.voice.name)
-    console.log('[Generate] refAudioPath:', variation.refAudioPath)
-    console.log('[Generate] refAudioBlobUrl:', variation.refAudioBlobUrl)
+    console.log('[Generate] refAudioPath (HF):', variation.refAudioPath)
+    console.log('[Generate] refAudioServerUrl:', (variation as Record<string, unknown>).refAudioServerUrl || '(not set)')
     console.log('[Generate] refAudioName:', variation.refAudioName)
     console.log('[Generate] Text:', text.substring(0, 80) + (text.length > 80 ? '...' : ''))
 
@@ -125,38 +127,43 @@ export async function POST(req: NextRequest) {
     console.log('[Generate] Instruct string:', instructStr || '(empty)')
     console.log('[Generate] Language:', language || 'Auto', '| Speed:', speed ?? 1.0, '| Steps:', numStep ?? 32, '| CFG:', guidanceScale ?? 2.0)
 
-    // Determine the ref audio FileData - try re-upload if path is empty or blob exists
-    let refAudioPath = variation.refAudioPath
-    const blobUrl = variation.refAudioBlobUrl
+    // Get the permanent audio URL from our server
+    const serverUrl = (variation as Record<string, unknown>).refAudioServerUrl as string || (variation as Record<string, unknown>).refAudioBlobUrl as string || ''
+    const fileName = variation.refAudioName || 'ref_audio.wav'
 
-    // If no HF path but we have a blob backup, re-upload
-    if ((!refAudioPath) && blobUrl) {
-      const newPath = await reuploadRefAudioToHF(blobUrl, variation.refAudioName || 'ref_audio.wav')
-      if (newPath) {
-        refAudioPath = newPath
-        // Update the variation in DB with the new path
+    // ALWAYS re-upload from our permanent server to HF Space
+    // This ensures the audio is always available, even if HF Space was restarted
+    let refAudioPath: string | null = null
+
+    if (serverUrl) {
+      console.log('[Generate] Re-uploading audio from server to HF Space...')
+      refAudioPath = await uploadAudioToHF(serverUrl, fileName)
+      if (refAudioPath) {
+        // Update the HF path in DB (it may have changed)
         await db.voiceVariation.update({
           where: { id: variation.id },
-          data: { refAudioPath: newPath },
+          data: { refAudioPath },
         })
-        console.log('[Generate] Updated refAudioPath in DB:', newPath)
-      } else {
-        return NextResponse.json(
-          { error: 'Não foi possível enviar o áudio de referência para o servidor de IA. Tente reenviar o áudio.' },
-          { status: 502 }
-        )
+        console.log('[Generate] Updated refAudioPath in DB:', refAudioPath)
       }
+    } else if (variation.refAudioPath) {
+      // Fallback: try using the existing HF path (may or may not work)
+      console.log('[Generate] No server URL, trying existing HF path...')
+      refAudioPath = variation.refAudioPath
     }
 
     if (!refAudioPath) {
-      return NextResponse.json({ error: 'Variação sem áudio de referência' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Áudio de referência não disponível. Reenvie o áudio de referência na variação.' },
+        { status: 400 }
+      )
     }
 
     // Build the ref audio FileData object for Gradio
     const refAudioFileData = {
       path: refAudioPath,
-      orig_name: variation.refAudioName || 'ref_audio.wav',
-      mime_type: 'audio/wav',
+      orig_name: fileName,
+      mime_type: fileName.endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav',
       is_stream: false,
       meta: { _type: 'gradio.FileData' },
     }
@@ -181,23 +188,15 @@ export async function POST(req: NextRequest) {
     console.log('[Generate] Submitting to Gradio clone_fn...')
     let submitResult = await submitToGradio(data)
 
-    // If we have a blob backup and the first attempt had no event_id, try re-uploading
-    if (!submitResult.eventId && blobUrl) {
-      console.log('[Generate] First submit failed, trying re-upload from Blob...')
-      const newPath = await reuploadRefAudioToHF(blobUrl, variation.refAudioName || 'ref_audio.wav')
-      if (newPath) {
-        refAudioPath = newPath
-        await db.voiceVariation.update({
-          where: { id: variation.id },
-          data: { refAudioPath: newPath },
-        })
-        console.log('[Generate] Re-uploaded and updated DB:', newPath)
-
-        // Retry with new path
+    // If first attempt failed and we have a server URL, retry once with a fresh upload
+    if (!submitResult.eventId && serverUrl) {
+      console.log('[Generate] First submit failed, retrying with fresh upload...')
+      const retryPath = await uploadAudioToHF(serverUrl, fileName)
+      if (retryPath) {
         const retryFileData = {
-          path: newPath,
-          orig_name: variation.refAudioName || 'ref_audio.wav',
-          mime_type: 'audio/wav',
+          path: retryPath,
+          orig_name: fileName,
+          mime_type: fileName.endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav',
           is_stream: false,
           meta: { _type: 'gradio.FileData' },
         }
@@ -345,8 +344,8 @@ export async function POST(req: NextRequest) {
           trackUrl: track.audioPath,
           trackVolume: trackVolume ?? 0.3,
           trackName: track.name,
-          mixed: false, // Client will mix
-          clientMix: true, // Signal to client that mixing should be done client-side
+          mixed: false,
+          clientMix: true,
         })
       }
     }

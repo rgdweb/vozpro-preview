@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminSession } from '@/lib/auth'
-import { uploadToBlob } from '@/lib/blob'
+import { uploadToAudioServer } from '@/lib/audio-server'
 
-// POST /api/upload-track - Upload music track to Vercel Blob
+// POST /api/upload-track - Upload music track to PHP hosting
 export async function POST(req: NextRequest) {
   try {
     const isAdmin = await getAdminSession()
@@ -26,19 +26,17 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Generate unique filename
+    // Upload to PHP hosting
     const ext = file.name.match(/\.(mp3|wav|ogg)$/i)?.[0] || '.mp3'
-    const uniqueName = `tracks/${Date.now()}-${Math.random().toString(36).substring(2, 8)}${ext}`
+    const uniqueName = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}${ext}`
+    const result = await uploadToAudioServer(file, uniqueName, 'track')
 
-    // Upload to Vercel Blob
-    const blobResult = await uploadToBlob(uniqueName, file, file.type || 'audio/mpeg')
-
-    // Get duration client-side after upload (ffprobe not available on Vercel)
     // Duration will be detected on the client or set to 0
     const duration = 0
 
     return NextResponse.json({
-      path: blobResult.downloadUrl || blobResult.url,
+      path: result.url,
+      filename: result.filename,
       name: file.name,
       duration,
     })

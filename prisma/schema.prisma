@@ -31,9 +31,10 @@ model VoiceVariation {
   voiceId      String
   label        String   // e.g. "Neutra", "Animada", "Empresarial", "Dramática", "Sussurrada"
   emoji        String   @default("") // e.g. "😊", "🎉", "💼", "🎭", "🤫"
-  refAudioPath    String   @default("") // path on HF Space server (for Gradio FileData)
-  refAudioBlobUrl String   @default("") // permanent backup on Vercel Blob (for re-upload)
-  refAudioName    String   @default("") // original filename
+  refAudioPath      String   @default("") // path on HF Space server (temporary, for Gradio FileData)
+  refAudioServerUrl String   @default("") // permanent URL on PHP hosting (for re-upload to HF)
+  refAudioFilename  String   @default("") // filename on PHP server (for deletion)
+  refAudioName      String   @default("") // original filename (user-friendly)
   refText      String   @default("") // transcription of reference audio
   instruct     String   @default("") // optional instruct for fine-tuning (must use supported values only)
   order        Int      @default(0)
@@ -48,7 +49,7 @@ model Track {
   name        String   // e.g. "Corporativo", "Eletrônica", "Acústica"
   description String   @default("")
   emoji       String   @default("")
-  audioPath   String   // Vercel Blob URL for the track file
+  audioPath   String   // URL for the track file (PHP hosting)
   duration    Float    @default(0) // duration in seconds
   order       Int      @default(0)
   active      Boolean  @default(true)

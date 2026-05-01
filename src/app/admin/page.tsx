@@ -20,17 +20,18 @@ import { toast } from 'sonner'
 import AudioPlayer from '@/components/audio-player'
 
 /**
- * Comprimir audio client-side usando OfflineAudioContext (INSTANTANEO, sem tempo real).
- * Calcula o sample rate automaticamente para garantir que o arquivo final fique < 3.8MB
- * (margem de seguranca abaixo do limite 4.5MB do Vercel).
+ * Comprimir SOMENTE arquivos WAV/FLAC (nao comprimidos).
+ * MP3/OGG/M4A ja sao comprimidos — comprimir novamente so perde qualidade!
+ *
+ * Para WAV/FLAC grandes, converte para WAV 22050Hz mono (qualidade otima para trilha de fundo).
+ * Calcula sample rate automaticamente para garantir < 4MB (limite seguro do Vercel 4.5MB).
  *
  * Exemplos:
- * - MP3 3MB (1min) → nao comprime, envia original
- * - WAV 8MB (1min) → WAV 22050Hz mono ~2MB
- * - MP3 6MB (3min) → WAV 11025Hz mono ~2.5MB
- * - WAV 20MB (5min) → WAV 8000Hz mono ~3.8MB
+ * - MP3 5MB → envia original (qualidade 100%)
+ * - WAV 8MB (1min) → WAV 22050Hz mono ~2MB (qualidade otima)
+ * - WAV 30MB (3min) → WAV 11025Hz mono ~2.5MB
  */
-const MAX_COMPRESSED_SIZE = 3.8 * 1024 * 1024 // 3.8MB (seguro para o limite 4.5MB do Vercel)
+const MAX_COMPRESSED_SIZE = 4 * 1024 * 1024 // 4MB (seguro para o limite 4.5MB do Vercel)
 const SAMPLE_RATES = [22050, 16000, 11025, 8000] // do melhor para o menor
 
 async function compressAudioFile(file: File): Promise<{ blob: Blob; name: string }> {
@@ -528,16 +529,26 @@ export default function AdminDashboard() {
         return
       }
 
-      // Comprime se arquivo for > 3.8MB (a funcao calcula sample rate automaticamente
-      // para garantir que o resultado fique abaixo do limite do Vercel)
-      if (file.size >= MAX_COMPRESSED_SIZE) {
-        toast.info('Comprimindo arquivo...')
+      const sizeMB = file.size / (1024 * 1024)
+
+      // Formatos ja comprimidos (MP3/OGG/M4A/WEBM): NUNCA comprimir, manter qualidade original
+      // Formatos nao comprimidos (WAV/FLAC): comprimir se > 4MB
+      const isUncompressed = ['wav', 'flac'].includes(ext.replace('.', ''))
+
+      if (isUncompressed && file.size >= MAX_COMPRESSED_SIZE) {
+        // WAV/FLAC grande: comprime para WAV com sample rate inteligente
+        toast.info('Comprimindo arquivo WAV/FLAC...')
         const compressed = await compressAudioFile(file)
         setPendingTrackFile({ blob: compressed.blob, name: compressed.name })
         toast.success(`Arquivo pronto (${(compressed.blob.size / (1024 * 1024)).toFixed(1)}MB)`)
-      } else {
+      } else if (sizeMB > 4.2) {
+        // MP3/OGG/M4A muito grande (>4.2MB): alerta mas envia original (qualidade preservada)
         setPendingTrackFile({ blob: file, name: file.name })
-        toast.success(`Arquivo pronto (${(file.size / (1024 * 1024)).toFixed(1)}MB)`)
+        toast.warning(`Arquivo grande (${sizeMB.toFixed(1)}MB). Vai tentar enviar com qualidade original. Se falhar, use um arquivo menor ou converta para WAV.`)
+      } else {
+        // Arquivo normal: envia original, sem perda de qualidade
+        setPendingTrackFile({ blob: file, name: file.name })
+        toast.success(`Arquivo pronto (${sizeMB.toFixed(1)}MB)`)
       }
     } catch (err) {
       console.error('Error preparing file:', err)

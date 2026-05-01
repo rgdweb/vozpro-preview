@@ -100,17 +100,20 @@ async function submitToGradio(data: unknown[], debug: ReturnType<typeof createDe
  */
 async function checkHFStatus(debug: ReturnType<typeof createDebug>): Promise<{ ok: boolean; detail: string }> {
   try {
-    const res = await fetch(`${HF_SPACE_URL}/info`, { signal: AbortSignal.timeout(10000) })
+    const res = await fetch(`${HF_SPACE_URL}/info`, { signal: AbortSignal.timeout(5000) })
     if (res.ok) {
-      const info = await res.json()
-      debug.log('HF Space status', 'ok', `Model: ${info?.model_name || info?.model || 'loaded'}`)
-      return { ok: true, detail: JSON.stringify(info).substring(0, 200) }
+      const contentType = res.headers.get('content-type') || ''
+      if (contentType.includes('application/json')) {
+        const info = await res.json()
+        debug.log('HF Space status', 'ok', `Model: ${info?.model_name || info?.model || 'loaded'}`)
+        return { ok: true, detail: JSON.stringify(info).substring(0, 200) }
+      }
     }
-    debug.log('HF Space status', 'warn', `HTTP ${res.status} - pode estar acordando`)
-    return { ok: false, detail: `HTTP ${res.status}` }
+    debug.log('HF Space status', 'warn', `Space acordando ou em manutencao (HTTP ${res.status})`)
+    return { ok: false, detail: `HTTP ${res.status} - space pode estar acordando` }
   } catch (err) {
-    debug.log('HF Space status', 'error', `Não respondeu: ${err instanceof Error ? err.message : String(err)}`)
-    return { ok: false, detail: 'Offline ou timeout' }
+    debug.log('HF Space status', 'warn', `Sem resposta (timeout 5s) - space pode estar acordando, continuando...`)
+    return { ok: false, detail: 'Sem resposta - continuando mesmo assim' }
   }
 }
 
@@ -339,19 +342,85 @@ export async function POST(req: NextRequest) {
 
         if (eventType === 'error') {
           debug.log('Gradio ERROR', 'error', `Raw: ${eventData?.substring(0, 500) || 'vazio'}`)
-          lastGradioError = eventData
-          let errorMsg = 'Erro na geração pelo servidor de IA.'
-          if (eventData && eventData !== 'null') {
-            try {
-              const errData = JSON.parse(eventData)
-              errorMsg = errData.error || errData.message || errorMsg
-            } catch {
-              if (eventData.length > 5 && eventData.length < 500) {
-                errorMsg = eventData
+          
+          // If Gradio returns null error (generic rejection), retry entire flow
+          // This often happens when the HF Space was sleeping or the uploaded file got corrupted
+          const isNullError = !eventData || eventData === 'null'
+          
+          if (isNullError && !debug.result().steps.some(s => s.step === 'Null error retry')) {
+            debug.log('Null error retry', 'warn', 'Erro generico do Gradio (null), reenviando tudo...')
+            await new Promise(r => setTimeout(r, 3000))
+            
+            // Re-upload audio with fresh unique name
+            const freshFileName = `retry_${Date.now()}_${fileName}`
+            const freshPath = await uploadAudioToHF(serverUrl, freshFileName, debug)
+            
+            if (freshPath) {
+              const freshFileData = {
+                path: freshPath,
+                orig_name: freshFileName,
+                mime_type: freshFileName.endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav',
+                is_stream: false,
+                meta: { _type: 'gradio.FileData' },
+              }
+              data[2] = freshFileData
+              
+              // Fresh submit
+              const retrySubmit = await submitToGradio(data, debug)
+              if (retrySubmit.eventId) {
+                debug.log('Null error retry', 'ok', `Novo event_id: ${retrySubmit.eventId}, repolling...`)
+                // Continue polling with new event_id by updating eventId
+                const newEventId = retrySubmit.eventId
+                // Poll the new event
+                for (let j = 0; j < 80; j++) {
+                  await new Promise(r => setTimeout(r, 2000))
+                  const retryRes = await fetch(
+                    `${HF_SPACE_URL}/gradio_api/call/_clone_fn/${newEventId}`,
+                    { headers: { 'Accept': 'text/event-stream' } }
+                  )
+                  if (!retryRes.ok) continue
+                  const retryText = await retryRes.text()
+                  const retryBlocks = retryText.split('\n\n').filter(Boolean)
+                  for (const rBlock of retryBlocks) {
+                    const rLines = rBlock.split('\n')
+                    const rEventType = rLines.find(l => l.startsWith('event:'))?.replace('event: ', '').trim()
+                    const rEventData = rLines.find(l => l.startsWith('data:'))?.slice(6).trim()
+                    
+                    if (rEventType === 'complete' && rEventData) {
+                      debug.log('Null error retry', 'ok', 'Geracao completou apos retry!')
+                      try {
+                        const rResult = JSON.parse(rEventData)
+                        const rAudio = rResult[0]
+                        if (rAudio?.url) voiceAudioUrl = rAudio.url
+                        else if (rAudio?.path) voiceAudioUrl = `${HF_SPACE_URL}/gradio_api/file=${rAudio.path}`
+                      } catch {}
+                    }
+                    if (rEventType === 'error') {
+                      debug.log('Null error retry', 'error', `Retry tambem falhou: ${rEventData?.substring(0, 300) || 'null'}`)
+                    }
+                  }
+                  if (voiceAudioUrl) break
+                }
               }
             }
+            
+            if (voiceAudioUrl) break
           }
-          return NextResponse.json({ error: errorMsg, debug: debug.result() }, { status: 500 })
+          
+          if (!voiceAudioUrl) {
+            let errorMsg = 'Erro na geração pelo servidor de IA.'
+            if (eventData && eventData !== 'null') {
+              try {
+                const errData = JSON.parse(eventData)
+                errorMsg = errData.error || errData.message || errorMsg
+              } catch {
+                if (eventData.length > 5 && eventData.length < 500) {
+                  errorMsg = eventData
+                }
+              }
+            }
+            return NextResponse.json({ error: errorMsg, debug: debug.result() }, { status: 500 })
+          }
         }
 
         if (eventType === 'heartbeat') {

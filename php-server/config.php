@@ -14,8 +14,8 @@ define('ALLOWED_TYPES', [
     'audio/flac', 'audio/x-flac'
 ]);
 
-// Tamanho máximo em bytes (20MB)
-define('MAX_SIZE', 20 * 1024 * 1024);
+// Tamanho máximo em bytes (50MB)
+define('MAX_SIZE', 50 * 1024 * 1024);
 
 // Pasta raiz dos uploads
 define('UPLOAD_DIR', __DIR__ . '/audios/');

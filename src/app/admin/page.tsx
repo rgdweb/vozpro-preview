@@ -127,8 +127,10 @@ export default function AdminDashboard() {
   const [trackDialogOpen, setTrackDialogOpen] = useState(false)
   const [uploadingTrack, setUploadingTrack] = useState(false)
   const [trackFilePath, setTrackFilePath] = useState('')
+  const [trackFilename, setTrackFilename] = useState('')
   const [trackDuration, setTrackDuration] = useState(0)
   const [editingTrackId, setEditingTrackId] = useState<string | null>(null)
+  const [audioServerConfig, setAudioServerConfig] = useState<{ url: string; apiKey: string } | null>(null)
 
   // Check auth
   useEffect(() => {
@@ -145,12 +147,14 @@ export default function AdminDashboard() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [voicesRes, tracksRes] = await Promise.all([
+      const [voicesRes, tracksRes, configRes] = await Promise.all([
         fetch('/api/admin/voices'),
         fetch('/api/admin/tracks'),
+        fetch('/api/server-config'),
       ])
       if (voicesRes.ok) setVoices(await voicesRes.json())
       if (tracksRes.ok) setTracks(await tracksRes.json())
+      if (configRes.ok) setAudioServerConfig(await configRes.json())
     } catch {
       toast.error('Erro ao carregar dados')
     } finally {
@@ -381,25 +385,40 @@ export default function AdminDashboard() {
     const file = e.target.files?.[0]
     if (!file) return
 
+    if (!audioServerConfig?.url) {
+      toast.error('Servidor de áudio não configurado')
+      return
+    }
+
     setUploadingTrack(true)
     try {
-      const formData = new FormData()
-      formData.append('file', file)
+      // Upload DIRECTLY to PHP server (bypasses Vercel 4.5MB limit)
+      const ext = file.name.match(/\.(mp3|wav|ogg|m4a|flac|webm)$/i)?.[0] || '.mp3'
+      const uniqueName = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}${ext}`
 
-      const res = await fetch('/api/upload-track', {
+      const formData = new FormData()
+      formData.append('arquivo', file, uniqueName)
+      formData.append('tipo', 'track')
+
+      const res = await fetch(`${audioServerConfig.url}/upload.php`, {
         method: 'POST',
+        headers: audioServerConfig.apiKey ? {
+          'Authorization': `Bearer ${audioServerConfig.apiKey}`,
+        } : {},
         body: formData,
       })
 
       const data = await res.json()
-      if (data.path) {
-        setTrackFilePath(data.path)
-        setTrackDuration(data.duration || 0)
+      if (data.sucesso) {
+        setTrackFilePath(data.url)
+        setTrackFilename(data.arquivo)
+        setTrackDuration(0)
         toast.success('Trilha enviada!')
       } else {
-        toast.error(data.error || 'Falha no upload')
+        toast.error(data.erro || 'Falha no upload')
       }
-    } catch {
+    } catch (err) {
+      console.error('Track upload error:', err)
       toast.error('Erro no upload da trilha')
     } finally {
       setUploadingTrack(false)

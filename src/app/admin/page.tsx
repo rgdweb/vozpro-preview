@@ -118,6 +118,43 @@ function writeWavString(view: DataView, offset: number, str: string) {
   }
 }
 
+/**
+ * Upload directly to PHP server (bypasses Vercel 4.5MB body limit for large files).
+ * Gets a one-time token from /api/upload-token, then uploads to PHP.
+ */
+async function uploadDirectToPHP(
+  blob: Blob,
+  filename: string,
+  tipo: string = 'track'
+): Promise<{ url: string; arquivo: string }> {
+  // Get upload URL and token
+  const tokenRes = await fetch('/api/upload-token')
+  const tokenData = await tokenRes.json()
+  if (!tokenData.uploadUrl || !tokenData.token) {
+    throw new Error('Erro ao obter token de upload')
+  }
+
+  // Upload directly to PHP (bypasses Vercel body limit!)
+  const formData = new FormData()
+  formData.append('arquivo', blob, filename)
+  formData.append('tipo', tipo)
+
+  const uploadRes = await fetch(tokenData.uploadUrl, {
+    method: 'POST',
+    headers: {
+      'X-Upload-Token': tokenData.token,
+    },
+    body: formData,
+  })
+
+  const uploadData = await uploadRes.json()
+  if (!uploadData.sucesso) {
+    throw new Error(uploadData.erro || 'Erro no upload para o servidor')
+  }
+
+  return { url: uploadData.url, arquivo: uploadData.arquivo }
+}
+
 interface VoiceVariation {
   id: string
   label: string
@@ -541,28 +578,58 @@ export default function AdminDashboard() {
       let audioUrl = ''
       let audioFilename = ''
 
-      // Upload pending file via Vercel proxy (server-to-server, no CORS issues)
+      // Upload pending file
       if (pendingTrackFile) {
         setUploadingTrack(true)
-        toast.info('Enviando arquivo...')
 
-        const formData = new FormData()
-        formData.append('file', pendingTrackFile.blob, pendingTrackFile.name)
+        const fileSizeMB = pendingTrackFile.blob.size / (1024 * 1024)
 
-        const uploadRes = await fetch('/api/upload-track', {
-          method: 'POST',
-          body: formData,
-        })
+        if (fileSizeMB < 4) {
+          // Small file: use Vercel proxy (server-to-server, reliable, no CORS)
+          toast.info('Enviando arquivo...')
+          const formData = new FormData()
+          formData.append('file', pendingTrackFile.blob, pendingTrackFile.name)
 
-        const uploadData = await uploadRes.json()
-        if (!uploadRes.ok || (!uploadData.path && !uploadData.url)) {
-          setUploadingTrack(false)
-          toast.error(uploadData.error || 'Erro no upload do arquivo')
-          return
+          const uploadRes = await fetch('/api/upload-track', {
+            method: 'POST',
+            body: formData,
+          })
+
+          const uploadData = await uploadRes.json()
+          if (uploadRes.ok && (uploadData.path || uploadData.url)) {
+            audioUrl = uploadData.path || uploadData.url
+            audioFilename = uploadData.filename || ''
+          } else {
+            setUploadingTrack(false)
+            toast.error(uploadData.error || 'Erro no upload do arquivo')
+            return
+          }
+        } else {
+          // Large file (>4MB): upload directly to PHP (bypasses Vercel 4.5MB limit)
+          toast.info('Enviando arquivo grande direto ao servidor...')
+          try {
+            const result = await uploadDirectToPHP(pendingTrackFile.blob, pendingTrackFile.name, 'track')
+            audioUrl = result.url
+            audioFilename = result.arquivo
+          } catch (directErr) {
+            console.error('[Track] Direct PHP upload failed, trying Vercel proxy as fallback:', directErr)
+            // Fallback: try Vercel proxy anyway (might work if compression reduced size enough)
+            toast.info('Tentando método alternativo...')
+            const formData = new FormData()
+            formData.append('file', pendingTrackFile.blob, pendingTrackFile.name)
+            const uploadRes = await fetch('/api/upload-track', { method: 'POST', body: formData })
+            const uploadData = await uploadRes.json()
+            if (uploadRes.ok && (uploadData.path || uploadData.url)) {
+              audioUrl = uploadData.path || uploadData.url
+              audioFilename = uploadData.filename || ''
+            } else {
+              setUploadingTrack(false)
+              toast.error('Erro ao enviar arquivo. Tente um arquivo menor que 4MB ou use formato MP3.')
+              return
+            }
+          }
         }
 
-        audioUrl = uploadData.path || uploadData.url
-        audioFilename = uploadData.filename || ''
         setTrackFilePath(audioUrl)
         toast.success('Arquivo enviado!')
         setUploadingTrack(false)

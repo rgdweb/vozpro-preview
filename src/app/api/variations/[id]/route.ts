@@ -22,6 +22,7 @@ export async function PUT(
         ...(body.label !== undefined && { label: body.label.trim() }),
         ...(body.emoji !== undefined && { emoji: body.emoji }),
         ...(body.refAudioPath !== undefined && { refAudioPath: body.refAudioPath }),
+        ...(body.refAudioBlobUrl !== undefined && { refAudioBlobUrl: body.refAudioBlobUrl }),
         ...(body.refAudioName !== undefined && { refAudioName: body.refAudioName }),
         ...(body.refText !== undefined && { refText: body.refText }),
         ...(body.instruct !== undefined && { instruct: body.instruct }),

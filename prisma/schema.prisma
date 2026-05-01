@@ -31,8 +31,9 @@ model VoiceVariation {
   voiceId      String
   label        String   // e.g. "Neutra", "Animada", "Empresarial", "Dramática", "Sussurrada"
   emoji        String   @default("") // e.g. "😊", "🎉", "💼", "🎭", "🤫"
-  refAudioPath String   // path on HF Space server (for Gradio FileData)
-  refAudioName String   @default("") // original filename
+  refAudioPath    String   @default("") // path on HF Space server (for Gradio FileData)
+  refAudioBlobUrl String   @default("") // permanent backup on Vercel Blob (for re-upload)
+  refAudioName    String   @default("") // original filename
   refText      String   @default("") // transcription of reference audio
   instruct     String   @default("") // optional instruct for fine-tuning (must use supported values only)
   order        Int      @default(0)

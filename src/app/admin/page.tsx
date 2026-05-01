@@ -115,7 +115,7 @@ export default function AdminDashboard() {
 
   // Variation form state (used for both create and edit)
   const [variationForm, setVariationForm] = useState({
-    label: '', emoji: '', refAudioPath: '', refAudioName: '', refText: '', instruct: 'none',
+    label: '', emoji: '', refAudioPath: '', refAudioBlobUrl: '', refAudioName: '', refText: '', instruct: 'none',
   })
   const [editingVariationId, setEditingVariationId] = useState<string | null>(null)
   const [addingVariationTo, setAddingVariationTo] = useState<string | null>(null)
@@ -238,10 +238,11 @@ export default function AdminDashboard() {
       })
 
       const data = await res.json()
-      if (data.path) {
+      if (data.path || data.blobUrl) {
         setVariationForm(prev => ({
           ...prev,
-          refAudioPath: data.path,
+          refAudioPath: data.path || '',
+          refAudioBlobUrl: data.blobUrl || '',
           refAudioName: data.name || file.name,
         }))
         toast.success('Áudio enviado para o servidor!')
@@ -273,8 +274,9 @@ export default function AdminDashboard() {
           instruct: instructValue,
         }
         // Only update audio if a new one was uploaded
-        if (variationForm.refAudioPath) {
+        if (variationForm.refAudioPath || variationForm.refAudioBlobUrl) {
           updateBody.refAudioPath = variationForm.refAudioPath
+          updateBody.refAudioBlobUrl = variationForm.refAudioBlobUrl
           updateBody.refAudioName = variationForm.refAudioName
         }
         await fetch(`/api/variations/${editingVariationId}`, {
@@ -285,7 +287,7 @@ export default function AdminDashboard() {
         toast.success('Variação atualizada!')
       } else {
         // CREATE new variation
-        if (!variationForm.refAudioPath) {
+        if (!variationForm.refAudioPath && !variationForm.refAudioBlobUrl) {
           toast.error('Áudio de referência é obrigatório para nova variação')
           return
         }
@@ -305,7 +307,7 @@ export default function AdminDashboard() {
       setVariationDialogOpen(false)
       setEditingVariationId(null)
       setAddingVariationTo(null)
-      setVariationForm({ label: '', emoji: '', refAudioPath: '', refAudioName: '', refText: '', instruct: 'none' })
+      setVariationForm({ label: '', emoji: '', refAudioPath: '', refAudioBlobUrl: '', refAudioName: '', refText: '', instruct: 'none' })
       loadData()
     } catch {
       toast.error('Erro ao salvar variação')
@@ -351,12 +353,13 @@ export default function AdminDashboard() {
       })
 
       const data = await res.json()
-      if (data.path) {
+      if (data.path || data.blobUrl) {
         await fetch(`/api/variations/${variationId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            refAudioPath: data.path,
+            refAudioPath: data.path || '',
+            refAudioBlobUrl: data.blobUrl || '',
             refAudioName: data.name || file.name,
           }),
         })
@@ -722,7 +725,7 @@ export default function AdminDashboard() {
                             onClick={() => {
                               setEditingVariationId(null)
                               setAddingVariationTo(voice.id)
-                              setVariationForm({ label: '', emoji: '', refAudioPath: '', refAudioName: '', refText: '', instruct: 'none' })
+                              setVariationForm({ label: '', emoji: '', refAudioPath: '', refAudioBlobUrl: '', refAudioName: '', refText: '', instruct: 'none' })
                               setVariationDialogOpen(true)
                             }}
                             className="border-slate-600 text-slate-300 hover:bg-slate-700 gap-1"
@@ -810,6 +813,7 @@ export default function AdminDashboard() {
                                         label: v.label,
                                         emoji: v.emoji,
                                         refAudioPath: '',
+                                        refAudioBlobUrl: '',
                                         refAudioName: v.refAudioName,
                                         refText: v.refText,
                                         instruct: v.instruct || 'none',

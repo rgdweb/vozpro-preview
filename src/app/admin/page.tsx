@@ -385,51 +385,30 @@ export default function AdminDashboard() {
     const file = e.target.files?.[0]
     if (!file) return
 
-    if (!audioServerConfig?.url) {
-      toast.error('Servidor de áudio não configurado')
-      return
-    }
-
     setUploadingTrack(true)
     try {
-      // Upload DIRECTLY to PHP server (bypasses Vercel 4.5MB limit)
-      const ext = file.name.match(/\.(mp3|wav|ogg|m4a|flac|webm)$/i)?.[0] || '.mp3'
-      const uniqueName = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}${ext}`
-
+      // Upload through Vercel API (same-origin, avoids CORS issues)
       const formData = new FormData()
-      formData.append('arquivo', file, uniqueName)
-      formData.append('tipo', 'track')
+      formData.append('file', file)
 
-      const res = await fetch(`${audioServerConfig.url}/upload.php`, {
+      const res = await fetch('/api/upload-track', {
         method: 'POST',
-        headers: audioServerConfig.apiKey ? {
-          'Authorization': `Bearer ${audioServerConfig.apiKey}`,
-        } : {},
         body: formData,
       })
 
-      let data: any
-      try {
-        data = await res.json()
-      } catch {
-        // Resposta nao e JSON - pode ser erro HTML do PHP/servidor
-        const text = await res.text().catch(() => '')
-        console.error('Resposta nao-JSON do PHP:', res.status, text.substring(0, 500))
-        toast.error(`Erro do servidor (${res.status}): ${text.substring(0, 150) || 'resposta vazia'}`)
-        return
-      }
+      const data = await res.json()
 
-      if (data.sucesso) {
-        setTrackFilePath(data.url)
-        setTrackFilename(data.arquivo)
-        setTrackDuration(0)
+      if (data.path || data.filename) {
+        setTrackFilePath(data.path)
+        setTrackFilename(data.filename)
+        setTrackDuration(data.duration || 0)
         toast.success('Trilha enviada!')
       } else {
-        toast.error(data.erro || 'Falha no upload')
+        toast.error(data.error || 'Falha no upload')
       }
     } catch (err) {
       console.error('Track upload error:', err)
-      toast.error(`Erro na conexao: ${err instanceof Error ? err.message : 'falha de rede'}`)
+      toast.error('Erro no upload da trilha')
     } finally {
       setUploadingTrack(false)
     }

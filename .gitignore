@@ -80,3 +80,4 @@ keep-alive*.log
 spawner*.log
 audio-server*.log
 server-alive.log
+backups/

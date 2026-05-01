@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAdminSession } from '@/lib/auth'
 import { uploadToAudioServer } from '@/lib/audio-server'
 
+export const maxDuration = 60
+
 // POST /api/upload-track - Upload music track to PHP hosting
 export async function POST(req: NextRequest) {
   try {
@@ -18,8 +20,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Validate file type
-    const validTypes = ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp3', 'audio/x-wav']
-    if (!validTypes.includes(file.type) && !file.name.match(/\.(mp3|wav|ogg)$/i)) {
+    const validTypes = ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp3', 'audio/x-wav', 'audio/flac', 'audio/m4a', 'audio/webm']
+    if (!validTypes.includes(file.type) && !file.name.match(/\.(mp3|wav|ogg|m4a|flac|webm)$/i)) {
       return NextResponse.json(
         { error: 'Formato não suportado. Use MP3, WAV ou OGG.' },
         { status: 400 }

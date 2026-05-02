@@ -48,12 +48,14 @@ if ($url) {
     Write-Host ""
 
     try {
-        $encodedUrl = [uri]::EscapeDataString($url)
-        $updateUrl = "$serverUpdate?auth=$auth&url=$encodedUrl"
-        $null = Invoke-WebRequest -Uri $updateUrl -TimeoutSec 15 -UseBasicParsing -ErrorAction Stop
-        Write-Host "[OK] Servidor atualizado automaticamente!" -ForegroundColor Green
+        $resp = Invoke-RestMethod -Uri "$serverUpdate`?auth=$auth&url=$url" -TimeoutSec 15
+        if ($resp.ok) {
+            Write-Host "[OK] Servidor atualizado automaticamente!" -ForegroundColor Green
+        } else {
+            Write-Host "[ERRO] $($resp.error)" -ForegroundColor Red
+        }
     } catch {
-        Write-Host "[ERRO] Nao foi possivel atualizar: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "[ERRO] $($_.Exception.Message)" -ForegroundColor Red
     }
 
     Write-Host ""

@@ -290,14 +290,14 @@
         setInterval(checkServers, 30000);
 
         // ===================== GERAR HMAC TOKEN =====================
-        function generateToken() {
+        async function generateToken() {
             const timestamp = Math.floor(Date.now() / 1000);
-            const hmac = await_hash_hmac(timestamp.toString(), API_KEY);
+            const hmac = await hmacSha256(timestamp.toString(), API_KEY);
             return timestamp + '.' + hmac;
         }
 
-        // HMAC SHA256 simples (browser)
-        async function await_hash_hmac(message, key) {
+        // HMAC SHA256 (browser)
+        async function hmacSha256(message, key) {
             const encoder = new TextEncoder();
             const keyData = encoder.encode(key);
             const msgData = encoder.encode(message);
@@ -351,7 +351,7 @@
                 debugInfo.textContent += `[${new Date().toLocaleTimeString()}] Upload OK: ${refAudioUrl}\n`;
 
                 // PASSO 2: Gerar token HMAC
-                const token = generateToken();
+                const token = await generateToken();
 
                 // PASSO 3: Enviar para geracao
                 debugInfo.textContent += `[${new Date().toLocaleTimeString()}] Enviando para GPU local...\n`;

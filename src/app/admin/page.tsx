@@ -20,89 +20,56 @@ import { toast } from 'sonner'
 import AudioPlayer from '@/components/audio-player'
 
 /**
- * Chunked Upload - Divide arquivos grandes em pedacos < 4MB e envia via Vercel proxy.
- * Bypassa o limite de 4.5MB do Vercel sem perder qualidade (envia bytes originais).
+ * Upload Direto - Para arquivos grandes, envia direto do navegador pro PHP
+ * usando upload-direct.php com token temporario (bypassa limite 4.5MB do Vercel).
+ * Para arquivos pequenos, usa upload normal via Vercel proxy.
  */
-const CHUNK_SIZE = 3 * 1024 * 1024 // 3MB por chunk (seguro abaixo do limite de 4.5MB)
 
-interface ChunkedUploadResult {
+interface UploadResult {
   path: string
   filename: string
 }
 
-async function uploadFileChunked(
-  blob: Blob,
-  fileName: string,
-  tipo: string = 'track',
-  onProgress?: (percent: number) => void
-): Promise<ChunkedUploadResult> {
-  const totalSize = blob.size
-  const totalChunks = Math.ceil(totalSize / CHUNK_SIZE)
-  const fileId = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`
+/**
+ * Upload direto: navegador → PHP (sem Vercel no meio).
+ * Usa token temporario gerado pelo /api/upload-token.
+ */
+async function uploadDirectToPHP(blob: Blob, fileName: string, tipo: string = 'track'): Promise<UploadResult> {
+  // Passo 1: Pedir token temporario ao Vercel
+  const tokenRes = await fetch('/api/upload-token')
+  if (!tokenRes.ok) {
+    throw new Error('Erro ao gerar token de upload')
+  }
+  const { uploadUrl, token } = await tokenRes.json()
 
-  console.log(`[ChunkedUpload] Iniciando: ${(totalSize / (1024 * 1024)).toFixed(1)}MB, ${totalChunks} chunks de ${(CHUNK_SIZE / (1024 * 1024)).toFixed(1)}MB`)
+  // Passo 2: Enviar arquivo direto pro PHP
+  const formData = new FormData()
+  formData.append('arquivo', blob, fileName)
+  formData.append('tipo', tipo)
 
-  let lastResult: { path: string; filename: string } | null = null
+  const phpRes = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      'X-Upload-Token': token,
+    },
+    body: formData,
+  })
 
-  for (let i = 0; i < totalChunks; i++) {
-    const start = i * CHUNK_SIZE
-    const end = Math.min(start + CHUNK_SIZE, totalSize)
-    const chunkBlob = blob.slice(start, end)
-
-    const formData = new FormData()
-    formData.append('chunkData', chunkBlob, 'chunk')
-    formData.append('chunkIndex', i.toString())
-    formData.append('totalChunks', totalChunks.toString())
-    formData.append('fileName', fileName)
-    formData.append('fileId', fileId)
-    formData.append('tipo', tipo)
-
-    const res = await fetch('/api/upload-chunk', {
-      method: 'POST',
-      body: formData,
-    })
-
-    // Ler resposta como texto primeiro (evita crash se resposta nao for JSON)
-    let responseText = ''
-    try {
-      responseText = await res.text()
-    } catch {
-      throw new Error(`Servidor nao respondeu (parte ${i + 1}/${totalChunks}). Verifique sua conexao.`)
-    }
-
-    let data: { success: boolean; error?: string; status?: string; path?: string; filename?: string }
-    try {
-      data = JSON.parse(responseText)
-    } catch {
-      console.error(`[ChunkedUpload] Resposta invalida no chunk ${i}:`, responseText.substring(0, 200))
-      throw new Error(`Resposta invalida do servidor (parte ${i + 1}). Voce atualizou o upload.php no servidor PHP?`)
-    }
-
-    if (!res.ok || !data.success) {
-      throw new Error(data.error || `Erro ao enviar parte ${i + 1}/${totalChunks}`)
-    }
-
-    // Progresso: baseado nos chunks enviados
-    const percent = Math.round(((i + 1) / totalChunks) * 100)
-    onProgress?.(percent)
-
-    // Se o PHP retornou resultado final (ultimo chunk remontou)
-    if (data.status === 'complete' && data.path) {
-      lastResult = { path: data.path, filename: data.filename }
-    }
-
-    // Pequena pausa entre chunks para nao sobrecarregar
-    if (i < totalChunks - 1) {
-      await new Promise(resolve => setTimeout(resolve, 100))
-    }
+  // Ler resposta como texto (evita crash se nao for JSON)
+  const responseText = await phpRes.text()
+  let data: { sucesso: boolean; erro?: string; url?: string; arquivo?: string }
+  try {
+    data = JSON.parse(responseText)
+  } catch {
+    console.error('[DirectUpload] Resposta invalida:', responseText.substring(0, 200))
+    throw new Error('Resposta invalida do servidor de upload')
   }
 
-  if (!lastResult) {
-    throw new Error('Upload concluído mas sem resultado final do servidor')
+  if (!data.sucesso || !data.url) {
+    throw new Error(data.erro || 'Erro no upload direto')
   }
 
-  console.log(`[ChunkedUpload] Concluido: ${lastResult.path}`)
-  return lastResult
+  return { path: data.url, filename: data.arquivo || '' }
 }
 
 interface VoiceVariation {
@@ -523,7 +490,7 @@ export default function AdminDashboard() {
         const sizeMB = (fileSize / (1024 * 1024)).toFixed(1)
 
         if (fileSize <= 3.5 * 1024 * 1024) {
-          // Arquivo pequeno: upload normal (sem chunks)
+          // Arquivo pequeno: upload normal via Vercel proxy
           toast.info('Enviando arquivo...')
 
           const formData = new FormData()
@@ -551,18 +518,13 @@ export default function AdminDashboard() {
             return
           }
         } else {
-          // Arquivo grande: chunked upload (divide em pedacos de 3MB)
-          const totalChunks = Math.ceil(fileSize / CHUNK_SIZE)
-          toast.info(`Enviando ${sizeMB}MB em ${totalChunks} partes... (qualidade original)`)
+          // Arquivo grande: upload direto navegador → PHP (bypassa limite Vercel)
+          toast.info(`Enviando ${sizeMB}MB direto pro servidor... (qualidade original, sem limite)`)
 
-          const result = await uploadFileChunked(
+          const result = await uploadDirectToPHP(
             pendingTrackFile.blob,
             pendingTrackFile.name,
-            'track',
-            (percent) => {
-              // Atualiza mensagem de progresso
-              toast.info(`Enviando parte... ${percent}%`) 
-            }
+            'track'
           )
 
           audioUrl = result.path

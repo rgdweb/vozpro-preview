@@ -287,14 +287,20 @@ export async function POST(req: NextRequest) {
         { headers: { 'Accept': 'text/event-stream' } }
       )
 
-      if (!resultRes.ok) {
+      let eventBlocks: string[] = []
+      
+      if (resultRes.status === 404) {
+        // 404 = event_id perdido (worker crashou/reiniciou)
+        debug.log('Poll', 'error', `404 - event_id ${eventId} perdido (worker crashou?)`)
+        eventBlocks = ['event: error\ndata: "404: Not Found - event_id lost"']
+      } else if (!resultRes.ok) {
         if (i % 10 === 0) debug.log('Poll', 'warn', `HTTP ${resultRes.status} na tentativa ${i + 1}`)
         await new Promise(r => setTimeout(r, 2000))
         continue
+      } else {
+        const resultText = await resultRes.text()
+        eventBlocks = resultText.split('\n\n').filter(Boolean)
       }
-
-      const resultText = await resultRes.text()
-      const eventBlocks = resultText.split('\n\n').filter(Boolean)
 
       for (const block of eventBlocks) {
         const lines = block.split('\n')
@@ -346,61 +352,84 @@ export async function POST(req: NextRequest) {
           // If Gradio returns null error (generic rejection), retry entire flow
           // This often happens when the HF Space was sleeping or the uploaded file got corrupted
           const isNullError = !eventData || eventData === 'null'
+          const is404Error = eventData?.includes('404')
           
-          if (isNullError && !debug.result().steps.some(s => s.step === 'Null error retry')) {
-            debug.log('Null error retry', 'warn', 'Erro generico do Gradio (null), reenviando tudo...')
+          if (isNullError || is404Error) {
+            debug.log('Gradio retry', 'warn', `${isNullError ? 'Null' : '404'} detectado - job perdido/crashed, reiniciando job completo...`)
             await new Promise(r => setTimeout(r, 3000))
             
-            // Re-upload audio with fresh unique name
-            const freshFileName = `retry_${Date.now()}_${fileName}`
-            const freshPath = await uploadAudioToHF(serverUrl, freshFileName, debug)
-            
-            if (freshPath) {
-              const freshFileData = {
-                path: freshPath,
-                orig_name: freshFileName,
-                mime_type: freshFileName.endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav',
-                is_stream: false,
-                meta: { _type: 'gradio.FileData' },
+            // Full retry loop (up to 2 additional times)
+            for (let retryIdx = 0; retryIdx < 2 && !voiceAudioUrl; retryIdx++) {
+              debug.log('Gradio retry', 'info', `Tentativa ${retryIdx + 1}/2`)
+              
+              // Re-upload audio with fresh unique name
+              const freshFileName = `retry_${Date.now()}_${fileName}`
+              if (serverUrl) {
+                const freshPath = await uploadAudioToHF(serverUrl, freshFileName, debug)
+                if (freshPath) {
+                  data[2] = {
+                    path: freshPath,
+                    orig_name: freshFileName,
+                    mime_type: freshFileName.endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav',
+                    is_stream: false,
+                    meta: { _type: 'gradio.FileData' },
+                  }
+                } else {
+                  debug.log('Gradio retry', 'warn', 'Re-upload falhou, tentando mesmo assim...')
+                }
               }
-              data[2] = freshFileData
               
               // Fresh submit
               const retrySubmit = await submitToGradio(data, debug)
-              if (retrySubmit.eventId) {
-                debug.log('Null error retry', 'ok', `Novo event_id: ${retrySubmit.eventId}, repolling...`)
-                // Continue polling with new event_id by updating eventId
-                const newEventId = retrySubmit.eventId
-                // Poll the new event
-                for (let j = 0; j < 80; j++) {
-                  await new Promise(r => setTimeout(r, 2000))
-                  const retryRes = await fetch(
-                    `${HF_SPACE_URL}/gradio_api/call/_clone_fn/${newEventId}`,
-                    { headers: { 'Accept': 'text/event-stream' } }
-                  )
-                  if (!retryRes.ok) continue
-                  const retryText = await retryRes.text()
-                  const retryBlocks = retryText.split('\n\n').filter(Boolean)
-                  for (const rBlock of retryBlocks) {
-                    const rLines = rBlock.split('\n')
-                    const rEventType = rLines.find(l => l.startsWith('event:'))?.replace('event: ', '').trim()
-                    const rEventData = rLines.find(l => l.startsWith('data:'))?.slice(6).trim()
-                    
-                    if (rEventType === 'complete' && rEventData) {
-                      debug.log('Null error retry', 'ok', 'Geracao completou apos retry!')
+              if (!retrySubmit.eventId) {
+                await new Promise(r => setTimeout(r, 5000 * (retryIdx + 1)))
+                continue
+              }
+              
+              const newEventId = retrySubmit.eventId
+              debug.log('Gradio retry', 'ok', `Novo event_id: ${newEventId}, pollando...`)
+              
+              // Poll the new event with timeout
+              for (let j = 0; j < 60; j++) {
+                await new Promise(r => setTimeout(r, 2000))
+                const retryRes = await fetch(
+                  `${HF_SPACE_URL}/gradio_api/call/_clone_fn/${newEventId}`,
+                  { headers: { 'Accept': 'text/event-stream' } }
+                )
+                if (!retryRes.ok) continue
+                const retryText = await retryRes.text()
+                const retryBlocks = retryText.split('\n\n').filter(Boolean)
+                for (const rBlock of retryBlocks) {
+                  const rLines = rBlock.split('\n')
+                  const rEventType = rLines.find(l => l.startsWith('event:'))?.replace('event: ', '').trim()
+                  const rEventData = rLines.find(l => l.startsWith('data:'))?.slice(6).trim()
+                  
+                  if (rEventType === 'complete' && rEventData) {
+                    debug.log('Gradio retry', 'ok', `Geracao completou apos retry ${retryIdx + 1}!`)
+                    try {
+                      const rResult = JSON.parse(rEventData)
+                      const rAudio = rResult[0]
+                      if (rAudio?.url) voiceAudioUrl = rAudio.url
+                      else if (rAudio?.path) voiceAudioUrl = `${HF_SPACE_URL}/gradio_api/file=${rAudio.path}`
+                    } catch {}
+                  }
+                  if (rEventType === 'error') {
+                    debug.log('Gradio retry', 'warn', `Erro no retry ${retryIdx + 1}: ${rEventData?.substring(0, 300) || 'null'}`)
+                    // If it's a non-null error, stop retrying
+                    if (rEventData && rEventData !== 'null' && !rEventData.includes('404')) {
+                      let retryErrorMsg = 'Erro na geracao pelo servidor de IA'
                       try {
-                        const rResult = JSON.parse(rEventData)
-                        const rAudio = rResult[0]
-                        if (rAudio?.url) voiceAudioUrl = rAudio.url
-                        else if (rAudio?.path) voiceAudioUrl = `${HF_SPACE_URL}/gradio_api/file=${rAudio.path}`
+                        const errParsed = JSON.parse(rEventData)
+                        retryErrorMsg = errParsed.error || errParsed.message || retryErrorMsg
                       } catch {}
-                    }
-                    if (rEventType === 'error') {
-                      debug.log('Null error retry', 'error', `Retry tambem falhou: ${rEventData?.substring(0, 300) || 'null'}`)
+                      lastGradioError = retryErrorMsg
+                      break
                     }
                   }
-                  if (voiceAudioUrl) break
+                  // Ignore heartbeat - keep polling
+                  if (rEventType === 'heartbeat') continue
                 }
+                if (voiceAudioUrl || lastGradioError) break
               }
             }
             
@@ -424,8 +453,8 @@ export async function POST(req: NextRequest) {
         }
 
         if (eventType === 'heartbeat') {
-          debug.log('Poll', 'warn', 'Heartbeat recebido (sem resultado)')
-          break
+          // Heartbeat = Gradio ainda processando, NAO parar!
+          if (i % 15 === 0) debug.log('Poll', 'info', `Heartbeat (ainda processando, tentativa ${i + 1})`)
         }
       }
 

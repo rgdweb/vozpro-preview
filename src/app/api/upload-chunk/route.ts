@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminSession } from '@/lib/auth'
-import { uploadToAudioServer } from '@/lib/audio-server'
 
 const AUDIO_SERVER_URL = process.env.AUDIO_SERVER_URL || 'https://sorteiomax.com.br/omnivoice'
 const AUDIO_SERVER_API_KEY = process.env.AUDIO_SERVER_API_KEY || ''
@@ -48,11 +47,32 @@ export async function POST(req: NextRequest) {
       body: phpFormData,
     })
 
-    const data = await phpRes.json()
+    // Ler resposta como texto primeiro (evita crash se PHP retornar HTML/erro)
+    let responseText = ''
+    try {
+      responseText = await phpRes.text()
+    } catch {
+      return NextResponse.json(
+        { error: `Servidor PHP nao respondeu (chunk ${chunkIndex}/${totalChunks})` },
+        { status: 502 }
+      )
+    }
+
+    // Verificar se a resposta e JSON valido
+    let data: Record<string, unknown>
+    try {
+      data = JSON.parse(responseText)
+    } catch {
+      console.error(`[UploadChunk] Resposta invalida do PHP (chunk ${chunkIndex}):`, responseText.substring(0, 200))
+      return NextResponse.json(
+        { error: `Servidor PHP retornou resposta invalida. Faca o upload do upload.php atualizado no servidor PHP.` },
+        { status: 502 }
+      )
+    }
 
     if (!data.sucesso) {
       return NextResponse.json(
-        { error: data.erro || 'Erro no servidor PHP' },
+        { error: (data.erro as string) || 'Erro no servidor PHP' },
         { status: phpRes.status }
       )
     }

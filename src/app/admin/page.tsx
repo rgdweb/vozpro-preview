@@ -62,10 +62,24 @@ async function uploadFileChunked(
       body: formData,
     })
 
-    const data = await res.json()
+    // Ler resposta como texto primeiro (evita crash se resposta nao for JSON)
+    let responseText = ''
+    try {
+      responseText = await res.text()
+    } catch {
+      throw new Error(`Servidor nao respondeu (parte ${i + 1}/${totalChunks}). Verifique sua conexao.`)
+    }
+
+    let data: { success: boolean; error?: string; status?: string; path?: string; filename?: string }
+    try {
+      data = JSON.parse(responseText)
+    } catch {
+      console.error(`[ChunkedUpload] Resposta invalida no chunk ${i}:`, responseText.substring(0, 200))
+      throw new Error(`Resposta invalida do servidor (parte ${i + 1}). Voce atualizou o upload.php no servidor PHP?`)
+    }
 
     if (!res.ok || !data.success) {
-      throw new Error(data.error || `Erro ao enviar chunk ${i + 1}/${totalChunks}`)
+      throw new Error(data.error || `Erro ao enviar parte ${i + 1}/${totalChunks}`)
     }
 
     // Progresso: baseado nos chunks enviados

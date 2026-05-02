@@ -39,7 +39,7 @@ export async function GET() {
       .join('')
 
     return NextResponse.json({
-      generateUrl: `${audioServerUrl}/generate-direct.php`,
+      generateUrl: `${audioServerUrl}/generate.php`,
       token: `${timestamp}.${hmac}`,
     })
   } catch (error) {

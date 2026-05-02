@@ -244,7 +244,7 @@ function streamSSEForResult($eventId, $hfUrl, $timeoutSec = 180) {
         }
 
         $blocks = explode("\n\n", $buffer);
-        $buffer = array_pop($blocks) !== null ? array_pop($blocks) : '';
+        $buffer = array_pop($blocks) ?? '';
 
         foreach ($blocks as $block) {
             $block = trim($block);
@@ -310,7 +310,13 @@ function streamSSEForResult($eventId, $hfUrl, $timeoutSec = 180) {
         CURLOPT_RETURNTRANSFER => false,
         CURLOPT_TIMEOUT => $timeoutSec,
         CURLOPT_CONNECTTIMEOUT => 30,
-        CURLOPT_HTTPHEADER => ['Accept: text/event-stream'],
+        CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+        CURLOPT_HTTPHEADER => [
+            'Accept: text/event-stream',
+            'Cache-Control: no-cache',
+            'Connection: keep-alive',
+            'X-Accel-Buffering: no',
+        ],
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_WRITEFUNCTION => $writeFn,
     ]);

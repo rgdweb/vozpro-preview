@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminSession } from '@/lib/auth'
+import { uploadToAudioServer } from '@/lib/audio-server'
 
 const AUDIO_SERVER_URL = process.env.AUDIO_SERVER_URL || 'https://sorteiomax.com.br/omnivoice'
 const AUDIO_SERVER_API_KEY = process.env.AUDIO_SERVER_API_KEY || ''
 
 export const maxDuration = 60
 
-// POST /api/upload-chunk - Proxy individual chunk to PHP server
+// POST /api/upload-chunk - Proxy individual chunk to PHP upload.php (chunked mode)
 export async function POST(req: NextRequest) {
   try {
     const isAdmin = await getAdminSession()
@@ -29,7 +30,8 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Forward chunk to PHP server (server-to-server, no CORS issues)
+    // Send chunk to PHP upload.php (server-to-server, no CORS issues)
+    // upload.php auto-detects chunked mode via chunkIndex/totalChunks/fileId params
     const phpFormData = new FormData()
     phpFormData.append('chunkData', chunkData, 'chunk')
     phpFormData.append('chunkIndex', chunkIndex)
@@ -38,7 +40,7 @@ export async function POST(req: NextRequest) {
     phpFormData.append('fileId', fileId)
     phpFormData.append('tipo', tipo || 'track')
 
-    const phpRes = await fetch(`${AUDIO_SERVER_URL}/upload-chunk.php`, {
+    const phpRes = await fetch(`${AUDIO_SERVER_URL}/upload.php`, {
       method: 'POST',
       headers: {
         ...(AUDIO_SERVER_API_KEY ? { 'Authorization': `Bearer ${AUDIO_SERVER_API_KEY}` } : {}),

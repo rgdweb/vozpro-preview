@@ -307,9 +307,9 @@ export default function VozProClient() {
       setGeneratingTime(Math.floor((Date.now() - genStartTime) / 1000))
     }, 1000)
 
-    // Timeout de seguranca do frontend (cancela se demorar mais de 5 min)
+    // Timeout de seguranca do frontend (cancela se demorar mais de 10 min - CPU pode ser lenta)
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 300000)
+    const timeoutId = setTimeout(() => controller.abort(), 600000)
 
     try {
       // Montar instruct a partir dos metadados da voz
@@ -491,14 +491,14 @@ export default function VozProClient() {
       const elapsed = Date.now() - genStartTime
 
       if (err instanceof DOMException && err.name === 'AbortError') {
-        // Timeout do frontend (5 min)
-        toast.error('Tempo limite excedido', { description: 'A geracao demorou mais de 5 minutos. Tente um texto mais curto.' })
+        // Timeout do frontend (10 min - CPU HF Space)
+        toast.error('Tempo limite excedido', { description: 'A geracao demorou mais de 10 minutos. Tente um texto mais curto.' })
         setLastGenResponse({
-          error: 'Timeout do frontend (5 min) — abortado automaticamente',
+          error: 'Timeout do frontend (10 min CPU) — abortado automaticamente',
           debug: {
             totalDuration: elapsed,
             steps: [
-              { time: new Date().toISOString(), step: 'Timeout Frontend', status: 'error', detail: `AbortController abortou apos 5min (${(elapsed / 1000).toFixed(0)}s decorridos).`, duration: elapsed }
+              { time: new Date().toISOString(), step: 'Timeout Frontend', status: 'error', detail: `AbortController abortou apos 10min CPU (${(elapsed / 1000).toFixed(0)}s decorridos).`, duration: elapsed }
             ]
           }
         })

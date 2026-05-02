@@ -1,5 +1,5 @@
 <?php
-// upload.php - Upload de áudios para o VozPro
+// upload.php - Upload de audios para o VozPro
 // Suporta upload normal (arquivo inteiro) E chunked upload (arquivos grandes divididos em pedacos)
 // Modo chunked e ativado quando os parametros chunkIndex, totalChunks e fileId estao presentes
 
@@ -17,7 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-// Só aceitar POST
+// So aceitar POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     echo json_encode(['sucesso' => false, 'erro' => 'Metodo nao permitido']);
@@ -52,14 +52,19 @@ if ($isChunked) {
 // UPLOAD NORMAL (arquivo inteiro, menor que 4MB)
 // ========================
 function handleNormalUpload() {
-    global $ALLOWED_TYPES, $ALLOWED_CATEGORIES, $MAX_SIZE, $UPLOAD_DIR, $BASE_URL;
+    // Usar constantes do config.php (definidas com define())
+    $allowedTypes = defined('ALLOWED_TYPES') ? ALLOWED_TYPES : [];
+    $allowedCategories = defined('ALLOWED_CATEGORIES') ? ALLOWED_CATEGORIES : ['ref', 'track', 'generated'];
+    $maxSize = defined('MAX_SIZE') ? MAX_SIZE : 52428800;
+    $uploadDir = defined('UPLOAD_DIR') ? UPLOAD_DIR : __DIR__ . '/audios/';
+    $baseUrl = defined('BASE_URL') ? BASE_URL : '';
 
     // Pegar categoria
     $tipo = $_POST['tipo'] ?? 'ref';
 
-    if (!in_array($tipo, $ALLOWED_CATEGORIES)) {
+    if (!in_array($tipo, $allowedCategories)) {
         http_response_code(400);
-        echo json_encode(['sucesso' => false, 'erro' => 'Tipo invalido. Permitidos: ' . implode(', ', $ALLOWED_CATEGORIES)]);
+        echo json_encode(['sucesso' => false, 'erro' => 'Tipo invalido. Permitidos: ' . implode(', ', $allowedCategories)]);
         exit;
     }
 
@@ -98,21 +103,21 @@ function handleNormalUpload() {
     $mimeType = finfo_file($finfo, $arquivo['tmp_name']);
     finfo_close($finfo);
 
-    if (!in_array($mimeType, $ALLOWED_TYPES)) {
+    if (!in_array($mimeType, $allowedTypes)) {
         http_response_code(400);
         echo json_encode(['sucesso' => false, 'erro' => 'Tipo de arquivo nao permitido. Use WAV, MP3, OGG, FLAC ou M4A']);
         exit;
     }
 
     // Validar tamanho
-    if ($arquivo['size'] > $MAX_SIZE) {
+    if ($arquivo['size'] > $maxSize) {
         http_response_code(400);
-        echo json_encode(['sucesso' => false, 'erro' => 'Arquivo muito grande. Maximo: ' . round($MAX_SIZE / (1024 * 1024)) . 'MB']);
+        echo json_encode(['sucesso' => false, 'erro' => 'Arquivo muito grande. Maximo: ' . round($maxSize / (1024 * 1024)) . 'MB']);
         exit;
     }
 
     // Criar pasta da categoria
-    $pastaCategoria = $UPLOAD_DIR . $tipo . '/';
+    $pastaCategoria = $uploadDir . $tipo . '/';
     if (!is_dir($pastaCategoria)) {
         mkdir($pastaCategoria, 0755, true);
     }
@@ -133,7 +138,7 @@ function handleNormalUpload() {
     $caminhoCompleto = $pastaCategoria . $nomeArquivo;
 
     if (move_uploaded_file($arquivo['tmp_name'], $caminhoCompleto)) {
-        $urlPublica = $BASE_URL . '/audios/' . $tipo . '/' . $nomeArquivo;
+        $urlPublica = $baseUrl . '/audios/' . $tipo . '/' . $nomeArquivo;
         logUpload("Upload OK - Tipo: $tipo, Arquivo: $nomeArquivo, Tamanho: " . $arquivo['size']);
 
         echo json_encode([
@@ -154,7 +159,12 @@ function handleNormalUpload() {
 // CHUNKED UPLOAD (arquivo dividido em pedacos de ~3MB)
 // ========================
 function handleChunkedUpload() {
-    global $ALLOWED_TYPES, $ALLOWED_CATEGORIES, $MAX_SIZE, $UPLOAD_DIR, $BASE_URL;
+    // Usar constantes do config.php (definidas com define())
+    $allowedTypes = defined('ALLOWED_TYPES') ? ALLOWED_TYPES : [];
+    $allowedCategories = defined('ALLOWED_CATEGORIES') ? ALLOWED_CATEGORIES : ['ref', 'track', 'generated'];
+    $maxSize = defined('MAX_SIZE') ? MAX_SIZE : 52428800;
+    $uploadDir = defined('UPLOAD_DIR') ? UPLOAD_DIR : __DIR__ . '/audios/';
+    $baseUrl = defined('BASE_URL') ? BASE_URL : '';
 
     $chunkIndex = (int)$_POST['chunkIndex'];
     $totalChunks = (int)$_POST['totalChunks'];
@@ -168,9 +178,9 @@ function handleChunkedUpload() {
         exit;
     }
 
-    if (!in_array($tipo, $ALLOWED_CATEGORIES)) {
+    if (!in_array($tipo, $allowedCategories)) {
         http_response_code(400);
-        echo json_encode(['sucesso' => false, 'erro' => 'Tipo invalido. Permitidos: ' . implode(', ', $ALLOWED_CATEGORIES)]);
+        echo json_encode(['sucesso' => false, 'erro' => 'Tipo invalido. Permitidos: ' . implode(', ', $allowedCategories)]);
         exit;
     }
 
@@ -184,7 +194,7 @@ function handleChunkedUpload() {
     }
 
     // Diretorio temporario para esta sessao de upload
-    $chunkDir = $UPLOAD_DIR . 'chunks/' . $fileId . '/';
+    $chunkDir = $uploadDir . 'chunks/' . $fileId . '/';
     if (!is_dir($chunkDir)) {
         mkdir($chunkDir, 0755, true);
     }
@@ -235,16 +245,16 @@ function handleChunkedUpload() {
             exit;
         }
 
-        if ($totalSize > $MAX_SIZE) {
+        if ($totalSize > $maxSize) {
             array_map('unlink', glob($chunkDir . '*'));
             @rmdir($chunkDir);
             http_response_code(400);
-            echo json_encode(['sucesso' => false, 'erro' => 'Arquivo final muito grande. Maximo: ' . round($MAX_SIZE / (1024 * 1024)) . 'MB']);
+            echo json_encode(['sucesso' => false, 'erro' => 'Arquivo final muito grande. Maximo: ' . round($maxSize / (1024 * 1024)) . 'MB']);
             exit;
         }
 
         // Criar pasta da categoria
-        $pastaCategoria = $UPLOAD_DIR . $tipo . '/';
+        $pastaCategoria = $uploadDir . $tipo . '/';
         if (!is_dir($pastaCategoria)) {
             mkdir($pastaCategoria, 0755, true);
         }
@@ -273,7 +283,7 @@ function handleChunkedUpload() {
         $mimeType = finfo_file($finfo, $caminhoFinal);
         finfo_close($finfo);
 
-        if (!in_array($mimeType, $ALLOWED_TYPES)) {
+        if (!in_array($mimeType, $allowedTypes)) {
             unlink($caminhoFinal);
             array_map('unlink', glob($chunkDir . '*'));
             @rmdir($chunkDir);
@@ -285,12 +295,12 @@ function handleChunkedUpload() {
         // Limpar chunks
         array_map('unlink', glob($chunkDir . '*'));
         @rmdir($chunkDir);
-        $chunksParentDir = $UPLOAD_DIR . 'chunks/';
+        $chunksParentDir = $uploadDir . 'chunks/';
         if (is_dir($chunksParentDir)) {
             @rmdir($chunksParentDir);
         }
 
-        $urlPublica = $BASE_URL . '/audios/' . $tipo . '/' . $nomeArquivo;
+        $urlPublica = $baseUrl . '/audios/' . $tipo . '/' . $nomeArquivo;
         $tamanhoMB = round($totalSize / (1024 * 1024), 2);
 
         logUpload("Upload chunked COMPLETO - Tipo: $tipo, Arquivo: $nomeArquivo, Tamanho: {$tamanhoMB}MB, Chunks: $totalChunks");

@@ -20,42 +20,79 @@ import { toast } from 'sonner'
 import AudioPlayer from '@/components/audio-player'
 
 /**
- * Processamento de audio para trilhas - trima para 80s e comprime se necessario.
+ * Processamento de audio para trilhas - trima para 80s, re-encoda como MP3.
  * Tudo via Vercel proxy (sem upload direto, sem CORS).
  *
  * Regras:
  * - Arquivo <= 3.5MB e duracao <= 80s → envia original (zero perda)
  * - Arquivo > 80s → trima para 80s
- * - Se depois do trim ainda > 3.5MB → reduz sample rate ate caber
- * - Tudo processado no navegador (OfflineAudioContext = instantaneo)
+ * - Re-encoda como MP3 192kbps stereo (alta qualidade, arquivo pequeno)
+ * - 80s stereo 192kbps = ~1.9MB — cabe facil no Vercel
  */
 
 const MAX_UPLOAD_SIZE = 3.5 * 1024 * 1024 // 3.5MB (margem segura do limite 4.5MB)
 const MAX_DURATION = 80 // segundos maximo para trilha de propaganda
-const SAMPLE_RATES = [44100, 22050, 16000, 11025, 8000]
+const MP3_BITRATE = 192 // kbps — alta qualidade pra musica
 
-function encodeWavBuffer(buffer: AudioBuffer): Blob {
-  const numCh = buffer.numberOfChannels
-  const sr = buffer.sampleRate
-  const dataSize = buffer.length * numCh * 2
-  const abuf = new ArrayBuffer(44 + dataSize)
-  const v = new DataView(abuf)
-  const w = (o: number, s: string) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)) }
-  w(0, 'RIFF'); v.setUint32(4, 36 + dataSize, true); w(8, 'WAVE')
-  w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true)
-  v.setUint16(22, numCh, true); v.setUint32(24, sr, true)
-  v.setUint32(28, sr * numCh * 2, true); v.setUint16(32, numCh * 2, true)
-  v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, dataSize, true)
-  const channels: Float32Array[] = []
-  for (let ch = 0; ch < numCh; ch++) channels.push(buffer.getChannelData(ch))
-  let off = 44
-  for (let i = 0; i < buffer.length; i++) {
-    for (let ch = 0; ch < numCh; ch++) {
-      const s = Math.max(-1, Math.min(1, channels[ch][i]))
-      v.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true); off += 2
+/**
+ * Converte AudioBuffer para MP3 usando lamejs (alta qualidade, arquivo pequeno).
+ * Carrega lamejs dinamicamente do CDN para evitar problemas com bundler.
+ */
+async function encodeMp3(buffer: AudioBuffer, kbps: number = 192): Promise<Blob> {
+  // Carregar lamejs se ainda nao foi carregado
+  if (!(window as unknown as { lamejs?: object }).lamejs) {
+    // Tenta import do bundle primeiro (se tiver sido configurado como external)
+    try {
+      const lamejs = await import('lamejs' as string)
+      if (lamejs && (lamejs as { Mp3Encoder?: unknown }).Mp3Encoder) {
+        (window as unknown as { lamejs: object }).lamejs = lamejs as unknown as object
+      }
+    } catch {
+      // Se o import falhar, carrega do CDN via script tag
+      await new Promise<void>((resolve, reject) => {
+        if (document.querySelector('script[src*="lame"]')) { resolve(); return }
+        const script = document.createElement('script')
+        script.src = 'https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js'
+        script.onload = () => resolve()
+        script.onerror = () => reject(new Error('Falha ao carregar encoder MP3'))
+        document.head.appendChild(script)
+      })
     }
   }
-  return new Blob([abuf], { type: 'audio/wav' })
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lamejsMod = (window as any).lamejs
+  const Mp3Encoder = lamejsMod.Mp3Encoder
+
+  const numCh = Math.min(buffer.numberOfChannels, 2)
+  const sr = buffer.sampleRate
+  const encoder = new Mp3Encoder(numCh, sr, kbps)
+
+  const mp3Data: Int8Array[] = []
+  const sampleBlockSize = 1152
+  const left = buffer.getChannelData(0)
+  const right = numCh > 1 ? buffer.getChannelData(1) : left
+
+  for (let i = 0; i < left.length; i += sampleBlockSize) {
+    const leftChunk = new Int16Array(sampleBlockSize)
+    const rightChunk = numCh > 1 ? new Int16Array(sampleBlockSize) : undefined
+
+    for (let j = 0; j < sampleBlockSize; j++) {
+      const idx = i + j
+      if (idx < left.length) {
+        leftChunk[j] = Math.max(-32768, Math.min(32767, Math.round(left[idx] * 32767)))
+        if (rightChunk) rightChunk[j] = Math.max(-32768, Math.min(32767, Math.round(right[idx] * 32767)))
+      }
+    }
+
+    const mp3buf = encoder.encodeBuffer(leftChunk, rightChunk)
+    if (mp3buf.length > 0) mp3Data.push(mp3buf)
+  }
+
+  const end = encoder.flush()
+  if (end.length > 0) mp3Data.push(end)
+
+  return new Blob(mp3Data, { type: 'audio/mpeg' })
 }
 
 async function processTrackFile(file: File): Promise<{ blob: Blob; name: string; info: string }> {
@@ -71,42 +108,36 @@ async function processTrackFile(file: File): Promise<{ blob: Blob; name: string;
     return { blob: file, name: file.name, info: `${origSizeMB}MB, ${Math.round(duration)}s — original` }
   }
 
-  // Precisa processar: trimar para MAX_DURATION
+  // Precisa processar
   const needsTrim = duration > MAX_DURATION
   const targetDuration = needsTrim ? MAX_DURATION : duration
 
-  // Tentar stereo primeiro (som melhor pra musica)
-  let numChannels = 2
-  let maxSR = Math.floor((MAX_UPLOAD_SIZE - 44) / (targetDuration * numChannels * 2))
-  let targetSR = SAMPLE_RATES.find(sr => sr <= maxSR)
-
-  // Se stereo nao cabe, tenta mono
-  if (!targetSR) {
-    numChannels = 1
-    maxSR = Math.floor((MAX_UPLOAD_SIZE - 44) / (targetDuration * numChannels * 2))
-    targetSR = SAMPLE_RATES.find(sr => sr <= maxSR) || SAMPLE_RATES[SAMPLE_RATES.length - 1]
-  }
-
-  // Renderizar com OfflineAudioContext (instantaneo!)
-  const length = Math.ceil(targetDuration * targetSR)
-  const offlineCtx = new OfflineAudioContext(numChannels, length, targetSR)
+  // Renderizar com OfflineAudioContext (mantem sample rate e canais originais)
+  const length = Math.ceil(targetDuration * audioBuffer.sampleRate)
+  const numCh = Math.min(audioBuffer.numberOfChannels, 2) // MP3 suporta max 2 canais
+  const offlineCtx = new OfflineAudioContext(numCh, length, audioBuffer.sampleRate)
   const source = offlineCtx.createBufferSource()
   source.buffer = audioBuffer
   source.connect(offlineCtx.destination)
   source.start(0)
-  const resampled = await offlineCtx.startRendering()
+  const trimmed = await offlineCtx.startRendering()
   await audioCtx.close()
 
-  const wavBlob = encodeWavBuffer(resampled)
-  const finalSizeMB = (wavBlob.size / (1024 * 1024)).toFixed(1)
-  const chLabel = numChannels === 1 ? 'mono' : 'stereo'
+  // Calcular bitrate ideal: queremos o arquivo <= 3.5MB
+  // Tamanho MP3 ≈ duration * bitrate / 8 (em bytes)
+  const maxBitrate = Math.floor((MAX_UPLOAD_SIZE * 8) / targetDuration / 1000) // kbps
+  const targetBitrate = Math.min(MP3_BITRATE, Math.max(64, maxBitrate - 10)) // margem de seguranca
+
+  const mp3Blob = await encodeMp3(trimmed, targetBitrate)
+  const finalSizeMB = (mp3Blob.size / (1024 * 1024)).toFixed(1)
+  const chLabel = numCh === 1 ? 'mono' : 'stereo'
   const trimLabel = needsTrim ? `${Math.round(duration)}s → ${MAX_DURATION}s` : `${Math.round(duration)}s`
-  const info = `${trimLabel}, ${targetSR}Hz ${chLabel}, ${finalSizeMB}MB`
+  const info = `${trimLabel}, ${audioBuffer.sampleRate}Hz ${chLabel}, ${targetBitrate}kbps MP3, ${finalSizeMB}MB`
   const baseName = file.name.replace(/\.[^.]+$/, '')
-  const name = `${baseName}.wav`
+  const name = `${baseName}.mp3`
 
   console.log(`[TrackProcess] ${info}`)
-  return { blob: wavBlob, name, info }
+  return { blob: mp3Blob, name, info }
 }
 
 interface VoiceVariation {

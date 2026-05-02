@@ -212,8 +212,8 @@ export default function VozProClient() {
   const [trackEnabled, setTrackEnabled] = useState(false)
   const [trackVolume, setTrackVolume] = useState(0.3)
   const [speed, setSpeed] = useState(1.0)
-  const [numStep, setNumStep] = useState(32)
-  const [guidanceScale, setGuidanceScale] = useState(2.0)
+  const [numStep, setNumStep] = useState(20)
+  const [guidanceScale, setGuidanceScale] = useState(1.5)
   const [showAdvanced, setShowAdvanced] = useState(false)
 
   // Generation state

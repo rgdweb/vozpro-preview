@@ -20,118 +20,75 @@ import { toast } from 'sonner'
 import AudioPlayer from '@/components/audio-player'
 
 /**
- * Comprimir arquivos grandes para < 4MB usando OfflineAudioContext (INSTANTANEO).
- * Para trilhas musicais, usa STEREO (soa muito melhor que mono).
- * Calcula sample rate automaticamente para garantir que caiba no limite.
- *
- * Qualidade por duracao (stereo):
- * - Ate 1.5 min → 44100Hz (CD quality) — perfeito
- * - Ate 3 min → 22050Hz — muito bom
- * - Ate 4 min → 16000Hz — bom
- * - Ate 6 min → 11025Hz — aceitavel para trilha de fundo
- * - Mais que 6 min → 8000Hz — funcional
+ * Chunked Upload - Divide arquivos grandes em pedacos < 4MB e envia via Vercel proxy.
+ * Bypassa o limite de 4.5MB do Vercel sem perder qualidade (envia bytes originais).
  */
-const MAX_UPLOAD_SIZE = 4 * 1024 * 1024 // 4MB
-const SAMPLE_RATES = [44100, 22050, 16000, 11025, 8000]
-const NUM_CHANNELS = 2 // stereo — soa muito melhor pra musica
+const CHUNK_SIZE = 3 * 1024 * 1024 // 3MB por chunk (seguro abaixo do limite de 4.5MB)
 
-async function compressAudioFile(file: File): Promise<{ blob: Blob; name: string }> {
-  const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
-
-  const arrayBuffer = await file.arrayBuffer()
-  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
-
-  // Arquivos ja pequenos nao precisam de compressao
-  if (file.size < MAX_UPLOAD_SIZE) {
-    await audioCtx.close()
-    return { blob: file, name: file.name }
-  }
-
-  // Calcular sample rate: tamanho WAV = duration * sampleRate * channels * 2 + 44
-  const maxSampleRate = Math.floor((MAX_UPLOAD_SIZE - 44) / (audioBuffer.duration * NUM_CHANNELS * 2))
-
-  // Escolher o melhor sample rate que caiba
-  let targetSampleRate = SAMPLE_RATES.find(sr => sr <= maxSampleRate) || SAMPLE_RATES[SAMPLE_RATES.length - 1]
-
-  // Se nenhum serve (audio muito longo), usar o menor
-  if (targetSampleRate > maxSampleRate) {
-    targetSampleRate = Math.max(8000, maxSampleRate)
-  }
-
-  const length = Math.ceil(audioBuffer.duration * targetSampleRate)
-
-  const offlineCtx = new OfflineAudioContext(NUM_CHANNELS, length, targetSampleRate)
-  const source = offlineCtx.createBufferSource()
-  source.buffer = audioBuffer
-  source.connect(offlineCtx.destination)
-  source.start(0)
-
-  // INSTANTANEOO (nao tempo real!)
-  const resampledBuffer = await offlineCtx.startRendering()
-  const wavBlob = encodeAudioBufferToWav(resampledBuffer)
-
-  await audioCtx.close()
-  const baseName = file.name.replace(/\.[^.]+$/, '')
-  const finalMB = (wavBlob.size / (1024 * 1024)).toFixed(1)
-  const originalMB = (file.size / (1024 * 1024)).toFixed(1)
-  console.log(`[Admin] Compressao: ${originalMB}MB → ${finalMB}MB (${targetSampleRate}Hz stereo, ${Math.round(audioBuffer.duration)}s)`)
-  return { blob: wavBlob, name: baseName + '.wav' }
+interface ChunkedUploadResult {
+  path: string
+  filename: string
 }
 
-/**
- * Converte AudioBuffer para Blob WAV.
- */
-function encodeAudioBufferToWav(buffer: AudioBuffer): Blob {
-  const numChannels = buffer.numberOfChannels
-  const sampleRate = buffer.sampleRate
-  const bitDepth = 16
-  const bytesPerSample = bitDepth / 8
-  const blockAlign = numChannels * bytesPerSample
-  const dataSize = buffer.length * blockAlign
-  const headerSize = 44
-  const totalSize = headerSize + dataSize
+async function uploadFileChunked(
+  blob: Blob,
+  fileName: string,
+  tipo: string = 'track',
+  onProgress?: (percent: number) => void
+): Promise<ChunkedUploadResult> {
+  const totalSize = blob.size
+  const totalChunks = Math.ceil(totalSize / CHUNK_SIZE)
+  const fileId = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`
 
-  const arrayBuffer = new ArrayBuffer(totalSize)
-  const view = new DataView(arrayBuffer)
+  console.log(`[ChunkedUpload] Iniciando: ${(totalSize / (1024 * 1024)).toFixed(1)}MB, ${totalChunks} chunks de ${(CHUNK_SIZE / (1024 * 1024)).toFixed(1)}MB`)
 
-  // WAV header
-  writeWavString(view, 0, 'RIFF')
-  view.setUint32(4, totalSize - 8, true)
-  writeWavString(view, 8, 'WAVE')
-  writeWavString(view, 12, 'fmt ')
-  view.setUint32(16, 16, true)
-  view.setUint16(20, 1, true)
-  view.setUint16(22, numChannels, true)
-  view.setUint32(24, sampleRate, true)
-  view.setUint32(28, sampleRate * blockAlign, true)
-  view.setUint16(32, blockAlign, true)
-  view.setUint16(34, bitDepth, true)
-  writeWavString(view, 36, 'data')
-  view.setUint32(40, dataSize, true)
+  let lastResult: { path: string; filename: string } | null = null
 
-  // Audio data (interleaved)
-  const channels: Float32Array[] = []
-  for (let ch = 0; ch < numChannels; ch++) {
-    channels.push(buffer.getChannelData(ch))
-  }
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE
+    const end = Math.min(start + CHUNK_SIZE, totalSize)
+    const chunkBlob = blob.slice(start, end)
 
-  let offset = 44
-  for (let i = 0; i < buffer.length; i++) {
-    for (let ch = 0; ch < numChannels; ch++) {
-      const sample = Math.max(-1, Math.min(1, channels[ch][i]))
-      const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF
-      view.setInt16(offset, intSample, true)
-      offset += 2
+    const formData = new FormData()
+    formData.append('chunkData', chunkBlob, 'chunk')
+    formData.append('chunkIndex', i.toString())
+    formData.append('totalChunks', totalChunks.toString())
+    formData.append('fileName', fileName)
+    formData.append('fileId', fileId)
+    formData.append('tipo', tipo)
+
+    const res = await fetch('/api/upload-chunk', {
+      method: 'POST',
+      body: formData,
+    })
+
+    const data = await res.json()
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || `Erro ao enviar chunk ${i + 1}/${totalChunks}`)
+    }
+
+    // Progresso: baseado nos chunks enviados
+    const percent = Math.round(((i + 1) / totalChunks) * 100)
+    onProgress?.(percent)
+
+    // Se o PHP retornou resultado final (ultimo chunk remontou)
+    if (data.status === 'complete' && data.path) {
+      lastResult = { path: data.path, filename: data.filename }
+    }
+
+    // Pequena pausa entre chunks para nao sobrecarregar
+    if (i < totalChunks - 1) {
+      await new Promise(resolve => setTimeout(resolve, 100))
     }
   }
 
-  return new Blob([arrayBuffer], { type: 'audio/wav' })
-}
-
-function writeWavString(view: DataView, offset: number, str: string) {
-  for (let i = 0; i < str.length; i++) {
-    view.setUint8(offset + i, str.charCodeAt(i))
+  if (!lastResult) {
+    throw new Error('Upload concluído mas sem resultado final do servidor')
   }
+
+  console.log(`[ChunkedUpload] Concluido: ${lastResult.path}`)
+  return lastResult
 }
 
 interface VoiceVariation {
@@ -523,19 +480,11 @@ export default function AdminDashboard() {
         return
       }
 
-      if (file.size >= MAX_UPLOAD_SIZE) {
-        // Arquivo grande: comprime instantaneamente
-        const durationHint = file.size > 8 * 1024 * 1024 ? ' (trilha longa, qualidade reduzida)' : ''
-        toast.info(`Comprimindo arquivo${durationHint}...`)
-        const compressed = await compressAudioFile(file)
-        setPendingTrackFile({ blob: compressed.blob, name: compressed.name })
-        const sizeMB = (compressed.blob.size / (1024 * 1024)).toFixed(1)
-        const origMB = (file.size / (1024 * 1024)).toFixed(1)
-        toast.success(`Pronto: ${origMB}MB → ${sizeMB}MB`)
-      } else {
-        setPendingTrackFile({ blob: file, name: file.name })
-        toast.success(`Arquivo pronto (${(file.size / (1024 * 1024)).toFixed(1)}MB)`)
-      }
+      // Sem compressao! Guarda o arquivo original tal qual.
+      // O chunked upload cuida de arquivos grandes sem perder qualidade.
+      setPendingTrackFile({ blob: file, name: file.name })
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1)
+      toast.success(`Arquivo pronto: ${file.name} (${sizeMB}MB) — qualidade original preservada`)
     } catch (err) {
       console.error('Error preparing file:', err)
       toast.error('Erro ao processar o arquivo')
@@ -555,31 +504,55 @@ export default function AdminDashboard() {
 
       if (pendingTrackFile) {
         setUploadingTrack(true)
-        toast.info('Enviando arquivo...')
 
-        const formData = new FormData()
-        formData.append('file', pendingTrackFile.blob, pendingTrackFile.name)
+        const fileSize = pendingTrackFile.blob.size
+        const sizeMB = (fileSize / (1024 * 1024)).toFixed(1)
 
-        const uploadRes = await fetch('/api/upload-track', {
-          method: 'POST',
-          body: formData,
-        })
+        if (fileSize <= 3.5 * 1024 * 1024) {
+          // Arquivo pequeno: upload normal (sem chunks)
+          toast.info('Enviando arquivo...')
 
-        const contentType = uploadRes.headers.get('content-type') || ''
-        if (contentType.includes('application/json')) {
-          const uploadData = await uploadRes.json()
-          if (uploadRes.ok && (uploadData.path || uploadData.url)) {
-            audioUrl = uploadData.path || uploadData.url
-            audioFilename = uploadData.filename || ''
+          const formData = new FormData()
+          formData.append('file', pendingTrackFile.blob, pendingTrackFile.name)
+
+          const uploadRes = await fetch('/api/upload-track', {
+            method: 'POST',
+            body: formData,
+          })
+
+          const contentType = uploadRes.headers.get('content-type') || ''
+          if (contentType.includes('application/json')) {
+            const uploadData = await uploadRes.json()
+            if (uploadRes.ok && (uploadData.path || uploadData.url)) {
+              audioUrl = uploadData.path || uploadData.url
+              audioFilename = uploadData.filename || ''
+            } else {
+              setUploadingTrack(false)
+              toast.error(uploadData.error || 'Erro no upload do arquivo')
+              return
+            }
           } else {
             setUploadingTrack(false)
-            toast.error(uploadData.error || 'Erro no upload do arquivo')
+            toast.error(`Erro no servidor (${uploadRes.status}). Tente novamente.`)
             return
           }
         } else {
-          setUploadingTrack(false)
-          toast.error(`Erro no servidor (${uploadRes.status}). Tente novamente.`)
-          return
+          // Arquivo grande: chunked upload (divide em pedacos de 3MB)
+          const totalChunks = Math.ceil(fileSize / CHUNK_SIZE)
+          toast.info(`Enviando ${sizeMB}MB em ${totalChunks} partes... (qualidade original)`)
+
+          const result = await uploadFileChunked(
+            pendingTrackFile.blob,
+            pendingTrackFile.name,
+            'track',
+            (percent) => {
+              // Atualiza mensagem de progresso
+              toast.info(`Enviando parte... ${percent}%`) 
+            }
+          )
+
+          audioUrl = result.path
+          audioFilename = result.filename
         }
 
         setTrackFilePath(audioUrl)

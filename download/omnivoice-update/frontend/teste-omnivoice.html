@@ -500,25 +500,39 @@ let selectedFile = null;
 let generatedBlobUrl = null;
 
 // ---- Status Check ----
+// Testa conectividade DIRETO do navegador pro tunnel
+// (HostGator nao consegue testar por bloquear HTTPS de saida)
 async function checkStatus() {
     statusDot.className = 'status-dot checking';
     statusText.textContent = 'Verificando GPU...';
     
     try {
+        // 1. Pega a URL do tunnel no HostGator
         const resp = await fetch(`${HOSTGATOR_BASE}/get_tunnel.php`);
         const data = await resp.json();
         
-        if (data.status === 'online') {
-            statusDot.className = 'status-dot online';
-            statusText.textContent = 'GPU Online';
-            updateGenerateButton();
-        } else {
+        if (data.status !== 'online' || !data.tunnelUrl) {
             statusDot.className = 'status-dot offline';
-            statusText.textContent = 'GPU Offline — ' + (data.message || '');
+            statusText.textContent = 'GPU Offline — ' + (data.message || 'Inicie o iniciar.bat');
+            return;
         }
+        
+        // 2. Testa o tunnel DIRETO do navegador (o navegador consegue!)
+        statusText.textContent = 'Testando tunnel...';
+        const tunnelResp = await fetch(data.tunnelUrl + '/', { 
+            method: 'HEAD',
+            mode: 'no-cors',
+            signal: AbortSignal.timeout(5000)
+        });
+        
+        // Se chegou aqui, o tunnel respondeu (no-cors sempre "sucesso" se conectar)
+        statusDot.className = 'status-dot online';
+        statusText.textContent = 'GPU Online';
+        updateGenerateButton();
+        
     } catch (e) {
         statusDot.className = 'status-dot offline';
-        statusText.textContent = 'Erro ao conectar: ' + e.message;
+        statusText.textContent = 'GPU Offline — tunnel nao responde';
     }
 }
 

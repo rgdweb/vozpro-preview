@@ -146,6 +146,7 @@ function downloadRefAudio($url, $name) {
         CURLOPT_FILE => $fp,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_TIMEOUT => 60,
+        CURLOPT_ENCODING => '',  // BLOQUEIA compressao gzip/brotli (corrompe audio via tunnel)
         CURLOPT_SSL_VERIFYPEER => false,
     ]);
     $dlOk = curl_exec($ch);
@@ -213,6 +214,7 @@ function uploadToHF($filePath, $fileName, $hfUrl) {
         CURLOPT_POSTFIELDS => ['files' => $cfile],
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 120,
+        CURLOPT_ENCODING => '',  // BLOQUEIA compressao (corrompe upload de audio via tunnel)
         CURLOPT_SSL_VERIFYPEER => false,
     ]);
     $resp = curl_exec($ch);
@@ -241,6 +243,7 @@ function submitToGradio($gradioData, $hfUrl) {
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 120,
         CURLOPT_CONNECTTIMEOUT => 30,
+        CURLOPT_ENCODING => '',  // BLOQUEIA compressao no submit
         CURLOPT_SSL_VERIFYPEER => false,
     ]);
     $resp = curl_exec($ch);
@@ -352,11 +355,13 @@ function streamSSEForResult($eventId, $hfUrl, $timeoutSec = 600) {
         CURLOPT_TIMEOUT => $timeoutSec,
         CURLOPT_CONNECTTIMEOUT => 30,
         CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+        CURLOPT_ENCODING => '',  // BLOQUEIA compressao no SSE stream
         CURLOPT_HTTPHEADER => [
             'Accept: text/event-stream',
             'Cache-Control: no-cache',
             'Connection: keep-alive',
             'X-Accel-Buffering: no',
+            'Accept-Encoding: identity',  // Forca sem compressao
         ],
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_WRITEFUNCTION => $writeFn,
@@ -531,6 +536,7 @@ curl_setopt_array($ch, [
     CURLOPT_FILE => $fp,
     CURLOPT_FOLLOWLOCATION => true,
     CURLOPT_TIMEOUT => 120,
+    CURLOPT_ENCODING => '',  // BLOQUEIA compressao (corrompe audio WAV via tunnel!)
     CURLOPT_SSL_VERIFYPEER => false,
 ]);
 $dlOk = curl_exec($ch);

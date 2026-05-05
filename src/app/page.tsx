@@ -624,7 +624,7 @@ export default function VozProClient() {
       setIsGenerating(false)
       setGeneratingTime(0)
     }
-  }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume])
+  }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs])
 
   // Get the active audio URL
   const activeAudioUrl = mixedAudioUrl || audioUrl

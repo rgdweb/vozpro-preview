@@ -64,12 +64,12 @@ interface DuckingConfig {
 }
 
 const DEFAULT_DUCKING: DuckingConfig = {
-  duckVolume: 0.15,
-  fadeInMs: 1500,
+  duckVolume: 0.10,
+  fadeInMs: 1100,
   duckFadeMs: 500,
   unduckFadeMs: 800,
   fadeOutMs: 2000,
-  musicStartLeadMs: 2000,
+  musicStartLeadMs: 3000,
 }
 
 const LANGUAGES = [
@@ -273,7 +273,7 @@ export default function VozProClient() {
   // Settings
   const [text, setText] = useState('')
   const [trackEnabled, setTrackEnabled] = useState(false)
-  const [trackVolume, setTrackVolume] = useState(0.3)
+  const [trackVolume, setTrackVolume] = useState(0.4)
   const [duckVolume, setDuckVolume] = useState(DEFAULT_DUCKING.duckVolume)
   const [fadeInMs, setFadeInMs] = useState(DEFAULT_DUCKING.fadeInMs)
   const [duckFadeMs, setDuckFadeMs] = useState(DEFAULT_DUCKING.duckFadeMs)

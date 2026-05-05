@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { validateGeneratedAudio, shouldRetry, formatValidationLog, type ValidationResult } from '@/lib/asr-validator'
+import { preprocessTTS } from '@/lib/tts-text-preprocessor'
 
 // POST /api/tunnel-generate - Geracao direta via tunnel cloudflared
 // Sem HostGator intermediario - audio vai LIMPO pro GPU local
@@ -322,9 +323,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Falha no upload do audio', debug: debug.result() }, { status: 502 })
     }
 
-    // 4. Montar dados do Gradio (mesmo formato que /api/generate usa pro HF Space)
+    // 4. Pre-processar texto para TTS (forçar pausas na pontuação)
+    const processedText = preprocessTTS(text)
+    if (processedText !== text) {
+      debug.log('Preprocess', 'info', 'Texto preprocessado para melhor pontuacao')
+    }
+
+    // 5. Montar dados do Gradio (mesmo formato que /api/generate usa pro HF Space)
     const gradioData = [
-      text,
+      processedText,  // usa texto preprocessado (com pausas forçadas)
       language,
       {
         path: filePath,

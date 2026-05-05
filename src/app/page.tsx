@@ -356,6 +356,7 @@ export default function VozProClient() {
           ...body,
           referenceAudioUrl: selectedVariation?.refAudioServerUrl || body.refAudioUrl,
           referenceAudioName: body.refAudioName || 'ref_audio.wav',
+          useChunking: true,  // modo prosódia: gera frase por frase com pausas reais
         }
         res = await fetch('/api/tunnel-generate', {
           method: 'POST',

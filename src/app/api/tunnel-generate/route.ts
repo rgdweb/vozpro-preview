@@ -1,20 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { validateGeneratedAudio, shouldRetry, formatValidationLog, type ValidationResult } from '@/lib/asr-validator'
-import { preprocessTTS } from '@/lib/tts-text-preprocessor'
+import { chunkText, formatChunkSummary, type TextChunk } from '@/lib/tts-chunker'
+import { concatenateAudioBuffers, applyFadeOut, type AudioChunk } from '@/lib/audio-concatenator'
+import { validateGeneratedAudio, shouldRetry, formatValidationLog } from '@/lib/asr-validator'
 
 // POST /api/tunnel-generate - Geracao direta via tunnel cloudflared
-// Sem HostGator intermediario - audio vai LIMPO pro GPU local
-// Usa os mesmos endpoints Gradio que o /api/generate usa pro HF Space
-//
-// CAMADA 2: ASR Validator — apos gerar, transcreve e compara com texto original.
-// Se detectar alucinacao ("to", "ba", outra lingua), regenera automaticamente.
+// Pipeline completo com prosódia:
+//   1. Chunking de texto (divide por pontuação com duração de pausa)
+//   2. Gera cada chunk separadamente
+//   3. Concatena com silêncio real entre frases
+//   4. Valida resultado com ASR (opcional)
 
 export const maxDuration = 300
 
 const HOSTGATOR_BASE = 'https://sorteiomax.com.br/omnivoice'
-
-// Configuração do ASR validator
-const ASR_MAX_RETRIES = 3  // max regenerações se ASR detectar problema
 
 function createDebug() {
   const steps: { time: string; step: string; status: string; detail?: string; duration?: number }[] = []
@@ -26,9 +24,10 @@ function createDebug() {
   return { log, result }
 }
 
-/**
- * Descobre a URL do tunnel cloudflared via HostGator
- */
+// ============================================================
+// FUNÇÕES AUXILIARES (tunnel, upload, submit, stream)
+// ============================================================
+
 async function getTunnelUrl(debug: ReturnType<typeof createDebug>): Promise<string> {
   try {
     const res = await fetch(`${HOSTGATOR_BASE}/get_tunnel.php`, { signal: AbortSignal.timeout(10000) })
@@ -44,10 +43,6 @@ async function getTunnelUrl(debug: ReturnType<typeof createDebug>): Promise<stri
   }
 }
 
-/**
- * Faz upload de audio para o Gradio via tunnel
- * Usa /gradio_api/upload (mesmo endpoint que o HF Space usa)
- */
 async function uploadToGradio(
   tunnelUrl: string,
   audioBuffer: ArrayBuffer,
@@ -85,10 +80,6 @@ async function uploadToGradio(
   }
 }
 
-/**
- * Submete job de geracao pro Gradio via tunnel
- * Usa /gradio_api/call/_clone_fn (mesmo que o HF Space)
- */
 async function submitJob(
   tunnelUrl: string,
   data: unknown[],
@@ -118,9 +109,6 @@ async function submitJob(
   }
 }
 
-/**
- * SSE Stream para receber resultado do Gradio
- */
 async function streamResult(
   tunnelUrl: string,
   eventId: string,
@@ -133,29 +121,16 @@ async function streamResult(
   try {
     const response = await fetch(
       `${tunnelUrl}/gradio_api/call/_clone_fn/${eventId}`,
-      {
-        headers: { 'Accept': 'text/event-stream' },
-        signal: controller.signal,
-      }
+      { headers: { 'Accept': 'text/event-stream' }, signal: controller.signal }
     )
 
-    if (response.status === 404) {
-      clearTimeout(timeoutId)
-      return { audioUrl: null, error: '404' }
-    }
-
-    if (!response.ok) {
-      clearTimeout(timeoutId)
-      return { audioUrl: null, error: `HTTP ${response.status}` }
-    }
+    if (response.status === 404) { clearTimeout(timeoutId); return { audioUrl: null, error: '404' } }
+    if (!response.ok) { clearTimeout(timeoutId); return { audioUrl: null, error: `HTTP ${response.status}` } }
 
     debug.log('SSE Stream', 'ok', 'Conexao aberta, aguardando resultado...')
 
     const reader = response.body?.getReader()
-    if (!reader) {
-      clearTimeout(timeoutId)
-      return { audioUrl: null, error: 'No stream reader' }
-    }
+    if (!reader) { clearTimeout(timeoutId); return { audioUrl: null, error: 'No stream reader' } }
 
     const decoder = new TextDecoder()
     let buffer = ''
@@ -186,30 +161,22 @@ async function streamResult(
             if (!Array.isArray(resultData) || resultData.length < 2) {
               return { audioUrl: null, error: 'Formato inesperado' }
             }
-
             const audioOutput = resultData[0]
             let audioUrl: string | null = null
-            if (audioOutput?.url) {
-              audioUrl = audioOutput.url
-            } else if (audioOutput?.path) {
-              audioUrl = `${tunnelUrl}/gradio_api/file=${audioOutput.path}`
-            }
-
+            if (audioOutput?.url) audioUrl = audioOutput.url
+            else if (audioOutput?.path) audioUrl = `${tunnelUrl}/gradio_api/file=${audioOutput.path}`
             if (audioUrl) {
               debug.log('SSE Stream', 'ok', `Audio: ${audioUrl.substring(0, 80)}`)
               return { audioUrl, error: null }
             }
             return { audioUrl: null, error: 'Sem URL no output' }
-          } catch {
-            return { audioUrl: null, error: 'Parse error' }
-          }
+          } catch { return { audioUrl: null, error: 'Parse error' } }
         }
 
         if (eventType === 'error') {
           clearTimeout(timeoutId)
-          const errMsg = eventData || 'Erro na geracao'
-          debug.log('SSE Stream', 'error', errMsg.substring(0, 200))
-          return { audioUrl: null, error: errMsg }
+          debug.log('SSE Stream', 'error', (eventData || 'Erro na geracao').substring(0, 200))
+          return { audioUrl: null, error: eventData || 'Erro na geracao' }
         }
 
         if (eventType === 'heartbeat') {
@@ -225,22 +192,131 @@ async function streamResult(
     return { audioUrl: null, error: 'Stream ended without result' }
   } catch (err) {
     clearTimeout(timeoutId)
-    if (err instanceof Error && err.name === 'AbortError') {
-      return { audioUrl: null, error: 'timeout' }
-    }
+    if (err instanceof Error && err.name === 'AbortError') return { audioUrl: null, error: 'timeout' }
     return { audioUrl: null, error: err instanceof Error ? err.message : String(err) }
   }
 }
 
 /**
- * Gera audio TTS (submit + stream + download) — uma tentativa
- * Retorna o buffer do audio ou null se falhou
+ * Gera um chunk de texto via Gradio (submit + stream + download)
  */
-async function generateOnce(
+async function generateChunk(
   tunnelUrl: string,
-  data: unknown[],
+  chunkText: string,
+  gradioBaseData: unknown[],
+  debug: ReturnType<typeof createDebug>,
+  chunkIndex: number,
+  totalChunks: number
+): Promise<Buffer | null> {
+  // Substituir texto no data array
+  const data = [...gradioBaseData]
+  data[0] = chunkText  // índice 0 = texto
+
+  debug.log(`Chunk ${chunkIndex + 1}/${totalChunks}`, 'info', `"${chunkText.substring(0, 50)}..."`)
+
+  // Submeter job
+  let eventId: string | null = null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      debug.log(`Chunk ${chunkIndex + 1} retry`, 'warn', `Tentativa ${attempt + 1}/3`)
+      await new Promise(r => setTimeout(r, 2000))
+    }
+    eventId = await submitJob(tunnelUrl, data, debug)
+    if (eventId) break
+  }
+
+  if (!eventId) {
+    debug.log(`Chunk ${chunkIndex + 1}`, 'error', 'Falha ao submeter job')
+    return null
+  }
+
+  // SSE Stream
+  const result = await streamResult(tunnelUrl, eventId, debug, 180000)
+  if (!result.audioUrl) {
+    debug.log(`Chunk ${chunkIndex + 1}`, 'error', `Falha: ${result.error}`)
+    return null
+  }
+
+  // Download
+  const voiceRes = await fetch(result.audioUrl)
+  if (!voiceRes.ok) {
+    debug.log(`Chunk ${chunkIndex + 1}`, 'error', 'Falha no download')
+    return null
+  }
+
+  const voiceBuffer = Buffer.from(await voiceRes.arrayBuffer())
+  debug.log(`Chunk ${chunkIndex + 1}/${totalChunks}`, 'ok', `${(voiceBuffer.length / 1024).toFixed(1)}KB`)
+  return voiceBuffer
+}
+
+// ============================================================
+// PIPELINE COM CHUNKING (prosódia explícita)
+// ============================================================
+
+async function generateWithChunking(
+  tunnelUrl: string,
+  text: string,
+  gradioBaseData: unknown[],
   debug: ReturnType<typeof createDebug>
-): Promise<{ buffer: Buffer; audioUrl: string; mimeType: string } | null> {
+): Promise<{ finalBuffer: Buffer; chunks: TextChunk[] } | null> {
+  // 1. Chunking de texto
+  const chunks = chunkText(text)
+  if (chunks.length === 0) return null
+
+  debug.log('Chunking', 'ok', `${chunks.length} frases identificadas`)
+  debug.log('Chunking', 'info', formatChunkSummary(chunks).substring(0, 500))
+
+  // 2. Gerar cada chunk
+  const audioChunks: AudioChunk[] = []
+  let failedChunks = 0
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i]
+
+    const buffer = await generateChunk(tunnelUrl, chunk.text, gradioBaseData, debug, i, chunks.length)
+
+    if (buffer) {
+      audioChunks.push({ buffer, pauseAfterMs: chunk.pauseAfterMs })
+    } else {
+      failedChunks++
+      debug.log('Chunking', 'warn', `Chunk ${i + 1} falhou, pulando (${failedChunks} falhas)`)
+    }
+  }
+
+  if (audioChunks.length === 0) {
+    debug.log('Chunking', 'error', 'Todos os chunks falharam')
+    return null
+  }
+
+  if (failedChunks > 0) {
+    debug.log('Chunking', 'warn', `${failedChunks}/${chunks.length} chunks falharam, continuando com ${audioChunks.length}`)
+  }
+
+  // 3. Concatenar com silêncio real
+  debug.log('Concatenacao', 'info', `Juntando ${audioChunks.length} chunks com silencio...`)
+  const concatenated = concatenateAudioBuffers(audioChunks)
+
+  debug.log('Concatenacao', 'ok',
+    `${concatenated.totalDurationMs}ms total (${concatenated.chunkCount} chunks, ${(concatenated.buffer.length / 1024).toFixed(1)}KB)`)
+
+  // 4. Aplicar fade-out suave (200ms) no final
+  const withFade = applyFadeOut(concatenated.buffer, 200)
+
+  return { finalBuffer: withFade, chunks }
+}
+
+// ============================================================
+// MODO SINGLE-SHOT (fallback sem chunking)
+// ============================================================
+
+async function generateSingleShot(
+  tunnelUrl: string,
+  text: string,
+  gradioData: unknown[],
+  debug: ReturnType<typeof createDebug>
+): Promise<Buffer | null> {
+  debug.log('Geracao', 'info', 'Gerando audio (single-shot, sem chunking)...')
+
   // Submeter job com retry
   let eventId: string | null = null
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -248,28 +324,30 @@ async function generateOnce(
       debug.log('Submit retry', 'warn', `Tentativa ${attempt + 1}/3`)
       await new Promise(r => setTimeout(r, 3000))
     }
-    eventId = await submitJob(tunnelUrl, data, debug)
+    eventId = await submitJob(tunnelUrl, gradioData, debug)
     if (eventId) break
   }
 
   if (!eventId) return null
 
-  // SSE Stream - receber resultado
+  // SSE Stream
   const result = await streamResult(tunnelUrl, eventId, debug, 180000)
   if (!result.audioUrl) return null
 
-  // Baixar audio gerado
+  // Download
   const voiceRes = await fetch(result.audioUrl)
   if (!voiceRes.ok) return null
 
   const voiceBuffer = Buffer.from(await voiceRes.arrayBuffer())
-  const mimeType = result.audioUrl.endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav'
   debug.log('Download', 'ok', `${(voiceBuffer.length / 1024).toFixed(1)}KB`)
 
-  return { buffer: voiceBuffer, audioUrl: result.audioUrl, mimeType }
+  return applyFadeOut(voiceBuffer, 200)
 }
 
-// POST /api/tunnel-generate
+// ============================================================
+// POST HANDLER
+// ============================================================
+
 export async function POST(req: NextRequest) {
   const debug = createDebug()
 
@@ -286,7 +364,8 @@ export async function POST(req: NextRequest) {
       speed = 1,
       numStep = 32,
       guidanceScale = 2.0,
-      skipASR = false,  // permite pular ASR se necessario (fallback)
+      skipASR = false,
+      useChunking = true,  // CHUNKING ativo por padrao (controle de prosódia)
     } = body
 
     if (!text || !text.trim()) {
@@ -316,22 +395,16 @@ export async function POST(req: NextRequest) {
 
     const fileName = referenceAudioName || 'reference.wav'
 
-    // 3. Upload pro Gradio via tunnel
+    // 3. Upload pro Gradio via tunnel (UMA VEZ — referencia compartilhada entre chunks)
     debug.log('Upload', 'info', 'Enviando audio pro Gradio...')
     const filePath = await uploadToGradio(tunnelUrl, audioBuffer, fileName, debug)
     if (!filePath) {
       return NextResponse.json({ error: 'Falha no upload do audio', debug: debug.result() }, { status: 502 })
     }
 
-    // 4. Pre-processar texto para TTS (forçar pausas na pontuação)
-    const processedText = preprocessTTS(text)
-    if (processedText !== text) {
-      debug.log('Preprocess', 'info', 'Texto preprocessado para melhor pontuacao')
-    }
-
-    // 5. Montar dados do Gradio (mesmo formato que /api/generate usa pro HF Space)
-    const gradioData = [
-      processedText,  // usa texto preprocessado (com pausas forçadas)
+    // 4. Montar dados BASE do Gradio (texto será substituído por chunk)
+    const gradioBaseData = [
+      text,  // placeholder — será substituído por cada chunk
       language,
       {
         path: filePath,
@@ -351,110 +424,90 @@ export async function POST(req: NextRequest) {
       true,   // postprocess_output
     ]
 
-    debug.log('Parametros', 'info', `lang:${language} speed:${speed} steps:${numStep} cfg:${guidanceScale}`)
+    debug.log('Parametros', 'info', `lang:${language} speed:${speed} steps:${numStep} cfg:${guidanceScale} chunking:${useChunking}`)
 
     // =============================================================
-    // 5. GERAR + VALIDAR COM ASR (loop de qualidade)
-    // Gera o audio, valida com ASR, se ruim regenera até ASR_MAX_RETRIES
-    // Se ASR indisponível, retorna audio sem validação (graceful degradation)
+    // 5. GERAR ÁUDIO (chunking ou single-shot)
     // =============================================================
-    let bestResult: { buffer: Buffer; mimeType: string } | null = null
-    let bestValidation: ValidationResult | null = null
-    let validationAttempt = 0
+    let finalBuffer: Buffer | null = null
+    let chunkInfo: TextChunk[] | null = null
 
-    for (validationAttempt = 1; validationAttempt <= ASR_MAX_RETRIES; validationAttempt++) {
-      if (validationAttempt > 1) {
-        debug.log('ASR Retry', 'warn', `Regenerando (tentativa ${validationAttempt}/${ASR_MAX_RETRIES})...`)
-        await new Promise(r => setTimeout(r, 2000)) // pequena pausa entre tentativas
+    if (useChunking && text.length > 20) {
+      // MODO CHUNKING — gera frase por frase, concatena com silêncio
+      debug.log('Pipeline', 'info', 'Modo CHUNKING ativo (prosódia explícita)')
+      const chunkResult = await generateWithChunking(tunnelUrl, text, gradioBaseData, debug)
+      if (chunkResult) {
+        finalBuffer = chunkResult.finalBuffer
+        chunkInfo = chunkResult.chunks
+      } else {
+        // Fallback para single-shot se chunking falhar completamente
+        debug.log('Pipeline', 'warn', 'Chunking falhou, tentando single-shot como fallback...')
+        finalBuffer = await generateSingleShot(tunnelUrl, text, gradioBaseData, debug)
       }
-
-      // 5a. Gerar audio
-      debug.log('Geracao', 'info', `Gerando audio (tentativa ${validationAttempt}/${ASR_MAX_RETRIES})...`)
-      const generated = await generateOnce(tunnelUrl, gradioData, debug)
-
-      if (!generated) {
-        debug.log('Geracao', 'error', 'Falha na geracao')
-        continue
-      }
-
-      // Sempre guarda o melhor resultado (primeiro que gerou)
-      if (!bestResult) {
-        bestResult = { buffer: generated.buffer, mimeType: generated.mimeType }
-      }
-
-      // 5b. Validar com ASR (se não foi desativado pelo frontend)
-      if (skipASR) {
-        debug.log('ASR', 'info', 'Validacao ASR desativada pelo frontend')
-        bestResult = { buffer: generated.buffer, mimeType: generated.mimeType }
-        bestValidation = null
-        break
-      }
-
-      debug.log('ASR', 'info', 'Validando audio gerado com ASR...')
-      const validation = await validateGeneratedAudio(
-        new Uint8Array(generated.buffer).buffer as ArrayBuffer,
-        text
-      )
-      debug.log('ASR', validation.valid ? 'ok' : 'warn', formatValidationLog(validation))
-      bestValidation = validation
-
-      // Se válido, usa esse audio!
-      if (validation.valid) {
-        bestResult = { buffer: generated.buffer, mimeType: generated.mimeType }
-        break
-      }
-
-      // Se inválido, checa se vale retry
-      if (!shouldRetry(validation)) {
-        const reason = validation.method === 'unavailable'
-          ? 'ASR e duracao indisponiveis'
-          : 'validacao passou por outro metodo'
-        debug.log('ASR', 'info', `Aceitando audio (${reason})`)
-        bestResult = { buffer: generated.buffer, mimeType: generated.mimeType }
-        bestValidation = validation
-        break
-      }
-
-      // Inválido e vale retry — continua o loop
-      debug.log('ASR', 'warn', `Audio rejeitado, tentando novamente (${validationAttempt}/${ASR_MAX_RETRIES})`)
+    } else {
+      // MODO SINGLE-SHOT — texto curto ou chunking desativado
+      debug.log('Pipeline', 'info', `Modo SINGLE-SHOT (${!useChunking ? 'desativado' : 'texto curto'})`)
+      finalBuffer = await generateSingleShot(tunnelUrl, text, gradioBaseData, debug)
     }
 
-    // 6. Verificar se conseguiu gerar pelo menos um audio
-    if (!bestResult) {
+    // 6. Verificar resultado
+    if (!finalBuffer) {
       return NextResponse.json({
-        error: 'GPU nao conseguiu gerar audio apos varias tentativas',
+        error: 'GPU nao conseguiu gerar audio',
         debug: debug.result(),
       }, { status: 500 })
     }
 
-    // 7. Montar resposta
-    const voiceDataUri = `data:${bestResult.mimeType};base64,${bestResult.buffer.toString('base64')}`
+    // 7. Validação ASR (opcional, no audio final)
+    let asrResult = null
+    if (!skipASR && finalBuffer) {
+      debug.log('ASR', 'info', 'Validando audio final com ASR...')
+      asrResult = await validateGeneratedAudio(
+        new Uint8Array(finalBuffer).buffer as ArrayBuffer,
+        text
+      )
+      debug.log('ASR', asrResult.valid ? 'ok' : 'warn', formatValidationLog(asrResult))
+    }
+
+    // 8. Montar resposta
+    const voiceDataUri = `data:audio/wav;base64,${finalBuffer.toString('base64')}`
 
     const response: Record<string, unknown> = {
       audioUrl: voiceDataUri,
       viaTunnel: true,
+      mode: chunkInfo ? 'chunking' : 'single-shot',
       debug: debug.result(),
     }
 
-    // Incluir info da validação ASR no response (útil para debug e UI)
-    if (bestValidation) {
-      response.asrValidation = {
-        valid: bestValidation.valid,
-        attempts: validationAttempt,
-        method: bestValidation.method,
-        transcription: bestValidation.transcription,
-        confidence: Math.round(bestValidation.confidence * 100),
-        wordCoverage: bestValidation.wordCoverage >= 0 ? Math.round(bestValidation.wordCoverage * 100) : 'N/A',
-        issues: bestValidation.issues,
-      }
-      // Se após todas tentativas ainda tá inválido, adiciona aviso
-      if (!bestValidation.valid) {
-        response.asrWarning = true
-        response.asrMessage = `Audio pode conter imperfeicoes apos ${ASR_MAX_RETRIES} tentativas. Tente outra voz ou texto mais curto.`
+    // Info do chunking
+    if (chunkInfo) {
+      response.chunking = {
+        totalChunks: chunkInfo.length,
+        chunks: chunkInfo.map(c => ({
+          text: c.text.substring(0, 50),
+          pauseAfterMs: c.pauseAfterMs,
+          punctuation: c.punctuation,
+        })),
       }
     }
 
-    debug.log('FINAL', 'ok', `Total: ${(debug.result().totalDuration / 1000).toFixed(1)}s | ASR tentativas: ${validationAttempt}`)
+    // Info do ASR
+    if (asrResult) {
+      response.asrValidation = {
+        valid: asrResult.valid,
+        method: asrResult.method,
+        transcription: asrResult.transcription,
+        confidence: Math.round(asrResult.confidence * 100),
+        wordCoverage: asrResult.wordCoverage >= 0 ? Math.round(asrResult.wordCoverage * 100) : 'N/A',
+        issues: asrResult.issues,
+      }
+      if (!asrResult.valid) {
+        response.asrWarning = true
+        response.asrMessage = 'Audio pode conter imperfeicoes.'
+      }
+    }
+
+    debug.log('FINAL', 'ok', `Total: ${(debug.result().totalDuration / 1000).toFixed(1)}s | modo: ${chunkInfo ? 'chunking' : 'single-shot'}`)
 
     return NextResponse.json(response)
   } catch (error) {

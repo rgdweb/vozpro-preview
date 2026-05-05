@@ -458,6 +458,13 @@ export default function VozProClient() {
           refText: '',
           numStep: 16, // OmniVoice: 16 = rapido, 32 = qualidade
           speed: 1.0,
+          language: 'Auto',
+          // Voice Design params (usados pelo _design_fn endpoint)
+          gender: selectedVoice?.gender || 'Auto',
+          age: selectedVoice?.age || 'Auto',
+          pitch: selectedVoice?.pitch || 'Auto',
+          style: voiceMode === 'design' ? voiceDesignInstruct : 'Auto',
+          accent: selectedVoice?.accent || 'Auto',
         }
 
         res = await fetch('/api/omnivoice-generate', {

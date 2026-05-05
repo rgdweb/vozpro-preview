@@ -54,6 +54,24 @@ interface Track {
   active: boolean
 }
 
+interface DuckingConfig {
+  duckVolume: number      // volume da música ENQUANTO a voz fala (0-1)
+  fadeInMs: number        // tempo de fade-in inicial da música (antes da voz)
+  duckFadeMs: number      // tempo de transição (fade) ao reduzir a música quando a voz entra
+   unduckFadeMs: number    // tempo de transição ao voltar a música quando a voz termina
+  fadeOutMs: number        // tempo de fade-out final da música (após a voz)
+  musicStartLeadMs: number // tempo de música ANTES da voz começar
+}
+
+const DEFAULT_DUCKING: DuckingConfig = {
+  duckVolume: 0.15,
+  fadeInMs: 1500,
+  duckFadeMs: 500,
+  unduckFadeMs: 800,
+  fadeOutMs: 2000,
+  musicStartLeadMs: 2000,
+}
+
 const LANGUAGES = [
   { value: 'Auto', label: 'Auto Detectar' },
   { value: 'Portuguese', label: 'Português' },
@@ -72,12 +90,14 @@ const LANGUAGES = [
 
 /**
  * Mix voice audio (base64 data URI) with track audio (URL) using Web Audio API.
+ * Com DUCKING: música começa alta, reduz quando a voz entra, volta alta, fade-out final.
  * Returns a base64 data URI of the mixed audio.
  */
 async function mixAudioClientSide(
   voiceDataUri: string,
   trackUrl: string,
-  trackVolume: number
+  trackVolume: number,
+  ducking: DuckingConfig = DEFAULT_DUCKING
 ): Promise<string> {
   const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
 
@@ -91,15 +111,19 @@ async function mixAudioClientSide(
   const trackArrayBuffer = await trackResponse.arrayBuffer()
   const trackBuffer = await audioCtx.decodeAudioData(trackArrayBuffer)
 
-  // Duration = voice duration
-  const duration = voiceBuffer.duration
+  // Cálculo da duração total:
+  // [lead de música] + [fade-in] + [voz] + [unduck fade] + [fade-out final]
+  const leadIn = ducking.musicStartLeadMs / 1000
+  const voiceDuration = voiceBuffer.duration
+  const tailOut = ducking.unduckFadeMs / 1000 + ducking.fadeOutMs / 1000
+  const totalDuration = leadIn + voiceDuration + tailOut + 0.5 // +0.5s buffer
   const sampleRate = voiceBuffer.sampleRate
-  const length = Math.round(duration * sampleRate)
+  const length = Math.round(totalDuration * sampleRate)
 
-  // Force MONO output - preserves voice quality, avoids stereo up-mix artifacts
+  // Force MONO output
   const offlineCtx = new OfflineAudioContext(1, length, sampleRate)
 
-  // Compressor to prevent track from clipping/distorting the voice
+  // Compressor
   const compressor = offlineCtx.createDynamicsCompressor()
   compressor.threshold.value = -12
   compressor.knee.value = 10
@@ -108,20 +132,51 @@ async function mixAudioClientSide(
   compressor.release.value = 0.15
   compressor.connect(offlineCtx.destination)
 
-  // Voice source (full volume, direct to compressor)
+  // ========== VOZ (full volume, começa após o lead-in) ==========
   const voiceSource = offlineCtx.createBufferSource()
   voiceSource.buffer = voiceBuffer
   const voiceGain = offlineCtx.createGain()
   voiceGain.gain.value = 1.0
   voiceSource.connect(voiceGain)
   voiceGain.connect(compressor)
-  voiceSource.start(0)
+  voiceSource.start(leadIn) // voz começa após o lead de música
 
-  // Track source (reduced volume, through compressor)
+  // ========== MÚSICA com DUCKING ==========
   const trackSource = offlineCtx.createBufferSource()
   trackSource.buffer = trackBuffer
   const trackGain = offlineCtx.createGain()
-  trackGain.gain.value = Math.max(0, Math.min(0.6, trackVolume * 0.6)) // Cap track volume
+  const fullVolume = Math.max(0, Math.min(0.7, trackVolume * 0.7))
+  const duckVol = Math.max(0, Math.min(ducking.duckVolume, fullVolume))
+
+  // Timeline da música (usando setValueAtTime + linearRampToValueAtTime):
+  // t=0              → volume = 0 (fade-in)
+  // t=fadeIn          → volume = fullVolume (música alta)
+  // t=voiceStart     → começa a reduzir (duck)
+  // t=voiceStart+duck→ volume = duckVol (música baixa enquanto a voz fala)
+  // t=voiceEnd       → começa a subir (unduck)
+  // t=voiceEnd+unduck→ volume = fullVolume (música alta de novo)
+  // t=musicEnd       → fade-out até 0
+
+  const voiceStart = leadIn
+  const voiceEnd = leadIn + voiceDuration
+  const musicFadeOutEnd = voiceEnd + ducking.unduckFadeMs / 1000 + ducking.fadeOutMs / 1000
+  const fadeInEnd = Math.min(ducking.fadeInMs / 1000, voiceStart * 0.8) // fade-in não ultrapassa início da voz
+
+  const t = offlineCtx.currentTime
+  trackGain.gain.setValueAtTime(0, t)
+  // Fade-in inicial
+  trackGain.gain.linearRampToValueAtTime(fullVolume, t + fadeInEnd)
+  // Permanece alta até a voz começar
+  trackGain.gain.setValueAtTime(fullVolume, t + voiceStart)
+  // Duck: reduz quando a voz entra
+  trackGain.gain.linearRampToValueAtTime(duckVol, t + voiceStart + ducking.duckFadeMs / 1000)
+  // Permanece baixa enquanto a voz fala
+  trackGain.gain.setValueAtTime(duckVol, t + voiceEnd)
+  // Unduck: volta alta quando a voz termina
+  trackGain.gain.linearRampToValueAtTime(fullVolume, t + voiceEnd + ducking.unduckFadeMs / 1000)
+  // Fade-out final
+  trackGain.gain.linearRampToValueAtTime(0, t + musicFadeOutEnd)
+
   trackSource.connect(trackGain)
   trackGain.connect(compressor)
   trackSource.start(0)
@@ -219,6 +274,13 @@ export default function VozProClient() {
   const [text, setText] = useState('')
   const [trackEnabled, setTrackEnabled] = useState(false)
   const [trackVolume, setTrackVolume] = useState(0.3)
+  const [duckVolume, setDuckVolume] = useState(DEFAULT_DUCKING.duckVolume)
+  const [fadeInMs, setFadeInMs] = useState(DEFAULT_DUCKING.fadeInMs)
+  const [duckFadeMs, setDuckFadeMs] = useState(DEFAULT_DUCKING.duckFadeMs)
+  const [unduckFadeMs, setUnduckFadeMs] = useState(DEFAULT_DUCKING.unduckFadeMs)
+  const [fadeOutMs, setFadeOutMs] = useState(DEFAULT_DUCKING.fadeOutMs)
+  const [musicStartLeadMs, setMusicStartLeadMs] = useState(DEFAULT_DUCKING.musicStartLeadMs)
+  const [showDuckingSettings, setShowDuckingSettings] = useState(false)
   const [speed, setSpeed] = useState(1.0)
   const [numStep, setNumStep] = useState(20)
   const [guidanceScale, setGuidanceScale] = useState(1.5)
@@ -484,7 +546,8 @@ export default function VozProClient() {
           const mixedDataUri = await mixAudioClientSide(
             data.audioUrl,
             selectedTrack.audioPath,
-            trackVolume
+            trackVolume,
+            { duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs }
           )
           setAudioUrl(data.audioUrl)
           setMixedAudioUrl(mixedDataUri)
@@ -837,6 +900,97 @@ export default function VozProClient() {
                           />
                           {/* Preview track */}
                           <AudioPlayer audioPath={selectedTrack.audioPath} />
+
+                          {/* Ducking Settings */}
+                          <div className="pt-3 border-t border-white/10">
+                            <button
+                              onClick={() => setShowDuckingSettings(!showDuckingSettings)}
+                              className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-300 transition-colors w-full"
+                            >
+                              <Volume2 className="w-4 h-4" />
+                              Controles de Ducking
+                              <ChevronDown className={`w-3 h-3 ml-auto transition-transform ${showDuckingSettings ? 'rotate-180' : ''}`} />
+                            </button>
+
+                            {showDuckingSettings && (
+                              <div className="mt-3 space-y-3">
+                                <div className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <label className="text-xs text-slate-400">Volume durante a voz</label>
+                                    <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{Math.round(duckVolume * 100)}%</Badge>
+                                  </div>
+                                  <Slider value={[duckVolume]} onValueChange={([v]) => setDuckVolume(v)} min={0} max={1} step={0.01} />
+                                  <p className="text-[10px] text-slate-600">Quão baixa fica a música quando a voz está falando</p>
+                                </div>
+
+                                <div className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <label className="text-xs text-slate-400">Fade-in inicial</label>
+                                    <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{fadeInMs / 1000}s</Badge>
+                                  </div>
+                                  <Slider value={[fadeInMs]} onValueChange={([v]) => setFadeInMs(v)} min={0} max={5000} step={100} />
+                                </div>
+
+                                <div className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <label className="text-xs text-slate-400">Música antes da voz</label>
+                                    <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{(musicStartLeadMs / 1000).toFixed(1)}s</Badge>
+                                  </div>
+                                  <Slider value={[musicStartLeadMs]} onValueChange={([v]) => setMusicStartLeadMs(v)} min={0} max={10000} step={100} />
+                                  <p className="text-[10px] text-slate-600">Tempo de lead-in com música alta antes da voz começar</p>
+                                </div>
+
+                                <div className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <label className="text-xs text-slate-400">Transição Duck</label>
+                                    <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{duckFadeMs / 1000}s</Badge>
+                                  </div>
+                                  <Slider value={[duckFadeMs]} onValueChange={([v]) => setDuckFadeMs(v)} min={0} max={3000} step={50} />
+                                  <p className="text-[10px] text-slate-600">Tempo para reduzir a música quando a voz entra</p>
+                                </div>
+
+                                <div className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <label className="text-xs text-slate-400">Transição Unduck</label>
+                                    <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{unduckFadeMs / 1000}s</Badge>
+                                  </div>
+                                  <Slider value={[unduckFadeMs]} onValueChange={([v]) => setUnduckFadeMs(v)} min={0} max={3000} step={50} />
+                                  <p className="text-[10px] text-slate-600">Tempo para voltar a música alta após a voz</p>
+                                </div>
+
+                                <div className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <label className="text-xs text-slate-400">Fade-out final</label>
+                                    <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{fadeOutMs / 1000}s</Badge>
+                                  </div>
+                                  <Slider value={[fadeOutMs]} onValueChange={([v]) => setFadeOutMs(v)} min={0} max={8000} step={100} />
+                                  <p className="text-[10px] text-slate-600">Tempo para a música desaparecer no final</p>
+                                </div>
+
+                                {/* Visual timeline */}
+                                <div className="pt-2 border-t border-white/10">
+                                  <p className="text-[10px] text-slate-500 mb-2">Timeline do áudio:</p>
+                                  <div className="flex items-center gap-1 text-[10px]">
+                                    <div className="bg-purple-500/30 border border-purple-500/50 rounded px-2 py-1 text-purple-300">
+                                      Música {(musicStartLeadMs / 1000).toFixed(1)}s
+                                    </div>
+                                    <span className="text-slate-600">→</span>
+                                    <div className="bg-green-500/30 border border-green-500/50 rounded px-2 py-1 text-green-300">
+                                      Voz {duckFadeMs / 1000}s fade
+                                    </div>
+                                    <span className="text-slate-600">→</span>
+                                    <div className="bg-blue-500/30 border border-blue-500/50 rounded px-2 py-1 text-blue-300">
+                                      Música volta
+                                    </div>
+                                    <span className="text-slate-600">→</span>
+                                    <div className="bg-orange-500/30 border border-orange-500/50 rounded px-2 py-1 text-orange-300">
+                                      Fade {fadeOutMs / 1000}s
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                     </>

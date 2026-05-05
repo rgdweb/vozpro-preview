@@ -13,7 +13,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   AudioWaveform, Sparkles, Loader2, Download, Play, Pause, Square,
   Volume2, Music, Mic, ChevronRight, Settings2, Globe, Bug, Copy, ChevronDown,
-  Upload, CheckCircle2
+  Upload, CheckCircle2, Zap
 } from 'lucide-react'
 import { toast } from 'sonner'
 import AudioPlayer from '@/components/audio-player'
@@ -301,9 +301,11 @@ export default function VozProClient() {
   const [debugOpen, setDebugOpen] = useState(false)
   const [usePhpGenerate, setUsePhpGenerate] = useState(false)
   const [useTunnelGenerate, setUseTunnelGenerate] = useState(true) // GPU local via tunnel (padrao)
+  const [ttsModel, setTtsModel] = useState<'f5tts' | 'omnivoice'>('f5tts') // F5-TTS (padrao) ou OmniVoice (rapido)
 
   // Voice mode: clone (ref_audio) | design (instruct only) | auto (random)
   const [voiceMode, setVoiceMode] = useState<'clone' | 'design' | 'auto'>('clone')
+  const [omnivoiceAvailable, setOmnivoiceAvailable] = useState(false) // OmniVoice server disponível?
   const [voiceDesignInstruct, setVoiceDesignInstruct] = useState('')
   const [enableFrontendUpload, setEnableFrontendUpload] = useState(false) // liberado via admin
   const [uploadedVoiceFile, setUploadedVoiceFile] = useState<File | null>(null)
@@ -346,13 +348,20 @@ export default function VozProClient() {
         if (configRes.ok) {
           const configData = await configRes.json()
           setUsePhpGenerate(!!configData.phpServerUrl)
-          // Se tem tunnel disponivel, usa ele por padrao (prioridade: tunnel > php > hf)
           setUseTunnelGenerate(true)
         }
         if (settingsRes.ok) {
           const settingsData = await settingsRes.json()
           setEnableFrontendUpload(!!settingsData.enableVoiceUpload)
         }
+        // Verificar se OmniVoice server esta disponivel
+        try {
+          const ovRes = await fetch('/api/omnivoice-generate')
+          if (ovRes.ok) {
+            const ovData = await ovRes.json()
+            if (ovData.url) setOmnivoiceAvailable(true)
+          }
+        } catch { /* OmniVoice nao disponivel, tudo bem */ }
       } catch {
         toast.error('Erro ao carregar dados')
       } finally {
@@ -431,7 +440,28 @@ export default function VozProClient() {
 
       let res: Response
 
-      if (useTunnelGenerate) {
+      // ===== OMNIVOICE: Modelo rapido (RTF 0.025) =====
+      if (ttsModel === 'omnivoice') {
+        console.log(`[VozPro] Gerando via OmniVoice... modo: ${voiceMode}`)
+
+        const ovBody: Record<string, unknown> = {
+          text: text.trim(),
+          mode: voiceMode,
+          instruct: voiceMode === 'design' ? voiceDesignInstruct : instructStr,
+          referenceAudioUrl: voiceMode === 'clone' ? (uploadedVoiceUrl || selectedVariation?.refAudioServerUrl || '') : '',
+          referenceAudioName: voiceMode === 'clone' ? (uploadedVoiceFile?.name || selectedVariation?.refAudioName || 'ref_audio.wav') : '',
+          refText: '',
+          numStep: 16, // OmniVoice: 16 = rapido, 32 = qualidade
+          speed: 1.0,
+        }
+
+        res = await fetch('/api/omnivoice-generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(ovBody),
+          signal: controller.signal,
+        })
+      } else if (useTunnelGenerate) {
         // ===== TUNNEL DIRETO: Vercel -> GPU local via cloudflared =====
         console.log(`[VozPro] Gerando via tunnel (GPU local)... modo: ${voiceMode}`)
 
@@ -780,6 +810,57 @@ export default function VozProClient() {
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           {/* Left Panel - Voice & Track Selection */}
           <div className="lg:col-span-3 space-y-5">
+            {/* TTS Model Selector */}
+            <Card className="bg-white/5 border-white/10 backdrop-blur">
+              <CardContent className="pt-5 space-y-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <Zap className="w-5 h-5 text-amber-400" />
+                  <h3 className="text-lg font-bold text-white">Modelo TTS</h3>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setTtsModel('f5tts')}
+                    className={`p-3 rounded-xl border text-center transition-all ${
+                      ttsModel === 'f5tts'
+                        ? 'border-violet-500 bg-violet-500/20 shadow-lg shadow-violet-500/10'
+                        : 'border-white/10 bg-white/5 hover:border-white/20'
+                    }`}
+                  >
+                    <div className="text-2xl mb-1">🎙️</div>
+                    <div className={`text-xs font-medium ${ttsModel === 'f5tts' ? 'text-violet-200' : 'text-slate-400'}`}>
+                      F5-TTS
+                    </div>
+                    <div className="text-[10px] text-slate-600 mt-1">Clonagem fiel, chunking</div>
+                  </button>
+                  <button
+                    onClick={() => setTtsModel('omnivoice')}
+                    disabled={!omnivoiceAvailable}
+                    className={`p-3 rounded-xl border text-center transition-all ${
+                      ttsModel === 'omnivoice'
+                        ? 'border-amber-500 bg-amber-500/20 shadow-lg shadow-amber-500/10'
+                        : omnivoiceAvailable
+                          ? 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/8'
+                          : 'border-white/5 bg-white/[0.02] opacity-40 cursor-not-allowed'
+                    }`}
+                  >
+                    <div className="text-2xl mb-1">⚡</div>
+                    <div className={`text-xs font-medium ${ttsModel === 'omnivoice' ? 'text-amber-200' : 'text-slate-400'}`}>
+                      OmniVoice
+                    </div>
+                    <div className="text-[10px] text-slate-600 mt-1">
+                      {omnivoiceAvailable ? 'RTF 0.025, 600+ idiomas' : 'Servidor offline'}
+                    </div>
+                  </button>
+                </div>
+                {ttsModel === 'omnivoice' && (
+                  <p className="text-[10px] text-amber-400/80">
+                    OmniVoice suporta: Voice Design, pronúncia CMU [B EY1 S], símbolos [laughter], e 600+ idiomas.
+                    Voice Design e Auto Voice funcionam melhor no OmniVoice.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Voice Selection */}
             <Card className="bg-white/5 border-white/10 backdrop-blur">
               <CardHeader className="pb-3">

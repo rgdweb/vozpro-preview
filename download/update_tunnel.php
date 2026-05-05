@@ -1,76 +1,73 @@
 <?php
-// update_tunnel.php - Atualiza a URL do tunel no config.php automaticamente
-// Chamado pelo script start_tunnel.js apos abrir o localtunnel
+/**
+ * OmniVoice TTS - Recebe a nova URL do tunnel e salva em tunnel-config.ini
+ * Chamado pelo start_tunnel.ps1 quando o cloudflared inicia
+ * NAO sobreescreve o config.php principal (usa tunnel-config.ini separado)
+ */
 
-header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
 
-$simpleAuth = 'vozpro_tunnel_2024';
-
-$auth = $_GET['auth'] ?? '';
-if ($auth !== $simpleAuth) {
-    http_response_code(403);
-    echo json_encode(['error' => 'Acesso negado']);
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(204);
     exit;
 }
 
-$newUrl = $_GET['url'] ?? '';
-if (empty($newUrl)) {
+// Pega a URL do tunnel
+$tunnelUrl = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+    if (strpos($contentType, 'application/json') !== false) {
+        $input = json_decode(file_get_contents('php://input'), true);
+        if (is_array($input)) {
+            $tunnelUrl = trim($input['tunnelUrl'] ?? '');
+        }
+    } else {
+        $tunnelUrl = trim($_POST['tunnelUrl'] ?? '');
+    }
+}
+
+if (empty($tunnelUrl)) {
+    $tunnelUrl = trim($_GET['tunnelUrl'] ?? '');
+}
+
+if (empty($tunnelUrl)) {
     http_response_code(400);
-    echo json_encode(['error' => 'URL nao informada']);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['error' => 'tunnelUrl obrigatorio']);
     exit;
 }
 
-if (!filter_var($newUrl, FILTER_VALIDATE_URL)) {
-    http_response_code(400);
-    echo json_encode(['error' => 'URL invalida']);
-    exit;
-}
-
-// Ler config.php atual e trocar a URL
-$configFile = __DIR__ . '/config.php';
-$content = file_get_contents($configFile);
-
-if ($content === false) {
-    http_response_code(500);
-    echo json_encode(['error' => 'Falha ao ler config.php']);
-    exit;
-}
-
-// Substituir HF_SPACE_URL
-$oldUrl = null;
-if (preg_match("/define\('HF_SPACE_URL',\s*'([^']+)'\)/", $content, $matches)) {
-    $oldUrl = $matches[1];
-}
-
-$newContent = preg_replace(
-    "/define\('HF_SPACE_URL',\s*'[^']+'\)/",
-    "define('HF_SPACE_URL', '$newUrl')",
-    $content
+// Valida se e URL do cloudflared (trycloudflare.com) ou localhost
+$isValid = (
+    strpos($tunnelUrl, 'trycloudflare.com') !== false ||
+    strpos($tunnelUrl, 'localhost') !== false ||
+    strpos($tunnelUrl, '127.0.0.1') !== false
 );
 
-if ($newContent === $content) {
-    http_response_code(500);
-    echo json_encode(['error' => 'Nao foi possivel atualizar a URL no config']);
+if (!$isValid) {
+    http_response_code(400);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['error' => 'URL invalida - esperado trycloudflare.com']);
     exit;
 }
 
-file_put_contents($configFile, $newContent);
+// Salva em tunnel-config.ini (separado do config.php principal)
+$iniFile = __DIR__ . '/tunnel-config.ini';
+$now = date('Y-m-d H:i:s');
 
-// Log
-if (function_exists('logUpload')) {
-    logUpload("TUNNEL URL atualizada: $oldUrl => $newUrl");
-} else {
-    $logFile = __DIR__ . '/uploads.log';
-    $data = date('Y-m-d H:i:s');
-    file_put_contents($logFile, "[$data] TUNNEL URL: $oldUrl => $newUrl\n", FILE_APPEND);
-}
+$iniContent = "; Configuracao do Tunnel OmniVoice\n";
+$iniContent .= "; Atualizado automaticamente pelo cloudflared\n";
+$iniContent .= "tunnel_url = \"$tunnelUrl\"\n";
+$iniContent .= "updated_at = \"$now\"\n";
 
+file_put_contents($iniFile, $iniContent);
+
+header('Content-Type: application/json; charset=utf-8');
 echo json_encode([
-    'ok' => true,
-    'oldUrl' => $oldUrl,
-    'newUrl' => $newUrl,
-    'timestamp' => date('Y-m-d H:i:s')
+    'status' => 'ok',
+    'tunnelUrl' => $tunnelUrl,
+    'updated_at' => $now
 ]);
-?>

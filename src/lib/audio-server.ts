@@ -37,10 +37,17 @@ export async function uploadToAudioServer(
     body: formData,
   })
 
-  const data = await res.json()
+  // Ler como texto primeiro - protege contra respostas nao-JSON (HTML, config.php, etc)
+  const responseText = await res.text()
+  let data: Record<string, unknown>
+  try {
+    data = JSON.parse(responseText)
+  } catch {
+    throw new Error(`Servidor PHP retornou resposta invalida (HTTP ${res.status}). Tente novamente.`)
+  }
 
   if (!data.sucesso) {
-    throw new Error(data.erro || 'Erro no upload para o servidor de áudio')
+    throw new Error((data.erro as string) || 'Erro no upload para o servidor de áudio')
   }
 
   return {

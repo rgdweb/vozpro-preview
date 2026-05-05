@@ -384,7 +384,14 @@ export default function AdminDashboard() {
           body: formData,
         })
 
-        const data = await res.json()
+        let data: Record<string, unknown>
+        try {
+          data = await res.json()
+        } catch {
+          toast.error('Erro no servidor de upload. Tente novamente.')
+          setUploadingRef(false)
+          return
+        }
         if (data.serverUrl || data.path) {
           setVariationForm(prev => ({
             ...prev,
@@ -493,7 +500,13 @@ export default function AdminDashboard() {
         body: formData,
       })
 
-      const data = await res.json()
+      let data: Record<string, unknown>
+      try {
+        data = await res.json()
+      } catch {
+        toast.error('Erro no servidor de upload. Tente novamente.')
+        return
+      }
       if (data.serverUrl || data.path) {
         await fetch(`/api/variations/${variationId}`, {
           method: 'PUT',

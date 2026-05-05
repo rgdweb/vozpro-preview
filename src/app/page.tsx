@@ -359,7 +359,7 @@ export default function VozProClient() {
           const ovRes = await fetch('/api/omnivoice-generate')
           if (ovRes.ok) {
             const ovData = await ovRes.json()
-            if (ovData.url) setOmnivoiceAvailable(true)
+            if (ovData.reachable) setOmnivoiceAvailable(true)
           }
         } catch { /* OmniVoice nao disponivel, tudo bem */ }
       } catch {

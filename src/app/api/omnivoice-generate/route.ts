@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 // Usa o Gradio nativo do OmniVoice na porta 7861
 // NÃO altera nenhum fluxo existente do F5-TTS (tunnel-generate)
 
-const OMNIVOICE_URL = process.env.OMNIVOICE_URL || ''
+const OMNIVOICE_URL = process.env.OMNIVOICE_URL || process.env.HF_SPACE_URL || ''
 
 export async function POST(request: NextRequest) {
   try {
@@ -138,9 +138,25 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET() {
+  const effectiveUrl = OMNIVOICE_URL || process.env.HF_SPACE_URL || ''
+
+  // Verificar se o servidor OmniVoice realmente responde
+  let reachable = false
+  if (effectiveUrl) {
+    try {
+      const res = await fetch(effectiveUrl + '/gradio_api/info/', {
+        signal: AbortSignal.timeout(8000),
+      })
+      reachable = res.ok
+    } catch {
+      reachable = false
+    }
+  }
+
   return NextResponse.json({
-    status: 'omnivoice_available',
-    url: OMNIVOICE_URL,
+    status: reachable ? 'omnivoice_available' : 'omnivoice_unavailable',
+    url: effectiveUrl || undefined,
+    reachable,
     model: 'k2-fsa/OmniVoice',
     features: [
       'voice_cloning',

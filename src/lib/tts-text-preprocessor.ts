@@ -30,7 +30,7 @@ const DEFAULT_CONFIG: PreprocessConfig = {
   enabled: true,
   useNewlines: true,
   commaSpace: true,
-  repeatLastWord: true,    // repete ultima palavra da frase (evita corte no final)
+  repeatLastWord: false,   // desativado — soa estranho repetir palavras
   sentenceBreak: true,
   maxSentenceLength: 20,
 }

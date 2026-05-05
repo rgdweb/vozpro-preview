@@ -28,11 +28,11 @@ export interface TextChunk {
 // ============================================================
 
 const PAUSE_DURATION: Record<string, number> = {
-  ',': 100,     // vírgula → pausa curta
-  ';': 250,     // ponto e vírgula → pausa média
-  '.': 450,     // ponto final → pausa longa
-  '!': 500,     // exclamação → pausa expressiva
-  '?': 600,     // interrogação → pausa expressiva
+  ',': 50,      // vírgula → pausa mínima
+  ';': 180,     // ponto e vírgula → pausa média
+  '.': 380,     // ponto final → pausa longa
+  '!': 420,     // exclamação → pausa expressiva
+  '?': 500,     // interrogação → pausa expressiva
 }
 
 const MIN_CHUNK_WORDS = 2    // mínimo de palavras por chunk

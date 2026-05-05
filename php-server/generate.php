@@ -146,6 +146,7 @@ function downloadRefAudio($url, $name) {
         CURLOPT_FILE => $fp,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_TIMEOUT => 60,
+        CURLOPT_ENCODING => '',  // BLOQUEIA compressao gzip/brotli (corrompe audio via tunnel)
         CURLOPT_SSL_VERIFYPEER => false,
     ]);
     $dlOk = curl_exec($ch);
@@ -213,6 +214,7 @@ function uploadToHF($filePath, $fileName, $hfUrl) {
         CURLOPT_POSTFIELDS => ['files' => $cfile],
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 120,
+        CURLOPT_ENCODING => '',  // BLOQUEIA compressao (corrompe upload de audio via tunnel)
         CURLOPT_SSL_VERIFYPEER => false,
     ]);
     $resp = curl_exec($ch);
@@ -241,6 +243,7 @@ function submitToGradio($gradioData, $hfUrl) {
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 120,
         CURLOPT_CONNECTTIMEOUT => 30,
+        CURLOPT_ENCODING => '',  // BLOQUEIA compressao no submit
         CURLOPT_SSL_VERIFYPEER => false,
     ]);
     $resp = curl_exec($ch);
@@ -352,11 +355,13 @@ function streamSSEForResult($eventId, $hfUrl, $timeoutSec = 600) {
         CURLOPT_TIMEOUT => $timeoutSec,
         CURLOPT_CONNECTTIMEOUT => 30,
         CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+        CURLOPT_ENCODING => '',  // BLOQUEIA compressao no SSE stream
         CURLOPT_HTTPHEADER => [
             'Accept: text/event-stream',
             'Cache-Control: no-cache',
             'Connection: keep-alive',
             'X-Accel-Buffering: no',
+            'Accept-Encoding: identity',  // Forca sem compressao
         ],
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_WRITEFUNCTION => $writeFn,
@@ -402,6 +407,8 @@ function runGeneration($gradioData, $refAudioFile, $refAudioName, $hfUrl) {
             return ['audioUrl' => null, 'error' => 'Falha no upload do audio para HF Space'];
         }
         $gradioData[2]['path'] = $path;
+        $gradioData[2]['url'] = $hfUrl . '/gradio_api/file=' . $path;
+        $gradioData[2]['size'] = filesize($refAudioFile);
     }
 
     $eventId = null;
@@ -442,23 +449,24 @@ if (!$tempRefFile && !empty($refAudioPath)) {
 
 $gradioData = [
     $texto,
-    $idioma,
+    'Auto',  // Auto detecta (interface do OmniVoice usa Auto)
     [
         'path' => $refAudioPath ?? '',
+        'url' => '',  // preenchido apos upload
         'orig_name' => $refAudioName,
+        'size' => $tempRefFile ? filesize($tempRefFile) : 0,
         'mime_type' => (pathinfo($refAudioName, PATHINFO_EXTENSION) === 'mp3') ? 'audio/mpeg' : 'audio/wav',
-        'is_stream' => false,
         'meta' => ['_type' => 'gradio.FileData']
     ],
-    $refText,
-    $instruct,
+    '',        // refText: vazio (interface do OmniVoice envia vazio!)
+    null,      // instruct: null (interface do OmniVoice envia null!)
     (int)$numStep,
     (float)$guidanceScale,
-    true,
-    (float)$speed,
-    null,
-    true,
-    true
+    true,      // denoise
+    (int)$speed, // speed como int
+    0,         // duration: 0 (interface envia 0, nao null!)
+    true,      // preprocess
+    true       // postprocess
 ];
 
 $maxRetries = 3;
@@ -528,6 +536,7 @@ curl_setopt_array($ch, [
     CURLOPT_FILE => $fp,
     CURLOPT_FOLLOWLOCATION => true,
     CURLOPT_TIMEOUT => 120,
+    CURLOPT_ENCODING => '',  // BLOQUEIA compressao (corrompe audio WAV via tunnel!)
     CURLOPT_SSL_VERIFYPEER => false,
 ]);
 $dlOk = curl_exec($ch);

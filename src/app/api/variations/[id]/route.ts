@@ -17,6 +17,19 @@ export async function PUT(
     const { id } = await params
     const body = await req.json()
 
+    // Se trocou o audio, tenta apagar o arquivo antigo do servidor (non-blocking)
+    // Requer delete.php no HostGator - se nao existir, ignora silenciosamente
+    if (body.refAudioFilename !== undefined || body.refAudioPath !== undefined) {
+      (async () => {
+        try {
+          const oldVar = await db.voiceVariation.findUnique({ where: { id } })
+          if (oldVar?.refAudioFilename && oldVar.refAudioFilename !== body.refAudioFilename) {
+            await deleteFromAudioServer(oldVar.refAudioFilename, 'ref')
+          }
+        } catch {}
+      })()
+    }
+
     const variation = await db.voiceVariation.update({
       where: { id },
       data: {

@@ -17,6 +17,22 @@ export async function PUT(
     const { id } = await params
     const body = await req.json()
 
+    // Se trocou o audio, tenta apagar o arquivo antigo do servidor (non-blocking)
+    // Requer delete.php no HostGator - se nao existir, ignora silenciosamente
+    if (body.audioPath !== undefined) {
+      (async () => {
+        try {
+          const oldTrack = await db.track.findUnique({ where: { id } })
+          if (oldTrack?.audioPath) {
+            const oldFilename = oldTrack.audioPath.split('/').pop()
+            if (oldFilename && oldFilename !== body.audioPath.split('/').pop()) {
+              await deleteFromAudioServer(oldFilename, 'track')
+            }
+          }
+        } catch {}
+      })()
+    }
+
     const track = await db.track.update({
       where: { id },
       data: {

@@ -1,0 +1,31 @@
+# Reescrever URLs do OmniVoice API para arquivos com extensao diferente
+# Isso evita que o .htaccess pai capture estas requisicoes
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /omnivoice/
+
+    # upload_api.php -> upload.php (real file)
+    RewriteRule ^upload_api$ upload.php [L,QSA]
+    RewriteRule ^delete_api$ delete.php [L,QSA]
+    RewriteRule ^get_tunnel$ get_tunnel.php [L,QSA]
+    RewriteRule ^update_tunnel$ update_tunnel.php [L,QSA]
+</IfModule>
+
+# CORS
+<IfModule mod_headers.c>
+    Header always set Access-Control-Allow-Origin "*"
+    Header always set Access-Control-Allow-Methods "POST, OPTIONS, GET"
+    Header always set Access-Control-Allow-Headers "Content-Type, X-Upload-Token, X-Generate-Token, X-Chunk-Index, X-Total-Chunks, X-File-Name, X-File-Size"
+</IfModule>
+
+# Proteger config
+<FilesMatch "^(config\.php|uploads\.log)$">
+    Order deny,allow
+    Deny from all
+</FilesMatch>
+
+# Permitir audio
+<FilesMatch "\.(wav|mp3|ogg|flac|m4a|webm)$">
+    Order allow,deny
+    Allow from all
+</FilesMatch>

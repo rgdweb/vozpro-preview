@@ -391,7 +391,7 @@ export async function POST(req: NextRequest) {
       text,
       language || 'Auto',
       {} as unknown, // placeholder, preenchido no runGeneration
-      variation.refText || '',
+      '',  // refText: SEMPRE vazio - texto causa alucinacao (fala "to", "ba", outra lingua)
       instructStr,
       numStep ?? 32,
       guidanceScale ?? 2.0,

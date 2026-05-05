@@ -54,6 +54,24 @@ interface Track {
   active: boolean
 }
 
+interface DuckingConfig {
+  duckVolume: number      // volume da música ENQUANTO a voz fala (0-1)
+  fadeInMs: number        // tempo de fade-in inicial da música (antes da voz)
+  duckFadeMs: number      // tempo de transição (fade) ao reduzir a música quando a voz entra
+   unduckFadeMs: number    // tempo de transição ao voltar a música quando a voz termina
+  fadeOutMs: number        // tempo de fade-out final da música (após a voz)
+  musicStartLeadMs: number // tempo de música ANTES da voz começar
+}
+
+const DEFAULT_DUCKING: DuckingConfig = {
+  duckVolume: 0.10,
+  fadeInMs: 1100,
+  duckFadeMs: 500,
+  unduckFadeMs: 800,
+  fadeOutMs: 2000,
+  musicStartLeadMs: 3000,
+}
+
 const LANGUAGES = [
   { value: 'Auto', label: 'Auto Detectar' },
   { value: 'Portuguese', label: 'Português' },
@@ -72,12 +90,14 @@ const LANGUAGES = [
 
 /**
  * Mix voice audio (base64 data URI) with track audio (URL) using Web Audio API.
+ * Com DUCKING: música começa alta, reduz quando a voz entra, volta alta, fade-out final.
  * Returns a base64 data URI of the mixed audio.
  */
 async function mixAudioClientSide(
   voiceDataUri: string,
   trackUrl: string,
-  trackVolume: number
+  trackVolume: number,
+  ducking: DuckingConfig = DEFAULT_DUCKING
 ): Promise<string> {
   const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
 
@@ -91,31 +111,74 @@ async function mixAudioClientSide(
   const trackArrayBuffer = await trackResponse.arrayBuffer()
   const trackBuffer = await audioCtx.decodeAudioData(trackArrayBuffer)
 
-  // Duration = voice duration (shortest)
-  const duration = voiceBuffer.duration
+  // Cálculo da duração total:
+  // [lead de música] + [fade-in] + [voz] + [unduck fade] + [fade-out final]
+  const leadIn = ducking.musicStartLeadMs / 1000
+  const voiceDuration = voiceBuffer.duration
+  const tailOut = ducking.unduckFadeMs / 1000 + ducking.fadeOutMs / 1000
+  const totalDuration = leadIn + voiceDuration + tailOut + 0.5 // +0.5s buffer
   const sampleRate = voiceBuffer.sampleRate
-  const length = Math.ceil(duration * sampleRate)
+  const length = Math.round(totalDuration * sampleRate)
 
-  // Create offline context for mixing
-  const offlineCtx = new OfflineAudioContext(
-    Math.max(voiceBuffer.numberOfChannels, trackBuffer.numberOfChannels),
-    length,
-    sampleRate
-  )
+  // Force MONO output
+  const offlineCtx = new OfflineAudioContext(1, length, sampleRate)
 
-  // Voice source (full volume)
+  // Compressor
+  const compressor = offlineCtx.createDynamicsCompressor()
+  compressor.threshold.value = -12
+  compressor.knee.value = 10
+  compressor.ratio.value = 4
+  compressor.attack.value = 0.003
+  compressor.release.value = 0.15
+  compressor.connect(offlineCtx.destination)
+
+  // ========== VOZ (full volume, começa após o lead-in) ==========
   const voiceSource = offlineCtx.createBufferSource()
   voiceSource.buffer = voiceBuffer
-  voiceSource.connect(offlineCtx.destination)
-  voiceSource.start(0)
+  const voiceGain = offlineCtx.createGain()
+  voiceGain.gain.value = 1.0
+  voiceSource.connect(voiceGain)
+  voiceGain.connect(compressor)
+  voiceSource.start(leadIn) // voz começa após o lead de música
 
-  // Track source (with volume control)
+  // ========== MÚSICA com DUCKING ==========
   const trackSource = offlineCtx.createBufferSource()
   trackSource.buffer = trackBuffer
-  const gainNode = offlineCtx.createGain()
-  gainNode.gain.value = Math.max(0, Math.min(1, trackVolume))
-  trackSource.connect(gainNode)
-  gainNode.connect(offlineCtx.destination)
+  const trackGain = offlineCtx.createGain()
+  const fullVolume = Math.max(0, Math.min(0.7, trackVolume * 0.7))
+  const duckVol = Math.max(0, Math.min(ducking.duckVolume, fullVolume))
+
+  // Timeline da música (usando setValueAtTime + linearRampToValueAtTime):
+  // t=0              → volume = 0 (fade-in)
+  // t=fadeIn          → volume = fullVolume (música alta)
+  // t=voiceStart     → começa a reduzir (duck)
+  // t=voiceStart+duck→ volume = duckVol (música baixa enquanto a voz fala)
+  // t=voiceEnd       → começa a subir (unduck)
+  // t=voiceEnd+unduck→ volume = fullVolume (música alta de novo)
+  // t=musicEnd       → fade-out até 0
+
+  const voiceStart = leadIn
+  const voiceEnd = leadIn + voiceDuration
+  const musicFadeOutEnd = voiceEnd + ducking.unduckFadeMs / 1000 + ducking.fadeOutMs / 1000
+  const fadeInEnd = Math.min(ducking.fadeInMs / 1000, voiceStart * 0.8) // fade-in não ultrapassa início da voz
+
+  const t = offlineCtx.currentTime
+  trackGain.gain.setValueAtTime(0, t)
+  // Fade-in inicial
+  trackGain.gain.linearRampToValueAtTime(fullVolume, t + fadeInEnd)
+  // Permanece alta até a voz começar
+  trackGain.gain.setValueAtTime(fullVolume, t + voiceStart)
+  // Duck: reduz quando a voz entra
+  trackGain.gain.linearRampToValueAtTime(duckVol, t + voiceStart + ducking.duckFadeMs / 1000)
+  // Permanece baixa enquanto a voz fala
+  trackGain.gain.setValueAtTime(duckVol, t + voiceEnd)
+  // Unduck: volta alta quando a voz termina
+  trackGain.gain.linearRampToValueAtTime(fullVolume, t + voiceEnd + ducking.unduckFadeMs / 1000)
+  // Fade-out final
+  trackGain.gain.linearRampToValueAtTime(0, t + musicFadeOutEnd)
+
+  trackSource.connect(trackGain)
+  trackGain.connect(compressor)
   trackSource.start(0)
 
   // Render mixed audio
@@ -210,7 +273,14 @@ export default function VozProClient() {
   // Settings
   const [text, setText] = useState('')
   const [trackEnabled, setTrackEnabled] = useState(false)
-  const [trackVolume, setTrackVolume] = useState(0.3)
+  const [trackVolume, setTrackVolume] = useState(0.4)
+  const [duckVolume, setDuckVolume] = useState(DEFAULT_DUCKING.duckVolume)
+  const [fadeInMs, setFadeInMs] = useState(DEFAULT_DUCKING.fadeInMs)
+  const [duckFadeMs, setDuckFadeMs] = useState(DEFAULT_DUCKING.duckFadeMs)
+  const [unduckFadeMs, setUnduckFadeMs] = useState(DEFAULT_DUCKING.unduckFadeMs)
+  const [fadeOutMs, setFadeOutMs] = useState(DEFAULT_DUCKING.fadeOutMs)
+  const [musicStartLeadMs, setMusicStartLeadMs] = useState(DEFAULT_DUCKING.musicStartLeadMs)
+  const [showDuckingSettings, setShowDuckingSettings] = useState(false)
   const [speed, setSpeed] = useState(1.0)
   const [numStep, setNumStep] = useState(20)
   const [guidanceScale, setGuidanceScale] = useState(1.5)
@@ -228,6 +298,7 @@ export default function VozProClient() {
   const [lastGenResponse, setLastGenResponse] = useState<Record<string, unknown> | null>(null)
   const [debugOpen, setDebugOpen] = useState(false)
   const [usePhpGenerate, setUsePhpGenerate] = useState(false)
+  const [useTunnelGenerate, setUseTunnelGenerate] = useState(true) // GPU local via tunnel (padrao)
 
   const resultAudioRef = useRef<HTMLAudioElement | null>(null)
 
@@ -265,6 +336,8 @@ export default function VozProClient() {
         if (configRes.ok) {
           const configData = await configRes.json()
           setUsePhpGenerate(!!configData.phpServerUrl)
+          // Se tem tunnel disponivel, usa ele por padrao (prioridade: tunnel > php > hf)
+          setUseTunnelGenerate(true)
         }
       } catch {
         toast.error('Erro ao carregar dados')
@@ -328,7 +401,7 @@ export default function VozProClient() {
         language,
         refAudioUrl: selectedVariation?.refAudioServerUrl || '',
         refAudioPath: selectedVariation?.refAudioPath || '',
-        refText: selectedVariation?.refText || '',
+        refText: '',  // SEMPRE vazio - texto no refText causa alucinacao (fala "to", "ba", outra lingua)
         instruct: instructStr,
         refAudioName: selectedVariation?.refAudioName || 'ref_audio.wav',
         speed,
@@ -338,9 +411,23 @@ export default function VozProClient() {
 
       let res: Response
 
-      if (usePhpGenerate) {
+      if (useTunnelGenerate) {
+        // ===== TUNNEL DIRETO: Vercel -> GPU local via cloudflared =====
+        console.log('[VozPro] Gerando via tunnel (GPU local)...')
+        const tunnelBody = {
+          ...body,
+          referenceAudioUrl: selectedVariation?.refAudioServerUrl || body.refAudioUrl,
+          referenceAudioName: body.refAudioName || 'ref_audio.wav',
+          useChunking: true,  // modo prosódia: gera frase por frase com pausas reais
+        }
+        res = await fetch('/api/tunnel-generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(tunnelBody),
+          signal: controller.signal,
+        })
+      } else if (usePhpGenerate) {
         // ===== PHP DIRETO: browser -> PHP (bypass Vercel timeout!) =====
-        // 1. Obter token HMAC do Vercel (rapido, <1s)
         const tokenRes = await fetch('/api/generate-token')
         if (!tokenRes.ok) {
           toast.error('Erro ao obter token de geracao')
@@ -355,7 +442,6 @@ export default function VozProClient() {
 
         console.log('[VozPro] Gerando via PHP direto (sem Vercel proxy)...')
 
-        // 2. Chamar PHP diretamente (sem Vercel no meio!)
         res = await fetch(phpDirectUrl, {
           method: 'POST',
           headers: {
@@ -366,7 +452,7 @@ export default function VozProClient() {
           signal: controller.signal,
         })
       } else {
-        // ===== Vercei API direta (sem PHP) =====
+        // ===== Vercel API direta (HF Space) =====
         res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -460,7 +546,8 @@ export default function VozProClient() {
           const mixedDataUri = await mixAudioClientSide(
             data.audioUrl,
             selectedTrack.audioPath,
-            trackVolume
+            trackVolume,
+            { duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs }
           )
           setAudioUrl(data.audioUrl)
           setMixedAudioUrl(mixedDataUri)
@@ -481,6 +568,23 @@ export default function VozProClient() {
         }
 
         toast.success('Áudio gerado com sucesso!')
+      }
+
+      // Feedback do ASR Validator (camada 2 de qualidade)
+      if (data.asrWarning) {
+        toast.warning('Qualidade da voz', {
+          description: data.asrMessage || 'O audio pode conter imperfeicoes. Tente outra voz ou texto mais curto.',
+          duration: 6000,
+        })
+      } else if (data.asrValidation && !data.asrValidation.valid) {
+        // ASR rejeitou mas não houve retry (texto curto, etc)
+        console.warn('[VozPro] ASR rejeitou:', data.asrValidation)
+      } else if (data.asrValidation?.attempts > 1) {
+        // ASR regenerou automaticamente (tudo ok agora)
+        toast.success('Qualidade verificada', {
+          description: `Audio regenerado automaticamente (${data.asrValidation.attempts} tentativas).`,
+          duration: 4000,
+        })
       }
 
       if (data.warning) {
@@ -520,7 +624,7 @@ export default function VozProClient() {
       setIsGenerating(false)
       setGeneratingTime(0)
     }
-  }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume])
+  }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs])
 
   // Get the active audio URL
   const activeAudioUrl = mixedAudioUrl || audioUrl
@@ -796,6 +900,97 @@ export default function VozProClient() {
                           />
                           {/* Preview track */}
                           <AudioPlayer audioPath={selectedTrack.audioPath} />
+
+                          {/* Ducking Settings */}
+                          <div className="pt-3 border-t border-white/10">
+                            <button
+                              onClick={() => setShowDuckingSettings(!showDuckingSettings)}
+                              className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-300 transition-colors w-full"
+                            >
+                              <Volume2 className="w-4 h-4" />
+                              Controles de Ducking
+                              <ChevronDown className={`w-3 h-3 ml-auto transition-transform ${showDuckingSettings ? 'rotate-180' : ''}`} />
+                            </button>
+
+                            {showDuckingSettings && (
+                              <div className="mt-3 space-y-3">
+                                <div className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <label className="text-xs text-slate-400">Volume durante a voz</label>
+                                    <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{Math.round(duckVolume * 100)}%</Badge>
+                                  </div>
+                                  <Slider value={[duckVolume]} onValueChange={([v]) => setDuckVolume(v)} min={0} max={1} step={0.01} />
+                                  <p className="text-[10px] text-slate-600">Quão baixa fica a música quando a voz está falando</p>
+                                </div>
+
+                                <div className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <label className="text-xs text-slate-400">Fade-in inicial</label>
+                                    <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{fadeInMs / 1000}s</Badge>
+                                  </div>
+                                  <Slider value={[fadeInMs]} onValueChange={([v]) => setFadeInMs(v)} min={0} max={5000} step={100} />
+                                </div>
+
+                                <div className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <label className="text-xs text-slate-400">Música antes da voz</label>
+                                    <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{(musicStartLeadMs / 1000).toFixed(1)}s</Badge>
+                                  </div>
+                                  <Slider value={[musicStartLeadMs]} onValueChange={([v]) => setMusicStartLeadMs(v)} min={0} max={10000} step={100} />
+                                  <p className="text-[10px] text-slate-600">Tempo de lead-in com música alta antes da voz começar</p>
+                                </div>
+
+                                <div className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <label className="text-xs text-slate-400">Transição Duck</label>
+                                    <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{duckFadeMs / 1000}s</Badge>
+                                  </div>
+                                  <Slider value={[duckFadeMs]} onValueChange={([v]) => setDuckFadeMs(v)} min={0} max={3000} step={50} />
+                                  <p className="text-[10px] text-slate-600">Tempo para reduzir a música quando a voz entra</p>
+                                </div>
+
+                                <div className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <label className="text-xs text-slate-400">Transição Unduck</label>
+                                    <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{unduckFadeMs / 1000}s</Badge>
+                                  </div>
+                                  <Slider value={[unduckFadeMs]} onValueChange={([v]) => setUnduckFadeMs(v)} min={0} max={3000} step={50} />
+                                  <p className="text-[10px] text-slate-600">Tempo para voltar a música alta após a voz</p>
+                                </div>
+
+                                <div className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <label className="text-xs text-slate-400">Fade-out final</label>
+                                    <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{fadeOutMs / 1000}s</Badge>
+                                  </div>
+                                  <Slider value={[fadeOutMs]} onValueChange={([v]) => setFadeOutMs(v)} min={0} max={8000} step={100} />
+                                  <p className="text-[10px] text-slate-600">Tempo para a música desaparecer no final</p>
+                                </div>
+
+                                {/* Visual timeline */}
+                                <div className="pt-2 border-t border-white/10">
+                                  <p className="text-[10px] text-slate-500 mb-2">Timeline do áudio:</p>
+                                  <div className="flex items-center gap-1 text-[10px]">
+                                    <div className="bg-purple-500/30 border border-purple-500/50 rounded px-2 py-1 text-purple-300">
+                                      Música {(musicStartLeadMs / 1000).toFixed(1)}s
+                                    </div>
+                                    <span className="text-slate-600">→</span>
+                                    <div className="bg-green-500/30 border border-green-500/50 rounded px-2 py-1 text-green-300">
+                                      Voz {duckFadeMs / 1000}s fade
+                                    </div>
+                                    <span className="text-slate-600">→</span>
+                                    <div className="bg-blue-500/30 border border-blue-500/50 rounded px-2 py-1 text-blue-300">
+                                      Música volta
+                                    </div>
+                                    <span className="text-slate-600">→</span>
+                                    <div className="bg-orange-500/30 border border-orange-500/50 rounded px-2 py-1 text-orange-300">
+                                      Fade {fadeOutMs / 1000}s
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                     </>

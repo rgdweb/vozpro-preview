@@ -39,25 +39,16 @@ const MP3_BITRATE = 192 // kbps — alta qualidade pra musica
  * Carrega lamejs dinamicamente do CDN para evitar problemas com bundler.
  */
 async function encodeMp3(buffer: AudioBuffer, kbps: number = 192): Promise<Blob> {
-  // Carregar lamejs se ainda nao foi carregado
+  // Carregar lamejs do CDN se ainda nao foi carregado
   if (!(window as unknown as { lamejs?: object }).lamejs) {
-    // Tenta import do bundle primeiro (se tiver sido configurado como external)
-    try {
-      const lamejs = await import('lamejs' as string)
-      if (lamejs && (lamejs as { Mp3Encoder?: unknown }).Mp3Encoder) {
-        (window as unknown as { lamejs: object }).lamejs = lamejs as unknown as object
-      }
-    } catch {
-      // Se o import falhar, carrega do CDN via script tag
-      await new Promise<void>((resolve, reject) => {
-        if (document.querySelector('script[src*="lame"]')) { resolve(); return }
-        const script = document.createElement('script')
-        script.src = 'https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js'
-        script.onload = () => resolve()
-        script.onerror = () => reject(new Error('Falha ao carregar encoder MP3'))
-        document.head.appendChild(script)
-      })
-    }
+    await new Promise<void>((resolve, reject) => {
+      if (document.querySelector('script[src*="lame"]')) { resolve(); return }
+      const script = document.createElement('script')
+      script.src = 'https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js'
+      script.onload = () => resolve()
+      script.onerror = () => reject(new Error('Falha ao carregar encoder MP3'))
+      document.head.appendChild(script)
+    })
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -384,7 +375,14 @@ export default function AdminDashboard() {
           body: formData,
         })
 
-        const data = await res.json()
+        let data: Record<string, unknown>
+        try {
+          data = await res.json()
+        } catch {
+          toast.error('Erro no servidor de upload. Tente novamente.')
+          setUploadingRef(false)
+          return
+        }
         if (data.serverUrl || data.path) {
           setVariationForm(prev => ({
             ...prev,
@@ -493,7 +491,13 @@ export default function AdminDashboard() {
         body: formData,
       })
 
-      const data = await res.json()
+      let data: Record<string, unknown>
+      try {
+        data = await res.json()
+      } catch {
+        toast.error('Erro no servidor de upload. Tente novamente.')
+        return
+      }
       if (data.serverUrl || data.path) {
         await fetch(`/api/variations/${variationId}`, {
           method: 'PUT',

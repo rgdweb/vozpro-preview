@@ -49,7 +49,7 @@ const MIN_CHUNK_CHARS = 5    // mínimo de caracteres
  * Regras:
  * 1. Pontuação forte (. ! ?) → quebra de sentença (pausa longa)
  * 2. Ponto e vírgula (;) → quebra média
- * 3. Vírgula (,) → quebra curta (só se chunk ficar >= MIN_CHUNK_WORDS)
+ * 3. Vírgula (,) → NÃO quebra (mantém no mesmo chunk, evita micro-interrupção)
  * 4. Frases muito longas (>25 palavras) → quebra forçada
  * 5. Frases muito curtas → mescla com a próxima
  */
@@ -110,8 +110,8 @@ function insertBreakMarkers(text: string): string {
   // Pontuação forte → marcador
   result = result.replace(/([.!?])\s+/g, '$1¶¶¶')
 
-  // Vírgula → marcador (vírgula pode ter espaço antes/depis)
-  result = result.replace(/,\s*/g, ',¶¶¶')
+  // Vírgula → NÃO quebra (mantém no fluxo natural)
+  // Não inserimos marcador para vírgula
 
   // Ponto e vírgula → marcador
   result = result.replace(/;\s*/g, ';¶¶¶')
@@ -142,8 +142,8 @@ function splitByMarkers(markedText: string): RawChunk[] {
     const trimmed = part.trim()
     if (!trimmed) continue
 
-    // Verificar se termina com pontuação
-    const punctuationMatch = trimmed.match(/([.!?;,])$/)
+    // Verificar se termina com pontuação (sem vírgula — vírgula não quebra)
+    const punctuationMatch = trimmed.match(/([.!?;])$/)
     const punctuation = punctuationMatch ? punctuationMatch[1] : '.'
     const text = punctuationMatch ? trimmed.slice(0, -1).trim() : trimmed
 
@@ -182,7 +182,7 @@ function mergeShortChunks(chunks: TextChunk[]): TextChunk[] {
     if (wordCount < MIN_CHUNK_WORDS && i < chunks.length - 1) {
       const next = chunks[i + 1]
       result.push({
-        text: current.text + (current.punctuation === ',' ? ',' : '') + ' ' + next.text,
+        text: current.text + ' ' + next.text,
         pauseAfterMs: next.pauseAfterMs,  // usa a pausa do MAIOR chunk
         punctuation: next.punctuation,
         index: result.length,

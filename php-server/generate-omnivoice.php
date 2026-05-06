@@ -115,10 +115,6 @@ $refAudioName = $input['referenceAudioName'] ?? 'ref_audio.wav';
 $instruct = $input['instruct'] ?? '';
 $speed = $input['speed'] ?? 1.0;
 $numStep = $input['numStep'] ?? 32;
-$guidanceScale = $input['guidanceScale'] ?? 2.0;
-$denoise = isset($input['denoise']) ? ($input['denoise'] === true || $input['denoise'] === 'true' || $input['denoise'] === 1) : true;
-$preprocess = isset($input['preprocess']) ? ($input['preprocess'] === true || $input['preprocess'] === 'true' || $input['preprocess'] === 1) : true;
-$postprocess = isset($input['postprocess']) ? ($input['postprocess'] === true || $input['postprocess'] === 'true' || $input['postprocess'] === 1) : false;
 
 // Voice Design params (usados no _design_fn)
 $gender = $input['gender'] ?? 'Auto';
@@ -127,7 +123,7 @@ $pitch = $input['pitch'] ?? 'Auto';
 $style = $input['style'] ?? 'Auto';
 $accent = $input['accent'] ?? 'Auto';
 
-debugLog('Input', 'info', "modo: $mode | texto: " . mb_substr($texto, 0, 50) . " | lang: $idioma | steps: $numStep | cfg: $guidanceScale | dn: " . ($denoise ? '1' : '0') . " | pp: " . ($preprocess ? '1' : '0') . " | po: " . ($postprocess ? '1' : '0'));
+debugLog('Input', 'info', "modo: $mode | texto: " . mb_substr($texto, 0, 50) . " | lang: $idioma | steps: $numStep");
 
 if (empty(trim($texto))) {
     returnError('Texto e obrigatorio', 400);
@@ -409,12 +405,12 @@ if ($mode === 'clone') {
         '',                                // ref_text (vazio = auto Whisper)
         $instruct ?: null,                 // instruct
         (int)$numStep,                     // ns
-        (float)$guidanceScale,             // gs (CFG)
-        $denoise,                          // dn (denoise)
+        2.0,                               // gs (CFG)
+        true,                              // dn (denoise)
         (float)$speed,                     // sp (speed)
         null,                              // du (duration, null = auto)
-        $preprocess,                       // pp (preprocess)
-        $postprocess                       // po (postprocess)
+        true,                              // pp (preprocess)
+        true                               // po (postprocess)
     ];
 
 } else {
@@ -434,12 +430,12 @@ if ($mode === 'clone') {
         $texto,                            // text
         $idioma,                           // lang
         (int)$numStep,                     // ns
-        (float)$guidanceScale,             // gs (CFG)
-        $denoise,                          // dn (denoise)
+        2.0,                               // gs (CFG)
+        true,                              // dn (denoise)
         (float)$speed,                     // sp (speed)
         null,                              // du (duration)
-        $preprocess,                       // pp (preprocess)
-        $postprocess,                      // po (postprocess)
+        true,                              // pp (preprocess)
+        true,                              // po (postprocess)
         $gender,                           // gender
         $age,                              // age
         $pitch,                            // pitch

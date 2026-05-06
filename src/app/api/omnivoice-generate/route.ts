@@ -227,10 +227,6 @@ export async function POST(request: NextRequest) {
       refText = '',            // transcricao (vazio = auto Whisper)
       numStep = 16,            // 16=rapido, 32=qualidade
       speed = 1.0,
-      guidanceScale = 2.0,
-      denoise = true,
-      preprocess = true,
-      postprocess = false,
       language = 'Auto',       // Auto = detectar
       // Voice Design params (usados no modo design)
       gender = 'Auto',
@@ -295,15 +291,15 @@ export async function POST(request: NextRequest) {
         refText,                 // ref_text
         instruct,                // instruct
         numStep,                 // ns (inference steps)
-        guidanceScale,           // gs (guidance scale / CFG)
-        denoise,                 // dn (denoise)
+        2.0,                     // gs (guidance scale / CFG)
+        true,                    // dn (denoise)
         speed,                   // sp (speed)
         null,                    // du (duration, null = auto)
-        preprocess,              // pp (preprocess prompt)
-        postprocess,             // po (postprocess output)
+        true,                    // pp (preprocess prompt)
+        true,                    // po (postprocess output)
       ]
 
-      debug.log('Params', 'info', `lang:${language} steps:${numStep} cfg:${guidanceScale} speed:${speed} dn:${denoise} pp:${preprocess} po:${postprocess}`)
+      debug.log('Params', 'info', `lang:${language} steps:${numStep} speed:${speed}`)
 
       // 3. Submeter e acompanhar
       let eventId: string | null = null
@@ -356,12 +352,12 @@ export async function POST(request: NextRequest) {
         text,                        // text
         language || 'Auto',          // lang
         numStep,                     // ns (inference steps)
-        guidanceScale,               // gs (guidance scale / CFG)
-        denoise,                     // dn (denoise)
+        2.0,                         // gs (guidance scale / CFG)
+        true,                        // dn (denoise)
         speed,                       // sp (speed)
         null,                        // du (duration, null = auto)
-        preprocess,                  // pp (preprocess prompt)
-        postprocess,                 // po (postprocess output)
+        true,                        // pp (preprocess prompt)
+        true,                        // po (postprocess output)
         gender || 'Auto',            // gender
         age || 'Auto',               // age
         pitch || 'Auto',             // pitch

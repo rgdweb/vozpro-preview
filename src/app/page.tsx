@@ -13,7 +13,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   AudioWaveform, Sparkles, Loader2, Download, Play, Pause, Square,
   Volume2, Music, Mic, ChevronRight, Settings2, Globe, Bug, Copy, ChevronDown,
-  Upload, CheckCircle2, Zap, Scissors, FileAudio, Shield
+  Upload, CheckCircle2, Zap
 } from 'lucide-react'
 import { toast } from 'sonner'
 import AudioPlayer from '@/components/audio-player'
@@ -330,9 +330,6 @@ export default function VozProClient() {
   const [speed, setSpeed] = useState(1.0)
   const [numStep, setNumStep] = useState(20)
   const [guidanceScale, setGuidanceScale] = useState(1.5)
-  const [denoise] = useState(true)
-  const [preprocess] = useState(true)
-  const [postprocess] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
 
   // Generation state
@@ -518,9 +515,6 @@ export default function VozProClient() {
           refText: '',
           numStep: 32, // OmniVoice: 32 = qualidade (padrao), 16 = rapido mas pode errar palavras
           speed: 1.0,
-          denoise: true,
-          preprocess: true,
-          postprocess: false,
           language: language, // usa o idioma selecionado pelo usuario (Portuguese, Auto, etc)
           // Voice Design params (usados pelo _design_fn endpoint)
           gender: isAutoMode ? 'Auto' : (isDesignMode ? designParams.gender : 'Auto'),
@@ -1406,7 +1400,6 @@ export default function VozProClient() {
                     </div>
                     <Slider value={[speed]} onValueChange={([v]) => setSpeed(v)} min={0.5} max={1.5} step={0.05} />
                   </div>
-
                 </CardContent>
               </Card>
             </details>

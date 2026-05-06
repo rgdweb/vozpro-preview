@@ -107,32 +107,18 @@ const LANGUAGES = [
 function optimizePronunciation(text: string): string {
   let result = text
 
-  // 1. Artigos definidos/indefinidos após pontuação que termina frase (. ! ?)
-  // O OmniVoice confunde "O"/"A" artigo com a letra Ó/Á após ponto final
-  // Usa fonemas CMU que são 100% determinísticos no OmniVoice
-  const articleMap: Record<string, string> = {
-    'O': 'OW', 'o': 'OW',
-    'A': 'AH', 'a': 'AH',
-  }
-  const articlePattern = /([.!?]\s+)([OoAa])\s(?=[a-záàãâéèêíïóôõúüç])/g
-  result = result.replace(articlePattern, (match, punct, art) => {
-    return `${punct}[${articleMap[art]}] `
-  })
+  // 1. Artigos após pontuação que termina frase (. ! ?)
+  // O OmniVoice hesita/trava quando encontra artigo maiúsculo após ponto:
+  // "...resultados. O sistema" → lê "ponto OOOOO sistema"
+  // SOLUÇÃO: trocar ponto+artigo por vírgula+artigo minúsculo (une as frases)
+  // "...resultados. O sistema" → "...resultados, o sistema"
+  // Isso elimina a quebra de sentença que causa a hesitação
+  const articleAfterPunct = /([.!?])\s+([OoAa])\s(?=[a-záàãâéèêíïóôõúüç])/g
+  result = result.replace(articleAfterPunct, ',$2 ')
 
-  // 2. Plural dos artigos após pontuação
-  const pluralArticleMap: Record<string, string> = {
-    'Os': 'OW Z', 'os': 'OW Z',
-    'As': 'AH Z', 'as': 'AH Z',
-    'Um': 'UW M', 'um': 'UW M',
-    'Uma': 'UW M AH', 'uma': 'UW M AH',
-    'Uns': 'UW N Z', 'uns': 'UW N Z',
-    'Umas': 'UW M AH Z', 'umas': 'UW M AH Z',
-  }
-  const pluralArticlePattern = /([.!?]\s+)([Oo]s|[Aa]s|[Uu]m(?:[oa]s)?)\s(?=[a-záàãâéèêíïóôõúüç])/g
-  result = result.replace(pluralArticlePattern, (match, punct, art) => {
-    const phoneme = pluralArticleMap[art]
-    return phoneme ? `${punct}[${phoneme}] ` : match
-  })
+  // 2. Plural dos artigos após pontuação (mesma lógica)
+  const pluralArticleAfterPunct = /([.!?])\s+([Oo]s|[Aa]s|[Uu]m(?:[oa]s)?)\s(?=[a-záàãâéèêíïóôõúüç])/g
+  result = result.replace(pluralArticleAfterPunct, ',$2 ')
 
   // 3. Horários abreviados: "14h" → "[quatorze] horas", "8h" → "[oito] horas"
   const hourPattern = /(\d{1,2})\s*h(?!\w)/gi

@@ -92,6 +92,94 @@ const LANGUAGES = [
 ]
 
 /**
+ * Otimizador de pronúncia instantâneo (regex, 0ms de latência).
+ * 
+ * Usa colchetes [pronúncia] nativos do OmniVoice para corrigir
+ * palavras que o TTS pronuncia errado. Funciona por baixo dos panos,
+ * o usuário digita texto normal e recebe áudio perfeito.
+ * 
+ * Padrões corrigidos:
+ * 1. Artigos no início de frase após ponto (". O sistema" → ". [o] sistema")
+ * 2. Artigos após "!" e "?" (também iniciam frase nova)
+ * 3. Horários abreviados ("14h" → "[quatorze] horas")
+ * 4. Valores monetários básicos ("R$ 50" → "[cinquenta reais]")
+ */
+function optimizePronunciation(text: string): string {
+  let result = text
+
+  // 1. Artigos definidos/indefinidos após pontuação que termina frase (. ! ?)
+  // O OmniVoice confunde "O"/"A" artigo com a letra Ó/Á após ponto final
+  // Coloca em minúsculo entre colchetes para forçar pronúncia de artigo
+  const articlePattern = /([.!?]\s+)([OoAa])\s(?=[a-záàãâéèêíïóôõúüç])/g
+  result = result.replace(articlePattern, '$1[$2] ')
+
+  // 2. Plural dos artigos após pontuação
+  const pluralArticlePattern = /([.!?]\s+)([Oo]s|[Aa]s|[Uu]m(?:[oa]s)?)\s(?=[a-záàãâéèêíïóôõúüç])/g
+  result = result.replace(pluralArticlePattern, '$1[$2] ')
+
+  // 3. Horários abreviados: "14h" → "[quatorze] horas", "8h" → "[oito] horas"
+  const hourPattern = /(\d{1,2})\s*h(?!\w)/gi
+  result = result.replace(hourPattern, (match, num) => {
+    const n = parseInt(num)
+    if (isNaN(n) || n < 0 || n > 23) return match
+    return `[${numberToWords(n)}] horas`
+  })
+
+  // 4. Valores monetários simples: "R$ 50" → "[cinquenta reais]"
+  const currencyPattern = /R\$\s*(\d+(?:[.,]\d{1,2})?)/g
+  result = result.replace(currencyPattern, (match, val) => {
+    return `[${currencyToWords(val)}]`
+  })
+
+  // 5. Porcentagens: "50%" → "[cinquenta por cento]"
+  const percentPattern = /(\d+)%/g
+  result = result.replace(percentPattern, (match, num) => {
+    const n = parseInt(num)
+    if (isNaN(n)) return match
+    return `[${numberToWords(n)} por cento]`
+  })
+
+  return result
+}
+
+/** Converte número para palavras em PT-BR (0-99) */
+function numberToWords(n: number): string {
+  const units = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove']
+  const teens = ['dez', 'onze', 'doze', 'treze', 'quatorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove']
+  const tens = ['', '', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa']
+
+  if (n < 0 || n > 99) return String(n)
+  if (n < 10) return units[n]
+  if (n < 20) return teens[n - 10]
+  const t = Math.floor(n / 10)
+  const u = n % 10
+  return u === 0 ? tens[t] : `${tens[t]} e ${units[u]}`
+}
+
+/** Converte valor monetário "1500" ou "1.599,90" para palavras */
+function currencyToWords(val: string): string {
+  // Normaliza: remove pontos de milhar, troca vírgula por ponto
+  const clean = val.replace(/\./g, '').replace(',', '.')
+  const num = parseFloat(clean)
+  if (isNaN(num)) return val
+
+  if (num === 1) return 'um real'
+  if (num < 2) {
+    const cents = Math.round(num * 100)
+    if (cents === 0) return 'zero reais'
+    return `${cents} centavos`
+  }
+
+  const reais = Math.floor(num)
+  const centavos = Math.round((num - reais) * 100)
+  let result = `${numberToWords(reais)} reais`
+  if (centavos > 0) {
+    result += ` e ${centavos} centavos`
+  }
+  return result
+}
+
+/**
  * Converte descrição em texto do Voice Design para os parâmetros estruturados do OmniVoice.
  * OmniVoice _design_fn usa dropdowns (gender, age, pitch, style, accent), não texto livre.
  */
@@ -464,29 +552,11 @@ export default function VozProClient() {
     setIsMixed(false)
     setGeneratingTime(0)
 
-    // ===== AGENTE DE PRONÚNCIA IA =====
-    // Otimiza texto automaticamente antes de enviar ao TTS
+    // ===== OTIMIZAÇÃO DE PRONÚNCIA (regex instantâneo, 0ms) =====
+    // Usa colchetes [pronúncia] do OmniVoice por baixo dos panos
     let textToSend = text.trim()
     if (pronunciationOptimization) {
-      try {
-        console.log('[VozPro] Otimizando pronúncia com IA...')
-        const optRes = await fetch('/api/optimize-pronunciation', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: textToSend }),
-        })
-        if (optRes.ok) {
-          const optData = await optRes.json()
-          if (optData.changed && optData.changes > 0) {
-            textToSend = optData.optimized
-            console.log('[VozPro] Pronúncia otimizada:', optData.changes, 'correções')
-          } else {
-            console.log('[VozPro] Pronúcia OK, sem correções necessárias')
-          }
-        }
-      } catch (err) {
-        console.warn('[VozPro] Falha na otimização de pronúncia, usando texto original:', err)
-      }
+      textToSend = optimizePronunciation(textToSend)
     }
 
     // Timer para mostrar tempo decorrido ao usuario

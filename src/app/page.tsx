@@ -109,13 +109,30 @@ function optimizePronunciation(text: string): string {
 
   // 1. Artigos definidos/indefinidos após pontuação que termina frase (. ! ?)
   // O OmniVoice confunde "O"/"A" artigo com a letra Ó/Á após ponto final
-  // Coloca em minúsculo entre colchetes para forçar pronúncia de artigo
+  // Usa fonemas CMU que são 100% determinísticos no OmniVoice
+  const articleMap: Record<string, string> = {
+    'O': 'OW', 'o': 'OW',
+    'A': 'AH', 'a': 'AH',
+  }
   const articlePattern = /([.!?]\s+)([OoAa])\s(?=[a-záàãâéèêíïóôõúüç])/g
-  result = result.replace(articlePattern, '$1[$2] ')
+  result = result.replace(articlePattern, (match, punct, art) => {
+    return `${punct}[${articleMap[art]}] `
+  })
 
   // 2. Plural dos artigos após pontuação
+  const pluralArticleMap: Record<string, string> = {
+    'Os': 'OW Z', 'os': 'OW Z',
+    'As': 'AH Z', 'as': 'AH Z',
+    'Um': 'UW M', 'um': 'UW M',
+    'Uma': 'UW M AH', 'uma': 'UW M AH',
+    'Uns': 'UW N Z', 'uns': 'UW N Z',
+    'Umas': 'UW M AH Z', 'umas': 'UW M AH Z',
+  }
   const pluralArticlePattern = /([.!?]\s+)([Oo]s|[Aa]s|[Uu]m(?:[oa]s)?)\s(?=[a-záàãâéèêíïóôõúüç])/g
-  result = result.replace(pluralArticlePattern, '$1[$2] ')
+  result = result.replace(pluralArticlePattern, (match, punct, art) => {
+    const phoneme = pluralArticleMap[art]
+    return phoneme ? `${punct}[${phoneme}] ` : match
+  })
 
   // 3. Horários abreviados: "14h" → "[quatorze] horas", "8h" → "[oito] horas"
   const hourPattern = /(\d{1,2})\s*h(?!\w)/gi
@@ -569,6 +586,10 @@ export default function VozProClient() {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 600000)
 
+    // Guarda o body e URL da requisição para possível retry ASR
+    let lastRequestBody: Record<string, unknown> | null = null
+    let lastRequestUrl = ''
+
     try {
       // Montar instruct a partir dos metadados da voz
       const voice = selectedVoice
@@ -630,10 +651,12 @@ export default function VozProClient() {
             return
           }
           const { generateUrl: phpDirectUrl, token } = await tokenRes.json()
+          lastRequestBody = ovBody
 
           if (!phpDirectUrl || !token) {
             toast.error('OmniVoice PHP nao configurado, usando Vercel...')
             // Fallback pra Vercel
+            lastRequestUrl = '/api/omnivoice-generate'
             res = await fetch('/api/omnivoice-generate', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -641,6 +664,7 @@ export default function VozProClient() {
               signal: controller.signal,
             })
           } else {
+            lastRequestUrl = phpDirectUrl
             res = await fetch(phpDirectUrl, {
               method: 'POST',
               headers: {
@@ -654,6 +678,8 @@ export default function VozProClient() {
         } else {
           // ===== OMNIVOICE VIA VERCEL (fallback) =====
           console.log('[VozPro] Gerando via OmniVoice via Vercel (sem PHP direto)...')
+          lastRequestBody = ovBody
+          lastRequestUrl = '/api/omnivoice-generate'
           res = await fetch('/api/omnivoice-generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -806,6 +832,78 @@ export default function VozProClient() {
         return
       }
 
+      // ===== ASR RETRY AUTOMÁTICO (OmniVoice) =====
+      // Valida pronúncia e refaz automaticamente se errou
+      let finalAudioUrl = data.audioUrl
+      const maxAsrRetries = ttsModel === 'omnivoice' ? 2 : 0 // Só OmniVoice faz retry (é rápido)
+      const originalTextForCompare = textToSend.replace(/\[.*?\]/g, '') // Remove colchetes de pronúncia pra comparar
+
+      if (maxAsrRetries > 0 && originalTextForCompare.split(/\s+/).length >= 5) {
+        for (let retryAttempt = 0; retryAttempt < maxAsrRetries; retryAttempt++) {
+          try {
+            // Extrair base64 do data URI
+            const base64Data = finalAudioUrl.includes(',')
+              ? finalAudioUrl.split(',')[1]
+              : finalAudioUrl
+
+            const validateRes = await fetch('/api/asr-validate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                audioBase64: base64Data,
+                text: originalTextForCompare,
+              }),
+            })
+
+            if (validateRes.ok) {
+              const validation = await validateRes.json()
+              if (validation.skipped || validation.valid) {
+                console.log('[VozPro] ASR validou:', validation.skipped ? validation.reason : `OK (${validation.wordCoverage}% cobertura)`)
+                break // Áudio OK, segue
+              }
+
+              // ASR rejeitou — tentar regerar
+              console.log('[VozPro] ASR rejeitou, retry', retryAttempt + 1, '— palavras perdidas:', validation.missedWords?.join(', '))
+              if (retryAttempt < maxAsrRetries - 1 && lastRequestBody && lastRequestUrl) {
+                toast.info('Ajustando pronúncia...', { description: 'Regenerando para melhor qualidade.', duration: 2000 })
+
+                // Regenerar com a mesma chamada
+                const retryHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
+                if (lastRequestUrl.includes('sorteiomax')) {
+                  // PHP direto precisa de token novo
+                  try {
+                    const newTokenRes = await fetch('/api/omnivoice-token')
+                    if (newTokenRes.ok) {
+                      const { token: newToken } = await newTokenRes.json()
+                      if (newToken) retryHeaders['X-Generate-Token'] = newToken
+                    }
+                  } catch { /* sem token, tenta sem */ }
+                }
+
+                const retryRes = await fetch(lastRequestUrl, {
+                  method: 'POST',
+                  headers: retryHeaders,
+                  body: JSON.stringify(lastRequestBody),
+                  signal: controller.signal,
+                })
+
+                if (retryRes.ok) {
+                  const retryData = await retryRes.json()
+                  if (retryData.audioUrl) {
+                    finalAudioUrl = retryData.audioUrl
+                    continue // Tenta validar de novo
+                  }
+                }
+                break // Retry falhou, usa o que tem
+              }
+            }
+          } catch (asrErr) {
+            console.warn('[VozPro] ASR retry falhou, usando áudio:', asrErr)
+            break
+          }
+        }
+      }
+
       // Mixagem client-side com trilha (funciona tanto com PHP quanto Vercel)
       if (trackEnabled && selectedTrack?.audioPath) {
         console.log('[VozPro] Client-side mixing, mixing voice + track...')
@@ -813,23 +911,23 @@ export default function VozProClient() {
 
         try {
           const mixedDataUri = await mixAudioClientSide(
-            data.audioUrl,
+            finalAudioUrl,
             selectedTrack.audioPath,
             trackVolume,
             { duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs }
           )
-          setAudioUrl(data.audioUrl)
+          setAudioUrl(finalAudioUrl)
           setMixedAudioUrl(mixedDataUri)
           setIsMixed(true)
           toast.success(`Audio gerado com trilha "${selectedTrack.name}"!${data.viaDirectPhp ? ' (PHP direto)' : data.viaPhp ? ' (via PHP)' : ''}`)
         } catch (mixErr) {
           console.error('[VozPro] Client-side mixing failed:', mixErr)
-          setAudioUrl(data.audioUrl)
+          setAudioUrl(finalAudioUrl)
           toast.warning('Não foi possível mixar a trilha. Reproduzindo apenas a voz.')
         }
       } else {
         // No track - just voice
-        setAudioUrl(data.audioUrl)
+        setAudioUrl(finalAudioUrl)
 
         if (data.mixedAudio) {
           setMixedAudioUrl(data.mixedAudio)

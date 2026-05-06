@@ -13,7 +13,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   AudioWaveform, Sparkles, Loader2, Download, Play, Pause, Square,
   Volume2, Music, Mic, ChevronRight, Settings2, Globe, Bug, Copy, ChevronDown,
-  Upload, CheckCircle2, Zap
+  Upload, CheckCircle2, Zap, Scissors, FileAudio, Shield
 } from 'lucide-react'
 import { toast } from 'sonner'
 import AudioPlayer from '@/components/audio-player'
@@ -329,7 +329,10 @@ export default function VozProClient() {
   const [showDuckingSettings, setShowDuckingSettings] = useState(false)
   const [speed, setSpeed] = useState(1.0)
   const [numStep, setNumStep] = useState(20)
-  const [guidanceScale, setGuidanceScale] = useState(1.5)
+  const [guidanceScale, setGuidanceScale] = useState(2.0)
+  const [denoise, setDenoise] = useState(true)
+  const [preprocess, setPreprocess] = useState(true)
+  const [postprocess, setPostprocess] = useState(true)
   const [showAdvanced, setShowAdvanced] = useState(false)
 
   // Generation state
@@ -513,8 +516,12 @@ export default function VozProClient() {
           referenceAudioUrl: voiceMode === 'clone' ? (uploadedVoiceUrl || selectedVariation?.refAudioServerUrl || '') : '',
           referenceAudioName: voiceMode === 'clone' ? (uploadedVoiceFile?.name || selectedVariation?.refAudioName || 'ref_audio.wav') : '',
           refText: '',
-          numStep: 32, // OmniVoice: 32 = qualidade (padrao), 16 = rapido mas pode errar palavras
-          speed: 1.0,
+          numStep,
+          speed,
+          guidanceScale,
+          denoise,
+          preprocess,
+          postprocess,
           language: language, // usa o idioma selecionado pelo usuario (Portuguese, Auto, etc)
           // Voice Design params (usados pelo _design_fn endpoint)
           gender: isAutoMode ? 'Auto' : (isDesignMode ? designParams.gender : 'Auto'),
@@ -796,7 +803,7 @@ export default function VozProClient() {
       setIsGenerating(false)
       setGeneratingTime(0)
     }
-  }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs, omnivoicePhpUrl])
+  }, [text, selectedVariationId, language, speed, numStep, guidanceScale, denoise, preprocess, postprocess, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs, omnivoicePhpUrl])
 
   // Get the active audio URL
   const activeAudioUrl = mixedAudioUrl || audioUrl
@@ -1400,6 +1407,43 @@ export default function VozProClient() {
                     </div>
                     <Slider value={[speed]} onValueChange={([v]) => setSpeed(v)} min={0.5} max={1.5} step={0.05} />
                   </div>
+
+                  {/* OmniVoice Audio Processing Toggles */}
+                  {ttsModel === 'omnivoice' && (
+                    <div className="space-y-3 pt-2 border-t border-white/10">
+                      <p className="text-xs text-slate-500 font-medium">Processamento de Audio</p>
+
+                      {/* Denoise */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Shield className="w-3.5 h-3.5 text-slate-400" />
+                          <span className="text-sm text-slate-300">Denoise</span>
+                          <span className="text-[10px] text-slate-500">Remove ruido</span>
+                        </div>
+                        <Switch checked={denoise} onCheckedChange={setDenoise} />
+                      </div>
+
+                      {/* Preprocess Prompt */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Scissors className="w-3.5 h-3.5 text-slate-400" />
+                          <span className="text-sm text-slate-300">Preprocess</span>
+                          <span className="text-[10px] text-slate-500">Otimiza audio ref.</span>
+                        </div>
+                        <Switch checked={preprocess} onCheckedChange={setPreprocess} />
+                      </div>
+
+                      {/* Postprocess Output */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileAudio className="w-3.5 h-3.5 text-slate-400" />
+                          <span className="text-sm text-slate-300">Postprocess</span>
+                          <span className="text-[10px] text-slate-500">Remove silencios</span>
+                        </div>
+                        <Switch checked={postprocess} onCheckedChange={setPostprocess} />
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </details>

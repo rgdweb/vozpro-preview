@@ -332,6 +332,7 @@ export default function VozProClient() {
   const [numStep, setNumStep] = useState(20)
   const [guidanceScale, setGuidanceScale] = useState(1.5)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [pronunciationOptimization, setPronunciationOptimization] = useState(true) // Agente IA de pronúncia (ligado por padrão)
 
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false)
@@ -463,6 +464,31 @@ export default function VozProClient() {
     setIsMixed(false)
     setGeneratingTime(0)
 
+    // ===== AGENTE DE PRONÚNCIA IA =====
+    // Otimiza texto automaticamente antes de enviar ao TTS
+    let textToSend = text.trim()
+    if (pronunciationOptimization) {
+      try {
+        console.log('[VozPro] Otimizando pronúncia com IA...')
+        const optRes = await fetch('/api/optimize-pronunciation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: textToSend }),
+        })
+        if (optRes.ok) {
+          const optData = await optRes.json()
+          if (optData.changed && optData.changes > 0) {
+            textToSend = optData.optimized
+            console.log('[VozPro] Pronúncia otimizada:', optData.changes, 'correções')
+          } else {
+            console.log('[VozPro] Pronúcia OK, sem correções necessárias')
+          }
+        }
+      } catch (err) {
+        console.warn('[VozPro] Falha na otimização de pronúncia, usando texto original:', err)
+      }
+    }
+
     // Timer para mostrar tempo decorrido ao usuario
     const genStartTime = Date.now()
     const timerInterval = setInterval(() => {
@@ -486,7 +512,7 @@ export default function VozProClient() {
 
       // CORPO DA REQUISICAO - todos os dados que o PHP precisa
       const body: Record<string, unknown> = {
-        text: text.trim(),
+        text: textToSend,
         language,
         refAudioUrl: selectedVariation?.refAudioServerUrl || '',
         refAudioPath: selectedVariation?.refAudioPath || '',
@@ -508,7 +534,7 @@ export default function VozProClient() {
         const designParams = isDesignMode ? parseVoiceDesignToParams(voiceDesignInstruct) : { gender: 'Auto', age: 'Auto', pitch: 'Auto', style: 'Auto', accent: 'Auto' }
 
         const ovBody: Record<string, unknown> = {
-          text: text.trim(),
+          text: textToSend,
           mode: voiceMode,
           instruct: '', // _design_fn não usa instruct (usa dropdowns)
           referenceAudioUrl: voiceMode === 'clone' ? (uploadedVoiceUrl || selectedVariation?.refAudioServerUrl || '') : '',
@@ -1188,6 +1214,18 @@ export default function VozProClient() {
                     placeholder="Digite o texto que deseja que a voz fale... Ex: Na compra de qualquer produto, ganhe 50% de desconto! Aproveite essa promoção exclusiva!"
                     rows={4}
                     className="bg-white/5 border-white/10 text-white placeholder:text-slate-600 resize-none focus:border-violet-500"
+                  />
+                </div>
+
+                {/* Pronunciation Optimization Toggle */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+                    <span className="text-xs text-slate-400">Otimização de pronúncia IA</span>
+                  </div>
+                  <Switch
+                    checked={pronunciationOptimization}
+                    onCheckedChange={setPronunciationOptimization}
                   />
                 </div>
 

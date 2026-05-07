@@ -516,7 +516,7 @@ export default function VozProClient() {
 
       let res: Response
 
-      // ===== OMNIVOICE: Modelo rapido (RTF 0.025) =====
+      // ===== VOZPRO TURBO: Modelo rapido (RTF 0.025) =====
       if (ttsModel === 'omnivoice') {
         // Design: parseia texto para dropdowns do VozPro. Auto: tudo Auto. Clone: não usa.
         const isAutoMode = voiceMode === 'auto'

@@ -3,10 +3,18 @@ import { getAdminSession } from '@/lib/auth'
 import { db } from '@/lib/db'
 
 // GET /api/tracks - List all tracks (public, only active)
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const { searchParams } = new URL(req.url)
+    const category = searchParams.get('category')
+
+    const where: Record<string, unknown> = { active: true }
+    if (category && category !== 'all') {
+      where.category = category
+    }
+
     const tracks = await db.track.findMany({
-      where: { active: true },
+      where,
       orderBy: { order: 'asc' },
     })
     return NextResponse.json(tracks)
@@ -25,7 +33,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json()
-    const { name, description, emoji, audioPath, duration, order } = body
+    const { name, description, emoji, category, audioPath, duration, order } = body
 
     if (!name || !name.trim()) {
       return NextResponse.json({ error: 'Nome é obrigatório' }, { status: 400 })
@@ -40,6 +48,7 @@ export async function POST(req: NextRequest) {
         name: name.trim(),
         description: description || '',
         emoji: emoji || '',
+        category: category || '',
         audioPath,
         duration: duration || 0,
         order: order || 0,

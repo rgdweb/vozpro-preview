@@ -14,7 +14,8 @@ import { Switch } from '@/components/ui/switch'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import {
   AudioWaveform, LogOut, Plus, Trash2, Edit, Upload, Music, Mic,
-  Loader2, RefreshCw, Volume2, FileAudio, CheckCircle2, Settings2
+  Loader2, RefreshCw, Volume2, FileAudio, CheckCircle2, Settings2,
+  FolderOpen, ChevronLeft, FolderPlus, Folder
 } from 'lucide-react'
 import { toast } from 'sonner'
 import AudioPlayer from '@/components/audio-player'
@@ -151,6 +152,7 @@ interface Voice {
   age: string
   accent: string
   pitch: string
+  category: string
   order: number
   active: boolean
   variations: VoiceVariation[]
@@ -161,10 +163,16 @@ interface Track {
   name: string
   description: string
   emoji: string
+  category: string
   audioPath: string
   duration: number
   order: number
   active: boolean
+}
+
+interface CategoryInfo {
+  name: string
+  count: number
 }
 
 const GENDER_OPTIONS = [
@@ -220,7 +228,7 @@ export default function AdminDashboard() {
 
   // Voice form state
   const [voiceForm, setVoiceForm] = useState({
-    name: '', description: '', gender: 'Auto', age: 'Auto', accent: 'Auto', pitch: 'Auto',
+    name: '', description: '', gender: 'Auto', age: 'Auto', accent: 'Auto', pitch: 'Auto', category: '',
   })
   const [editingVoiceId, setEditingVoiceId] = useState<string | null>(null)
   const [voiceDialogOpen, setVoiceDialogOpen] = useState(false)
@@ -238,7 +246,7 @@ export default function AdminDashboard() {
   const [pendingVoiceFile, setPendingVoiceFile] = useState<File | null>(null)
 
   // Track form state
-  const [trackForm, setTrackForm] = useState({ name: '', description: '', emoji: '' })
+  const [trackForm, setTrackForm] = useState({ name: '', description: '', emoji: '', category: '' })
   const [trackDialogOpen, setTrackDialogOpen] = useState(false)
   const [uploadingTrack, setUploadingTrack] = useState(false)
   const [trackFilePath, setTrackFilePath] = useState('')
@@ -249,6 +257,19 @@ export default function AdminDashboard() {
 
   // Pending track file (not uploaded yet, waiting for save)
   const [pendingTrackFile, setPendingTrackFile] = useState<{ blob: Blob; name: string } | null>(null)
+
+  // Category state
+  const [trackCategories, setTrackCategories] = useState<CategoryInfo[]>([])
+  const [voiceCategories, setVoiceCategories] = useState<CategoryInfo[]>([])
+  const [selectedTrackCategory, setSelectedTrackCategory] = useState<string | null>(null)
+  const [selectedVoiceCategory, setSelectedVoiceCategory] = useState<string | null>(null)
+
+  // Batch upload state
+  const [batchUploadOpen, setBatchUploadOpen] = useState(false)
+  const [batchUploadCategory, setBatchUploadCategory] = useState('')
+  const [batchFiles, setBatchFiles] = useState<File[]>([])
+  const [batchUploading, setBatchUploading] = useState(false)
+  const [batchProgress, setBatchProgress] = useState('')
 
   // Settings state
   const [enableVoiceUpload, setEnableVoiceUpload] = useState(false)
@@ -269,11 +290,13 @@ export default function AdminDashboard() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [voicesRes, tracksRes, configRes, settingsRes] = await Promise.all([
+      const [voicesRes, tracksRes, configRes, settingsRes, trackCatRes, voiceCatRes] = await Promise.all([
         fetch('/api/admin/voices'),
         fetch('/api/admin/tracks'),
         fetch('/api/server-config'),
         fetch('/api/admin/settings'),
+        fetch('/api/track-categories'),
+        fetch('/api/voice-categories'),
       ])
       if (voicesRes.ok) setVoices(await voicesRes.json())
       if (tracksRes.ok) setTracks(await tracksRes.json())
@@ -283,6 +306,8 @@ export default function AdminDashboard() {
         setEnableVoiceUpload(settingsData.enableVoiceUpload === 'true')
         setSettingsLoaded(true)
       }
+      if (trackCatRes.ok) setTrackCategories(await trackCatRes.json())
+      if (voiceCatRes.ok) setVoiceCategories(await voiceCatRes.json())
     } catch {
       toast.error('Erro ao carregar dados')
     } finally {
@@ -323,7 +348,7 @@ export default function AdminDashboard() {
       }
       setVoiceDialogOpen(false)
       setEditingVoiceId(null)
-      setVoiceForm({ name: '', description: '', gender: 'Auto', age: 'Auto', accent: 'Auto', pitch: 'Auto' })
+      setVoiceForm({ name: '', description: '', gender: 'Auto', age: 'Auto', accent: 'Auto', pitch: 'Auto', category: '' })
       loadData()
     } catch {
       toast.error('Erro ao salvar voz')
@@ -611,6 +636,7 @@ export default function AdminDashboard() {
           name: trackForm.name.trim(),
           description: trackForm.description,
           emoji: trackForm.emoji,
+          category: trackForm.category,
         }
         // Only update audio if a new one was uploaded
         if (audioUrl) {
@@ -638,7 +664,7 @@ export default function AdminDashboard() {
 
       setTrackDialogOpen(false)
       setEditingTrackId(null)
-      setTrackForm({ name: '', description: '', emoji: '' })
+      setTrackForm({ name: '', description: '', emoji: '', category: '' })
       setTrackFilePath('')
       setTrackDuration(0)
       setPendingTrackFile(null)
@@ -672,6 +698,50 @@ export default function AdminDashboard() {
       loadData()
     } catch {
       toast.error('Erro ao atualizar')
+    }
+  }
+
+  // --- BATCH UPLOAD ---
+  const handleBatchUpload = async () => {
+    if (batchFiles.length === 0) {
+      toast.error('Selecione pelo menos um arquivo')
+      return
+    }
+    if (!batchUploadCategory.trim()) {
+      toast.error('Informe a categoria para os arquivos')
+      return
+    }
+
+    setBatchUploading(true)
+    setBatchProgress(`Enviando ${batchFiles.length} arquivo(s)...`)
+
+    try {
+      const formData = new FormData()
+      formData.append('category', batchUploadCategory)
+      batchFiles.forEach(file => formData.append('files', file))
+
+      const res = await fetch('/api/batch-upload-tracks', {
+        method: 'POST',
+        body: formData,
+      })
+
+      const data = await res.json()
+
+      if (res.ok) {
+        toast.success(`${data.created} trilha(s) criada(s)!${data.failed > 0 ? ` ${data.failed} falha(s).` : ''}`)
+        setBatchUploadOpen(false)
+        setBatchFiles([])
+        setBatchUploadCategory('')
+        setSelectedTrackCategory(batchUploadCategory)
+        loadData()
+      } else {
+        toast.error(data.error || 'Erro no upload em lote')
+      }
+    } catch {
+      toast.error('Erro de conexão')
+    } finally {
+      setBatchUploading(false)
+      setBatchProgress('')
     }
   }
 
@@ -755,7 +825,7 @@ export default function AdminDashboard() {
                   <Button
                     onClick={() => {
                       setEditingVoiceId(null)
-                      setVoiceForm({ name: '', description: '', gender: 'Auto', age: 'Auto', accent: 'Auto', pitch: 'Auto' })
+                      setVoiceForm({ name: '', description: '', gender: 'Auto', age: 'Auto', accent: 'Auto', pitch: 'Auto', category: '' })
                     }}
                     className="bg-violet-600 hover:bg-violet-700 text-white gap-2"
                   >
@@ -844,6 +914,30 @@ export default function AdminDashboard() {
                         </Select>
                       </div>
                     </div>
+                    <div className="space-y-2">
+                      <Label className="text-slate-300">Categoria</Label>
+                      <div className="flex gap-2">
+                        {voiceCategories.length > 0 ? (
+                          <Select value={voiceForm.category || '__new__'} onValueChange={(v) => setVoiceForm(p => ({ ...p, category: v === '__new__' ? '' : v }))}>
+                            <SelectTrigger className="bg-slate-900/50 border-slate-600 text-white w-48">
+                              <SelectValue placeholder="Selecionar..." />
+                            </SelectTrigger>
+                            <SelectContent className="bg-slate-800 border-slate-700">
+                              {voiceCategories.map(c => (
+                                <SelectItem key={c.name} value={c.name}>{c.name}</SelectItem>
+                              ))}
+                              <SelectItem value="__new__">+ Nova categoria...</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        ) : null}
+                        <Input
+                          value={voiceForm.category || ''}
+                          onChange={(e) => setVoiceForm(p => ({ ...p, category: e.target.value }))}
+                          placeholder={voiceCategories.length > 0 ? 'Ou digite nova...' : 'Ex: Narradores, Vendas...'}
+                          className="bg-slate-900/50 border-slate-600 text-white"
+                        />
+                      </div>
+                    </div>
                   </div>
                   <DialogFooter>
                     <Button variant="ghost" onClick={() => setVoiceDialogOpen(false)} className="text-slate-400">Cancelar</Button>
@@ -859,7 +953,95 @@ export default function AdminDashboard() {
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-6 h-6 animate-spin text-violet-500" />
               </div>
-            ) : voices.length === 0 ? (
+            ) : selectedVoiceCategory ? (
+              /* INSIDE A VOICE CATEGORY */
+              <div>
+                <button
+                  onClick={() => setSelectedVoiceCategory(null)}
+                  className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300 mb-4 transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Todas as Pastas &gt; <span className="font-semibold">{selectedVoiceCategory}</span>
+                </button>
+                {voices.filter(v => v.category === selectedVoiceCategory).length === 0 ? (
+                  <Card className="bg-slate-800/50 border-slate-700">
+                    <CardContent className="py-12 text-center">
+                      <FolderOpen className="w-12 h-12 mx-auto mb-3 text-slate-600" />
+                      <p className="text-slate-400">Pasta vazia</p>
+                      <p className="text-sm text-slate-500 mt-1">Adicione vozes a esta categoria</p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="space-y-3">
+                    {voices.filter(v => v.category === selectedVoiceCategory).map((voice) => (
+                      <Card key={voice.id} className="bg-slate-800/50 border-slate-700">
+                        <CardContent className="py-4">
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-lg bg-violet-500/20 flex items-center justify-center">
+                                <Mic className="w-5 h-5 text-violet-400" />
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h3 className="font-semibold text-white">{voice.name}</h3>
+                                  <Badge variant={voice.active ? 'default' : 'secondary'} className={voice.active ? 'bg-emerald-600' : 'bg-slate-600'}>
+                                    {voice.active ? 'Ativa' : 'Inativa'}
+                                  </Badge>
+                                </div>
+                                <p className="text-sm text-slate-400">{voice.description || 'Sem descrição'}</p>
+                                <div className="flex gap-1 mt-1">
+                                  {voice.gender !== 'Auto' && <Badge variant="outline" className="text-xs border-slate-600 text-slate-400">{voice.gender}</Badge>}
+                                  {voice.age !== 'Auto' && <Badge variant="outline" className="text-xs border-slate-600 text-slate-400">{voice.age}</Badge>}
+                                  {voice.pitch !== 'Auto' && <Badge variant="outline" className="text-xs border-slate-600 text-slate-400">{voice.pitch}</Badge>}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Switch checked={voice.active} onCheckedChange={() => handleToggleVoice(voice)} />
+                              <Button variant="ghost" size="icon" onClick={() => { setEditingVoiceId(voice.id); setVoiceForm({ name: voice.name, description: voice.description, gender: voice.gender, age: voice.age, accent: voice.accent, pitch: voice.pitch, category: voice.category || '' }); setVoiceDialogOpen(true) }} className="text-slate-400 hover:text-white"><Edit className="w-4 h-4" /></Button>
+                              <Button variant="ghost" size="icon" onClick={() => handleDeleteVoice(voice.id)} className="text-slate-400 hover:text-red-400"><Trash2 className="w-4 h-4" /></Button>
+                            </div>
+                          </div>
+                          {/* Variations */}
+                          <div className="border-t border-slate-700 pt-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-sm font-medium text-slate-300">Variações ({voice.variations.length})</span>
+                              <Button size="sm" variant="outline" onClick={() => { setEditingVariationId(null); setAddingVariationTo(voice.id); setVariationForm({ label: '', emoji: '', refAudioPath: '', serverUrl: '', filename: '', refAudioName: '', refText: '', instruct: 'none' }); setPendingVoiceFile(null); setVariationDialogOpen(true) }} className="border-slate-600 text-slate-300 hover:bg-slate-700 gap-1"><Plus className="w-3 h-3" />Variação</Button>
+                            </div>
+                            {voice.variations.length === 0 ? (
+                              <p className="text-sm text-slate-500 italic">Nenhuma variação.</p>
+                            ) : (
+                              <div className="space-y-2">
+                                {voice.variations.map((v) => (
+                                  <div key={v.id} className={`flex items-center justify-between rounded-lg border px-3 py-2 ${!v.active ? 'border-slate-800 bg-slate-900/20 opacity-60' : v.refAudioPath ? 'border-emerald-800/40 bg-emerald-900/10' : 'border-amber-800/40 bg-amber-900/10'}`}>
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className="text-lg shrink-0">{v.emoji || '🎙️'}</span>
+                                      <div className="min-w-0">
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span className="text-sm font-medium text-slate-300">{v.label}</span>
+                                          {v.refAudioPath ? (<Badge variant="outline" className="text-[10px] border-emerald-700 text-emerald-400 px-1.5 py-0"><Volume2 className="w-2.5 h-2.5 mr-0.5" /> Audio OK</Badge>) : (<Badge variant="outline" className="text-[10px] border-amber-700 text-amber-400 px-1.5 py-0">Sem audio</Badge>)}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <input type="file" accept="audio/*" onChange={(e) => handleQuickUploadAudio(v.id, e)} className="hidden" id={`quick-audio-${selectedVoiceCategory}-${v.id}`} />
+                                      <Button variant="ghost" size="sm" onClick={() => document.getElementById(`quick-audio-${selectedVoiceCategory}-${v.id}`)?.click()} className={`h-7 px-2 text-xs gap-1 ${v.refAudioPath ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30' : 'text-amber-400 hover:text-amber-300 hover:bg-amber-900/30'}`}><Upload className="w-3 h-3" />{v.refAudioPath ? 'Update' : 'Add'}</Button>
+                                      <Button variant="ghost" size="sm" onClick={() => { setEditingVariationId(v.id); setAddingVariationTo(null); setVariationForm({ label: v.label, emoji: v.emoji, refAudioPath: '', serverUrl: '', filename: '', refAudioName: v.refAudioName, refText: v.refText, instruct: v.instruct || 'none' }); setPendingVoiceFile(null); setVariationDialogOpen(true) }} className="h-7 px-2 text-xs text-slate-400 hover:text-white hover:bg-slate-700 gap-1"><Edit className="w-3 h-3" />Editar</Button>
+                                      <Switch checked={v.active} onCheckedChange={() => handleToggleVariation(v)} className="scale-75" />
+                                      <Button variant="ghost" size="icon" onClick={() => handleDeleteVariation(v.id)} className="text-slate-500 hover:text-red-400 h-7 w-7"><Trash2 className="w-3 h-3" /></Button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : voiceCategories.length === 0 && voices.length === 0 ? (
               <Card className="bg-slate-800/50 border-slate-700">
                 <CardContent className="py-12 text-center">
                   <Mic className="w-12 h-12 mx-auto mb-3 text-slate-600" />
@@ -868,204 +1050,52 @@ export default function AdminDashboard() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-3">
-                {voices.map((voice) => (
-                  <Card key={voice.id} className="bg-slate-800/50 border-slate-700">
-                    <CardContent className="py-4">
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-lg bg-violet-500/20 flex items-center justify-center">
-                            <Mic className="w-5 h-5 text-violet-400" />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h3 className="font-semibold text-white">{voice.name}</h3>
-                              <Badge variant={voice.active ? 'default' : 'secondary'} className={voice.active ? 'bg-emerald-600' : 'bg-slate-600'}>
-                                {voice.active ? 'Ativa' : 'Inativa'}
-                              </Badge>
-                            </div>
-                            <p className="text-sm text-slate-400">{voice.description || 'Sem descrição'}</p>
-                            <div className="flex gap-1 mt-1">
-                              {voice.gender !== 'Auto' && <Badge variant="outline" className="text-xs border-slate-600 text-slate-400">{voice.gender}</Badge>}
-                              {voice.age !== 'Auto' && <Badge variant="outline" className="text-xs border-slate-600 text-slate-400">{voice.age}</Badge>}
-                              {voice.pitch !== 'Auto' && <Badge variant="outline" className="text-xs border-slate-600 text-slate-400">{voice.pitch}</Badge>}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Switch
-                            checked={voice.active}
-                            onCheckedChange={() => handleToggleVoice(voice)}
-                          />
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              setEditingVoiceId(voice.id)
-                              setVoiceForm({
-                                name: voice.name,
-                                description: voice.description,
-                                gender: voice.gender,
-                                age: voice.age,
-                                accent: voice.accent,
-                                pitch: voice.pitch,
-                              })
-                              setVoiceDialogOpen(true)
-                            }}
-                            className="text-slate-400 hover:text-white"
-                          >
-                            <Edit className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleDeleteVoice(voice.id)}
-                            className="text-slate-400 hover:text-red-400"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </div>
-
-                      {/* Variations */}
-                      <div className="border-t border-slate-700 pt-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-sm font-medium text-slate-300">
-                            Variações ({voice.variations.length})
-                          </span>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setEditingVariationId(null)
-                              setAddingVariationTo(voice.id)
-                              setVariationForm({ label: '', emoji: '', refAudioPath: '', serverUrl: '', filename: '', refAudioName: '', refText: '', instruct: 'none' })
-                              setPendingVoiceFile(null)
-                              setVariationDialogOpen(true)
-                            }}
-                            className="border-slate-600 text-slate-300 hover:bg-slate-700 gap-1"
-                          >
-                            <Plus className="w-3 h-3" />
-                            Variação
-                          </Button>
-                        </div>
-
-                        {voice.variations.length === 0 ? (
-                          <p className="text-sm text-slate-500 italic">Nenhuma variação. Adicione variações com diferentes emoções.</p>
-                        ) : (
-                          <div className="space-y-2">
-                            {voice.variations.map((v) => (
-                              <div
-                                key={v.id}
-                                className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
-                                  !v.active
-                                    ? 'border-slate-800 bg-slate-900/20 opacity-60'
-                                    : v.refAudioPath
-                                      ? 'border-emerald-800/40 bg-emerald-900/10'
-                                      : 'border-amber-800/40 bg-amber-900/10'
-                                }`}
-                              >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <span className="text-lg shrink-0">{v.emoji || '🎙️'}</span>
-                                  <div className="min-w-0">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="text-sm font-medium text-slate-300">{v.label}</span>
-                                      {v.refAudioPath ? (
-                                        <Badge variant="outline" className="text-[10px] border-emerald-700 text-emerald-400 px-1.5 py-0">
-                                          <Volume2 className="w-2.5 h-2.5 mr-0.5" /> Audio OK
-                                        </Badge>
-                                      ) : (
-                                        <Badge variant="outline" className="text-[10px] border-amber-700 text-amber-400 px-1.5 py-0">
-                                          Sem audio
-                                        </Badge>
-                                      )}
-                                      {!v.active && (
-                                        <Badge variant="outline" className="text-[10px] border-slate-600 text-slate-500 px-1.5 py-0">
-                                          Inativa
-                                        </Badge>
-                                      )}
-                                      {v.instruct && (
-                                        <Badge variant="outline" className="text-[10px] border-slate-600 text-slate-500 px-1.5 py-0">
-                                          {v.instruct}
-                                        </Badge>
-                                      )}
-                                    </div>
-                                    {v.refAudioName && (
-                                      <p className="text-[10px] text-slate-500 truncate">{v.refAudioName}</p>
-                                    )}
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-1 shrink-0">
-                                  {/* Add/Update Audio */}
-                                  <input
-                                    type="file"
-                                    accept="audio/*"
-                                    onChange={(e) => handleQuickUploadAudio(v.id, e)}
-                                    className="hidden"
-                                    id={`quick-audio-${v.id}`}
-                                  />
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => document.getElementById(`quick-audio-${v.id}`)?.click()}
-                                    className={`h-7 px-2 text-xs gap-1 ${
-                                      v.refAudioPath
-                                        ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30'
-                                        : 'text-amber-400 hover:text-amber-300 hover:bg-amber-900/30'
-                                    }`}
-                                  >
-                                    <Upload className="w-3 h-3" />
-                                    {v.refAudioPath ? 'Update' : 'Add Audio'}
-                                  </Button>
-                                  {/* Edit variation */}
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => {
-                                      setEditingVariationId(v.id)
-                                      setAddingVariationTo(null)
-                                      setVariationForm({
-                                        label: v.label,
-                                        emoji: v.emoji,
-                                        refAudioPath: '',
-                                        serverUrl: '',
-                                        filename: '',
-                                        refAudioName: v.refAudioName,
-                                        refText: v.refText,
-                                        instruct: v.instruct || 'none',
-                                      })
-                                      setPendingVoiceFile(null)
-                                      setVariationDialogOpen(true)
-                                    }}
-                                    className="h-7 px-2 text-xs text-slate-400 hover:text-white hover:bg-slate-700 gap-1"
-                                  >
-                                    <Edit className="w-3 h-3" />
-                                    Editar
-                                  </Button>
-                                  {/* Toggle active */}
-                                  <Switch
-                                    checked={v.active}
-                                    onCheckedChange={() => handleToggleVariation(v)}
-                                    className="scale-75"
-                                  />
-                                  {/* Delete */}
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => handleDeleteVariation(v.id)}
-                                    className="text-slate-500 hover:text-red-400 h-7 w-7"
-                                  >
-                                    <Trash2 className="w-3 h-3" />
-                                  </Button>
+              /* FOLDER GRID VIEW */
+              <div>
+                {/* Uncategorized voices without a folder */}
+                {voices.filter(v => !v.category).length > 0 && (
+                  <div className="mb-6">
+                    <h3 className="text-sm font-medium text-slate-400 mb-2">Sem categoria</h3>
+                    <div className="space-y-2">
+                      {voices.filter(v => !v.category).map((voice) => (
+                        <Card key={voice.id} className="bg-slate-800/50 border-slate-700">
+                          <CardContent className="py-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-violet-500/20 flex items-center justify-center"><Mic className="w-4 h-4 text-violet-400" /></div>
+                                <div>
+                                  <span className="font-medium text-sm text-white">{voice.name}</span>
+                                  <p className="text-xs text-slate-500">{voice.variations.length} variação(ões)</p>
                                 </div>
                               </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                              <div className="flex items-center gap-1">
+                                <Switch checked={voice.active} onCheckedChange={() => handleToggleVoice(voice)} className="scale-75" />
+                                <Button variant="ghost" size="icon" onClick={() => { setEditingVoiceId(voice.id); setVoiceForm({ name: voice.name, description: voice.description, gender: voice.gender, age: voice.age, accent: voice.accent, pitch: voice.pitch, category: voice.category || '' }); setVoiceDialogOpen(true) }} className="text-slate-400 hover:text-white h-8 w-8"><Edit className="w-3.5 h-3.5" /></Button>
+                                <Button variant="ghost" size="icon" onClick={() => handleDeleteVoice(voice.id)} className="text-slate-400 hover:text-red-400 h-8 w-8"><Trash2 className="w-3.5 h-3.5" /></Button>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Category folder grid */}
+                {voiceCategories.length > 0 && (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                    {voiceCategories.map(cat => (
+                      <button
+                        key={cat.name}
+                        onClick={() => setSelectedVoiceCategory(cat.name)}
+                        className="flex flex-col items-center gap-2 p-4 rounded-xl border border-slate-700 bg-slate-800/50 hover:bg-slate-700/50 hover:border-violet-500/50 hover:scale-105 transition-all duration-200 cursor-pointer group"
+                      >
+                        <span className="text-3xl group-hover:scale-110 transition-transform">📁</span>
+                        <span className="text-sm font-medium text-white text-center truncate w-full">{cat.name}</span>
+                        <span className="text-xs text-slate-400">{cat.count} voz(es)</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </TabsContent>
@@ -1222,7 +1252,7 @@ export default function AdminDashboard() {
                   <Button
                     onClick={() => {
                       setEditingTrackId(null)
-                      setTrackForm({ name: '', description: '', emoji: '' })
+                      setTrackForm({ name: '', description: '', emoji: '', category: '' })
                       setTrackFilePath('')
                       setTrackDuration(0)
                       setPendingTrackFile(null)
@@ -1270,6 +1300,30 @@ export default function AdminDashboard() {
                         className="bg-slate-900/50 border-slate-600 text-white resize-none"
                         rows={2}
                       />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-slate-300">Categoria</Label>
+                      <div className="flex gap-2">
+                        {trackCategories.length > 0 ? (
+                          <Select value={trackForm.category || '__new__'} onValueChange={(v) => setTrackForm(p => ({ ...p, category: v === '__new__' ? '' : v }))}>
+                            <SelectTrigger className="bg-slate-900/50 border-slate-600 text-white w-48">
+                              <SelectValue placeholder="Selecionar..." />
+                            </SelectTrigger>
+                            <SelectContent className="bg-slate-800 border-slate-700">
+                              {trackCategories.map(c => (
+                                <SelectItem key={c.name} value={c.name}>{c.name}</SelectItem>
+                              ))}
+                              <SelectItem value="__new__">+ Nova categoria...</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        ) : null}
+                        <Input
+                          value={trackForm.category || ''}
+                          onChange={(e) => setTrackForm(p => ({ ...p, category: e.target.value }))}
+                          placeholder={trackCategories.length > 0 ? 'Ou digite nova...' : 'Ex: BOSSA, JAZZ, ROCK...'}
+                          className="bg-slate-900/50 border-slate-600 text-white"
+                        />
+                      </div>
                     </div>
                     <div className="space-y-2">
                       <Label className="text-slate-300">
@@ -1338,92 +1392,191 @@ export default function AdminDashboard() {
               </Dialog>
             </div>
 
+            {/* Batch Upload Dialog */}
+            <Dialog open={batchUploadOpen} onOpenChange={(open) => { setBatchUploadOpen(open); if (!open) { setBatchFiles([]); setBatchUploadCategory('') }}}>
+              <DialogTrigger asChild>
+                <Button className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">
+                  <Upload className="w-4 h-4" />
+                  Upload em Lote
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Upload em Lote</DialogTitle>
+                  <DialogDescription className="text-slate-400">Envie múltiplos arquivos de áudio de uma vez para uma categoria.</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-slate-300">Categoria *</Label>
+                    <div className="flex gap-2">
+                      {trackCategories.length > 0 ? (
+                        <Select value={batchUploadCategory || '__new__'} onValueChange={(v) => setBatchUploadCategory(v === '__new__' ? '' : v)}>
+                          <SelectTrigger className="bg-slate-900/50 border-slate-600 text-white w-48">
+                            <SelectValue placeholder="Selecionar..." />
+                          </SelectTrigger>
+                          <SelectContent className="bg-slate-800 border-slate-700">
+                            {trackCategories.map(c => (<SelectItem key={c.name} value={c.name}>{c.name}</SelectItem>))}
+                            <SelectItem value="__new__">+ Nova...</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : null}
+                      <Input value={batchUploadCategory} onChange={(e) => setBatchUploadCategory(e.target.value)} placeholder="Ex: BOSSA, JAZZ..." className="bg-slate-900/50 border-slate-600 text-white" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-slate-300">Arquivos de Áudio * (MP3, WAV, OGG...)</Label>
+                    <input type="file" accept="audio/*" multiple onChange={(e) => { if (e.target.files) setBatchFiles(Array.from(e.target.files)) }} className="hidden" id="batch-file-input" />
+                    <Button type="button" variant="outline" onClick={() => document.getElementById('batch-file-input')?.click()} className="w-full border-slate-500 text-white hover:bg-slate-700 gap-2">
+                      <FolderPlus className="w-4 h-4" />
+                      {batchFiles.length > 0 ? `${batchFiles.length} arquivo(s) selecionado(s)` : 'Selecionar arquivos...'}
+                    </Button>
+                    {batchFiles.length > 0 && (
+                      <div className="max-h-40 overflow-y-auto space-y-1 text-xs text-slate-400">
+                        {batchFiles.map((f, i) => (<p key={i}>🎵 {f.name} ({(f.size / 1024 / 1024).toFixed(1)}MB)</p>))}
+                      </div>
+                    )}
+                  </div>
+                  {batchProgress && (
+                    <div className="flex items-center gap-2 text-sm text-slate-300">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      {batchProgress}
+                    </div>
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button variant="ghost" onClick={() => setBatchUploadOpen(false)} className="text-slate-400">Cancelar</Button>
+                  <Button onClick={handleBatchUpload} disabled={batchUploading || batchFiles.length === 0 || !batchUploadCategory.trim()} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                    {batchUploading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
+                    Enviar {batchFiles.length} arquivo(s)
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
             {loading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-6 h-6 animate-spin text-violet-500" />
               </div>
-            ) : tracks.length === 0 ? (
+            ) : selectedTrackCategory ? (
+              /* INSIDE A TRACK CATEGORY */
+              <div>
+                <button
+                  onClick={() => setSelectedTrackCategory(null)}
+                  className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300 mb-4 transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Todas as Pastas &gt; <span className="font-semibold">{selectedTrackCategory}</span>
+                </button>
+                {tracks.filter(t => t.category === selectedTrackCategory).length === 0 ? (
+                  <Card className="bg-slate-800/50 border-slate-700">
+                    <CardContent className="py-12 text-center">
+                      <FolderOpen className="w-12 h-12 mx-auto mb-3 text-slate-600" />
+                      <p className="text-slate-400">Pasta vazia</p>
+                      <p className="text-sm text-slate-500 mt-1">Adicione trilhas a esta categoria</p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="space-y-3">
+                    {tracks.filter(t => t.category === selectedTrackCategory).map((track) => (
+                      <Card key={track.id} className="bg-slate-800/50 border-slate-700">
+                        <CardContent className="py-4">
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
+                                <Music className="w-5 h-5 text-purple-400" />
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-lg">{track.emoji || '🎵'}</span>
+                                  <h3 className="font-semibold text-white">{track.name}</h3>
+                                  <Badge variant={track.active ? 'default' : 'secondary'} className={track.active ? 'bg-emerald-600' : 'bg-slate-600'}>
+                                    {track.active ? 'Ativa' : 'Inativa'}
+                                  </Badge>
+                                </div>
+                                <p className="text-sm text-slate-400">{track.description || 'Sem descrição'}</p>
+                                {track.duration > 0 && (
+                                  <p className="text-xs text-slate-500 mt-0.5">
+                                    Duração: {Math.floor(track.duration / 60)}:{String(Math.floor(track.duration % 60)).padStart(2, '0')}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Switch checked={track.active} onCheckedChange={() => handleToggleTrack(track)} />
+                              <Button variant="ghost" size="icon" onClick={() => { setEditingTrackId(track.id); setTrackForm({ name: track.name, description: track.description || '', emoji: track.emoji || '', category: track.category || '' }); setTrackFilePath(''); setTrackDuration(track.duration); setPendingTrackFile(null); setTrackDialogOpen(true) }} className="text-slate-400 hover:text-white"><Edit className="w-4 h-4" /></Button>
+                              <Button variant="ghost" size="icon" onClick={() => handleDeleteTrack(track.id)} className="text-slate-400 hover:text-red-400"><Trash2 className="w-4 h-4" /></Button>
+                            </div>
+                          </div>
+                          {track.audioPath && (
+                            <div className="mt-2 rounded-lg bg-slate-900/50 border border-slate-700 p-2">
+                              <div className="flex items-center gap-2 mb-1">
+                                <Volume2 className="w-3.5 h-3.5 text-purple-400" />
+                                <span className="text-xs text-slate-400">Preview</span>
+                              </div>
+                              <AudioPlayer audioPath={track.audioPath} />
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : trackCategories.length === 0 && tracks.length === 0 ? (
               <Card className="bg-slate-800/50 border-slate-700">
                 <CardContent className="py-12 text-center">
                   <Music className="w-12 h-12 mx-auto mb-3 text-slate-600" />
                   <p className="text-slate-400">Nenhuma trilha cadastrada</p>
-                  <p className="text-sm text-slate-500 mt-1">Clique em &quot;Nova Trilha&quot; para começar</p>
+                  <p className="text-sm text-slate-500 mt-1">Clique em &quot;Nova Trilha&quot; ou &quot;Upload em Lote&quot; para começar</p>
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-3">
-                {tracks.map((track) => (
-                  <Card key={track.id} className="bg-slate-800/50 border-slate-700">
-                    <CardContent className="py-4">
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
-                            <Music className="w-5 h-5 text-purple-400" />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-lg">{track.emoji || '🎵'}</span>
-                              <h3 className="font-semibold text-white">{track.name}</h3>
-                              <Badge variant={track.active ? 'default' : 'secondary'} className={track.active ? 'bg-emerald-600' : 'bg-slate-600'}>
-                                {track.active ? 'Ativa' : 'Inativa'}
-                              </Badge>
+              /* FOLDER GRID VIEW */
+              <div>
+                {/* Uncategorized tracks */}
+                {tracks.filter(t => !t.category).length > 0 && (
+                  <div className="mb-6">
+                    <h3 className="text-sm font-medium text-slate-400 mb-2">Sem categoria</h3>
+                    <div className="space-y-2">
+                      {tracks.filter(t => !t.category).map((track) => (
+                        <Card key={track.id} className="bg-slate-800/50 border-slate-700">
+                          <CardContent className="py-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center"><Music className="w-4 h-4 text-purple-400" /></div>
+                                <div>
+                                  <span className="font-medium text-sm text-white">{track.name}</span>
+                                  <p className="text-xs text-slate-500">{track.description || 'Sem descrição'}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Switch checked={track.active} onCheckedChange={() => handleToggleTrack(track)} className="scale-75" />
+                                <Button variant="ghost" size="icon" onClick={() => { setEditingTrackId(track.id); setTrackForm({ name: track.name, description: track.description || '', emoji: track.emoji || '', category: track.category || '' }); setTrackFilePath(''); setTrackDuration(track.duration); setPendingTrackFile(null); setTrackDialogOpen(true) }} className="text-slate-400 hover:text-white h-8 w-8"><Edit className="w-3.5 h-3.5" /></Button>
+                                <Button variant="ghost" size="icon" onClick={() => handleDeleteTrack(track.id)} className="text-slate-400 hover:text-red-400 h-8 w-8"><Trash2 className="w-3.5 h-3.5" /></Button>
+                              </div>
                             </div>
-                            <p className="text-sm text-slate-400">{track.description || 'Sem descrição'}</p>
-                            {track.duration > 0 && (
-                              <p className="text-xs text-slate-500 mt-0.5">
-                                Duração: {Math.floor(track.duration / 60)}:{String(Math.floor(track.duration % 60)).padStart(2, '0')}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Switch
-                            checked={track.active}
-                            onCheckedChange={() => handleToggleTrack(track)}
-                          />
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              setEditingTrackId(track.id)
-                              setTrackForm({
-                                name: track.name,
-                                description: track.description || '',
-                                emoji: track.emoji || '',
-                              })
-                              setTrackFilePath('')
-                              setTrackDuration(track.duration)
-                              setPendingTrackFile(null)
-                              setTrackDialogOpen(true)
-                            }}
-                            className="text-slate-400 hover:text-white"
-                          >
-                            <Edit className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleDeleteTrack(track.id)}
-                            className="text-slate-400 hover:text-red-400"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </div>
-
-                      {/* Audio Preview */}
-                      {track.audioPath && (
-                        <div className="mt-2 rounded-lg bg-slate-900/50 border border-slate-700 p-2">
-                          <div className="flex items-center gap-2 mb-1">
-                            <Volume2 className="w-3.5 h-3.5 text-purple-400" />
-                            <span className="text-xs text-slate-400">Preview</span>
-                          </div>
-                          <AudioPlayer audioPath={track.audioPath} />
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Category folder grid */}
+                {trackCategories.length > 0 && (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                    {trackCategories.map(cat => (
+                      <button
+                        key={cat.name}
+                        onClick={() => setSelectedTrackCategory(cat.name)}
+                        className="flex flex-col items-center gap-2 p-4 rounded-xl border border-slate-700 bg-slate-800/50 hover:bg-slate-700/50 hover:border-violet-500/50 hover:scale-105 transition-all duration-200 cursor-pointer group"
+                      >
+                        <span className="text-3xl group-hover:scale-110 transition-transform">📁</span>
+                        <span className="text-sm font-medium text-white text-center truncate w-full">{cat.name}</span>
+                        <span className="text-xs text-slate-400">{cat.count} trilha(s)</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </TabsContent>

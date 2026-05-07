@@ -39,6 +39,7 @@ export async function PUT(
         ...(body.name !== undefined && { name: body.name.trim() }),
         ...(body.description !== undefined && { description: body.description }),
         ...(body.emoji !== undefined && { emoji: body.emoji }),
+        ...(body.category !== undefined && { category: body.category }),
         ...(body.audioPath !== undefined && { audioPath: body.audioPath }),
         ...(body.duration !== undefined && { duration: body.duration }),
         ...(body.order !== undefined && { order: body.order }),

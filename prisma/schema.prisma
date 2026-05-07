@@ -18,6 +18,7 @@ model Voice {
   age         String            @default("Auto") // child, teenager, young adult, middle-aged, elderly, Auto
   accent      String            @default("Auto") // portuguese accent, american accent, etc
   pitch       String            @default("Auto") // low pitch, moderate pitch, high pitch, etc
+  category    String            @default("")
   previewUrl  String            @default("") // URL to preview audio
   order       Int               @default(0)
   active      Boolean           @default(true)
@@ -49,6 +50,7 @@ model Track {
   name        String   // e.g. "Corporativo", "Eletrônica", "Acústica"
   description String   @default("")
   emoji       String   @default("")
+  category    String   @default("")
   audioPath   String   // URL for the track file (PHP hosting)
   duration    Float    @default(0) // duration in seconds
   order       Int      @default(0)

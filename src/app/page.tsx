@@ -14,7 +14,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   AudioWaveform, Sparkles, Loader2, Download, Play, Pause, Square,
   Volume2, Music, Mic, ChevronRight, Settings2, Globe, Bug, Copy, ChevronDown,
-  Upload, CheckCircle2, Zap
+  Upload, CheckCircle2, Zap, FolderOpen, ChevronLeft, Folder
 } from 'lucide-react'
 import { toast } from 'sonner'
 import AudioPlayer from '@/components/audio-player'
@@ -52,10 +52,16 @@ interface Track {
   name: string
   description: string
   emoji: string
+  category: string
   audioPath: string
   duration: number
   order: number
   active: boolean
+}
+
+interface CategoryInfo {
+  name: string
+  count: number
 }
 
 interface DuckingConfig {
@@ -313,6 +319,10 @@ function writeString(view: DataView, offset: number, str: string) {
 export default function VozProClient() {
   const [voices, setVoices] = useState<Voice[]>([])
   const [tracks, setTracks] = useState<Track[]>([])
+  const [voiceCategories, setVoiceCategories] = useState<CategoryInfo[]>([])
+  const [trackCategories, setTrackCategories] = useState<CategoryInfo[]>([])
+  const [selectedVoiceCategory, setSelectedVoiceCategory] = useState<string | null>(null)
+  const [selectedTrackCategory, setSelectedTrackCategory] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   // Selections
@@ -374,11 +384,13 @@ export default function VozProClient() {
     const loadData = async () => {
       setLoading(true)
       try {
-        const [voicesRes, tracksRes, configRes, settingsRes] = await Promise.all([
+        const [voicesRes, tracksRes, configRes, settingsRes, trackCatRes, voiceCatRes] = await Promise.all([
           fetch('/api/voices'),
           fetch('/api/tracks'),
           fetch('/api/generate-config'),
           fetch('/api/settings'),
+          fetch('/api/track-categories'),
+          fetch('/api/voice-categories'),
         ])
         if (voicesRes.ok) {
           const voicesData = await voicesRes.json()
@@ -415,6 +427,8 @@ export default function VozProClient() {
           const settingsData = await settingsRes.json()
           setEnableFrontendUpload(!!settingsData.enableVoiceUpload)
         }
+        if (trackCatRes.ok) setTrackCategories(await trackCatRes.json())
+        if (voiceCatRes.ok) setVoiceCategories(await voiceCatRes.json())
         // Verificar se VozPro server esta disponivel
         try {
           const ovRes = await fetch('/api/omnivoice-generate')
@@ -1069,9 +1083,121 @@ export default function VozProClient() {
               <CardContent className="space-y-4">
                 {voices.length === 0 ? (
                   <p className="text-slate-400 text-center py-6">Nenhuma voz disponível no momento</p>
-                ) : (
+                ) : selectedVoiceCategory ? (
+                  /* INSIDE A VOICE CATEGORY */
                   <>
-                    {/* Voice cards */}
+                    <button
+                      onClick={() => setSelectedVoiceCategory(null)}
+                      className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300 transition-colors"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      Todas &gt; <span className="font-semibold">{selectedVoiceCategory}</span>
+                    </button>
+                    {voices.filter(v => v.category === selectedVoiceCategory).length === 0 ? (
+                      <div className="text-center py-6">
+                        <FolderOpen className="w-8 h-8 mx-auto mb-2 text-slate-600" />
+                        <p className="text-slate-500 text-sm">Pasta vazia</p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {voices.filter(v => v.category === selectedVoiceCategory).map((voice) => (
+                            <button
+                              key={voice.id}
+                              onClick={() => setSelectedVoiceId(voice.id)}
+                              className={`p-3 rounded-xl border text-left transition-all ${
+                                selectedVoiceId === voice.id
+                                  ? 'border-violet-500 bg-violet-500/20 shadow-lg shadow-violet-500/10'
+                                  : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 mb-1">
+                                <Mic className={`w-4 h-4 ${selectedVoiceId === voice.id ? 'text-violet-400' : 'text-slate-500'}`} />
+                                <span className={`font-medium text-sm ${selectedVoiceId === voice.id ? 'text-violet-200' : 'text-slate-300'}`}>
+                                  {voice.name}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-500 line-clamp-1">{voice.description}</p>
+                            </button>
+                          ))}
+                        </div>
+                        {selectedVoice && selectedVoice.variations.length > 0 && (
+                          <div>
+                            <p className="text-sm font-medium text-slate-300 mb-2">Estilo / Emoção</p>
+                            <div className="flex flex-wrap gap-2">
+                              {selectedVoice.variations.map((v) => (
+                                <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
+                                  <span>{v.emoji || '🎙️'}</span>
+                                  <span>{v.label}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </>
+                ) : voiceCategories.length > 0 ? (
+                  /* FOLDER GRID VIEW */
+                  <>
+                    {/* Uncategorized voices */}
+                    {voices.filter(v => !v.category).length > 0 && (
+                      <div className="mb-4">
+                        <p className="text-xs text-slate-500 mb-2">Sem categoria</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {voices.filter(v => !v.category).map((voice) => (
+                            <button
+                              key={voice.id}
+                              onClick={() => setSelectedVoiceId(voice.id)}
+                              className={`p-3 rounded-xl border text-left transition-all ${
+                                selectedVoiceId === voice.id
+                                  ? 'border-violet-500 bg-violet-500/20 shadow-lg shadow-violet-500/10'
+                                  : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 mb-1">
+                                <Mic className={`w-4 h-4 ${selectedVoiceId === voice.id ? 'text-violet-400' : 'text-slate-500'}`} />
+                                <span className={`font-medium text-sm ${selectedVoiceId === voice.id ? 'text-violet-200' : 'text-slate-300'}`}>
+                                  {voice.name}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-500 line-clamp-1">{voice.description}</p>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                      {voiceCategories.map(cat => (
+                        <button
+                          key={cat.name}
+                          onClick={() => setSelectedVoiceCategory(cat.name)}
+                          className="flex flex-col items-center gap-2 p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-violet-500/10 hover:border-violet-500/50 hover:scale-105 transition-all duration-200 cursor-pointer group"
+                        >
+                          <span className="text-3xl group-hover:scale-110 transition-transform">📁</span>
+                          <span className="text-sm font-medium text-white text-center truncate w-full">{cat.name}</span>
+                          <span className="text-xs text-slate-500">{cat.count} voz(es)</span>
+                        </button>
+                      ))}
+                    </div>
+                    {/* Show variations for uncategorized voices if selected */}
+                    {selectedVoice && !selectedVoice.category && selectedVoice.variations.length > 0 && (
+                      <div>
+                        <p className="text-sm font-medium text-slate-300 mb-2">Estilo / Emoção</p>
+                        <div className="flex flex-wrap gap-2">
+                          {selectedVoice.variations.map((v) => (
+                            <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
+                              <span>{v.emoji || '🎙️'}</span>
+                              <span>{v.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  /* No categories - show flat list as before */
+                  <>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       {voices.map((voice) => (
                         <button
@@ -1093,22 +1219,12 @@ export default function VozProClient() {
                         </button>
                       ))}
                     </div>
-
-                    {/* Emotion/Style Variations */}
                     {selectedVoice && selectedVoice.variations.length > 0 && (
                       <div>
                         <p className="text-sm font-medium text-slate-300 mb-2">Estilo / Emoção</p>
                         <div className="flex flex-wrap gap-2">
                           {selectedVoice.variations.map((v) => (
-                            <button
-                              key={v.id}
-                              onClick={() => setSelectedVariationId(v.id)}
-                              className={`px-4 py-2 rounded-full border text-sm transition-all flex items-center gap-1.5 ${
-                                selectedVariationId === v.id
-                                  ? 'border-violet-500 bg-violet-500/20 text-violet-200'
-                                  : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'
-                              }`}
-                            >
+                            <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
                               <span>{v.emoji || '🎙️'}</span>
                               <span>{v.label}</span>
                             </button>
@@ -1334,7 +1450,98 @@ export default function VozProClient() {
                 <CardContent className="space-y-3">
                   {tracks.length === 0 ? (
                     <p className="text-slate-500 text-sm">Nenhuma trilha disponível</p>
+                  ) : selectedTrackCategory ? (
+                    /* INSIDE A TRACK CATEGORY */
+                    <>
+                      <button
+                        onClick={() => setSelectedTrackCategory(null)}
+                        className="flex items-center gap-2 text-sm text-purple-400 hover:text-purple-300 transition-colors"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                        Todas &gt; <span className="font-semibold">{selectedTrackCategory}</span>
+                      </button>
+                      {tracks.filter(t => t.category === selectedTrackCategory).length === 0 ? (
+                        <div className="text-center py-6">
+                          <FolderOpen className="w-8 h-8 mx-auto mb-2 text-slate-600" />
+                          <p className="text-slate-500 text-sm">Pasta vazia</p>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            {tracks.filter(t => t.category === selectedTrackCategory).map((track) => (
+                              <button
+                                key={track.id}
+                                onClick={() => setSelectedTrackId(track.id)}
+                                className={`p-3 rounded-xl border text-left transition-all ${
+                                  selectedTrackId === track.id
+                                    ? 'border-purple-500 bg-purple-500/20'
+                                    : 'border-white/10 bg-white/5 hover:border-white/20'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-lg">{track.emoji || '🎵'}</span>
+                                  <span className={`text-sm font-medium ${selectedTrackId === track.id ? 'text-purple-200' : 'text-slate-300'}`}>
+                                    {track.name}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-500 line-clamp-1">{track.description}</p>
+                              </button>
+                            ))}
+                          </div>
+                          {selectedTrack && (
+                            <TrackControls />
+                          )}
+                        </>
+                      )}
+                    </>
+                  ) : trackCategories.length > 0 ? (
+                    /* FOLDER GRID VIEW */
+                    <>
+                      {tracks.filter(t => !t.category).length > 0 && (
+                        <div className="mb-4">
+                          <p className="text-xs text-slate-500 mb-2">Sem categoria</p>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            {tracks.filter(t => !t.category).map((track) => (
+                              <button
+                                key={track.id}
+                                onClick={() => setSelectedTrackId(track.id)}
+                                className={`p-3 rounded-xl border text-left transition-all ${
+                                  selectedTrackId === track.id
+                                    ? 'border-purple-500 bg-purple-500/20'
+                                    : 'border-white/10 bg-white/5 hover:border-white/20'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-lg">{track.emoji || '🎵'}</span>
+                                  <span className={`text-sm font-medium ${selectedTrackId === track.id ? 'text-purple-200' : 'text-slate-300'}`}>
+                                    {track.name}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-500 line-clamp-1">{track.description}</p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                        {trackCategories.map(cat => (
+                          <button
+                            key={cat.name}
+                            onClick={() => setSelectedTrackCategory(cat.name)}
+                            className="flex flex-col items-center gap-2 p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-purple-500/10 hover:border-purple-500/50 hover:scale-105 transition-all duration-200 cursor-pointer group"
+                          >
+                            <span className="text-3xl group-hover:scale-110 transition-transform">📁</span>
+                            <span className="text-sm font-medium text-white text-center truncate w-full">{cat.name}</span>
+                            <span className="text-xs text-slate-500">{cat.count} trilha(s)</span>
+                          </button>
+                        ))}
+                      </div>
+                      {selectedTrack && !selectedTrack.category && (
+                        <TrackControls />
+                      )}
+                    </>
                   ) : (
+                    /* No categories - flat list */
                     <>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {tracks.map((track) => (
@@ -1357,36 +1564,20 @@ export default function VozProClient() {
                           </button>
                         ))}
                       </div>
-
-                      {/* Volume control */}
                       {selectedTrack && (
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
                             <label className="text-sm text-slate-400">Volume da Trilha</label>
                             <span className="text-xs text-slate-500">{Math.round(trackVolume * 100)}%</span>
                           </div>
-                          <Slider
-                            value={[trackVolume]}
-                            onValueChange={([v]) => setTrackVolume(v)}
-                            min={0}
-                            max={1}
-                            step={0.05}
-                            className="w-full"
-                          />
-                          {/* Preview track */}
+                          <Slider value={[trackVolume]} onValueChange={([v]) => setTrackVolume(v)} min={0} max={1} step={0.05} className="w-full" />
                           <AudioPlayer audioPath={selectedTrack.audioPath} />
-
-                          {/* Ducking Settings */}
                           <div className="pt-3 border-t border-white/10">
-                            <button
-                              onClick={() => setShowDuckingSettings(!showDuckingSettings)}
-                              className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-300 transition-colors w-full"
-                            >
+                            <button onClick={() => setShowDuckingSettings(!showDuckingSettings)} className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-300 transition-colors w-full">
                               <Volume2 className="w-4 h-4" />
                               Controles de Ducking
                               <ChevronDown className={`w-3 h-3 ml-auto transition-transform ${showDuckingSettings ? 'rotate-180' : ''}`} />
                             </button>
-
                             {showDuckingSettings && (
                               <div className="mt-3 space-y-3">
                                 <div className="space-y-1">
@@ -1395,9 +1586,7 @@ export default function VozProClient() {
                                     <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{Math.round(duckVolume * 100)}%</Badge>
                                   </div>
                                   <Slider value={[duckVolume]} onValueChange={([v]) => setDuckVolume(v)} min={0} max={1} step={0.01} />
-                                  <p className="text-[10px] text-slate-600">Quão baixa fica a música quando a voz está falando</p>
                                 </div>
-
                                 <div className="space-y-1">
                                   <div className="flex justify-between">
                                     <label className="text-xs text-slate-400">Fade-in inicial</label>
@@ -1405,62 +1594,44 @@ export default function VozProClient() {
                                   </div>
                                   <Slider value={[fadeInMs]} onValueChange={([v]) => setFadeInMs(v)} min={0} max={5000} step={100} />
                                 </div>
-
                                 <div className="space-y-1">
                                   <div className="flex justify-between">
                                     <label className="text-xs text-slate-400">Música antes da voz</label>
                                     <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{(musicStartLeadMs / 1000).toFixed(1)}s</Badge>
                                   </div>
                                   <Slider value={[musicStartLeadMs]} onValueChange={([v]) => setMusicStartLeadMs(v)} min={0} max={10000} step={100} />
-                                  <p className="text-[10px] text-slate-600">Tempo de lead-in com música alta antes da voz começar</p>
                                 </div>
-
                                 <div className="space-y-1">
                                   <div className="flex justify-between">
                                     <label className="text-xs text-slate-400">Transição Duck</label>
                                     <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{duckFadeMs / 1000}s</Badge>
                                   </div>
                                   <Slider value={[duckFadeMs]} onValueChange={([v]) => setDuckFadeMs(v)} min={0} max={3000} step={50} />
-                                  <p className="text-[10px] text-slate-600">Tempo para reduzir a música quando a voz entra</p>
                                 </div>
-
                                 <div className="space-y-1">
                                   <div className="flex justify-between">
                                     <label className="text-xs text-slate-400">Transição Unduck</label>
                                     <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{unduckFadeMs / 1000}s</Badge>
                                   </div>
                                   <Slider value={[unduckFadeMs]} onValueChange={([v]) => setUnduckFadeMs(v)} min={0} max={3000} step={50} />
-                                  <p className="text-[10px] text-slate-600">Tempo para voltar a música alta após a voz</p>
                                 </div>
-
                                 <div className="space-y-1">
                                   <div className="flex justify-between">
                                     <label className="text-xs text-slate-400">Fade-out final</label>
                                     <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{fadeOutMs / 1000}s</Badge>
                                   </div>
                                   <Slider value={[fadeOutMs]} onValueChange={([v]) => setFadeOutMs(v)} min={0} max={8000} step={100} />
-                                  <p className="text-[10px] text-slate-600">Tempo para a música desaparecer no final</p>
                                 </div>
-
-                                {/* Visual timeline */}
                                 <div className="pt-2 border-t border-white/10">
                                   <p className="text-[10px] text-slate-500 mb-2">Timeline do áudio:</p>
                                   <div className="flex items-center gap-1 text-[10px]">
-                                    <div className="bg-purple-500/30 border border-purple-500/50 rounded px-2 py-1 text-purple-300">
-                                      Música {(musicStartLeadMs / 1000).toFixed(1)}s
-                                    </div>
+                                    <div className="bg-purple-500/30 border border-purple-500/50 rounded px-2 py-1 text-purple-300">Música {(musicStartLeadMs / 1000).toFixed(1)}s</div>
                                     <span className="text-slate-600">→</span>
-                                    <div className="bg-green-500/30 border border-green-500/50 rounded px-2 py-1 text-green-300">
-                                      Voz {duckFadeMs / 1000}s fade
-                                    </div>
+                                    <div className="bg-green-500/30 border border-green-500/50 rounded px-2 py-1 text-green-300">Voz {duckFadeMs / 1000}s fade</div>
                                     <span className="text-slate-600">→</span>
-                                    <div className="bg-blue-500/30 border border-blue-500/50 rounded px-2 py-1 text-blue-300">
-                                      Música volta
-                                    </div>
+                                    <div className="bg-blue-500/30 border border-blue-500/50 rounded px-2 py-1 text-blue-300">Música volta</div>
                                     <span className="text-slate-600">→</span>
-                                    <div className="bg-orange-500/30 border border-orange-500/50 rounded px-2 py-1 text-orange-300">
-                                      Fade {fadeOutMs / 1000}s
-                                    </div>
+                                    <div className="bg-orange-500/30 border border-orange-500/50 rounded px-2 py-1 text-orange-300">Fade {fadeOutMs / 1000}s</div>
                                   </div>
                                 </div>
                               </div>
@@ -1470,6 +1641,7 @@ export default function VozProClient() {
                       )}
                     </>
                   )}
+
                 </CardContent>
               )}
             </Card>

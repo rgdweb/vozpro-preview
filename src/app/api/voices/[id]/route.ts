@@ -49,6 +49,7 @@ export async function PUT(
         ...(body.age !== undefined && { age: body.age }),
         ...(body.accent !== undefined && { accent: body.accent }),
         ...(body.pitch !== undefined && { pitch: body.pitch }),
+        ...(body.category !== undefined && { category: body.category }),
         ...(body.order !== undefined && { order: body.order }),
         ...(body.active !== undefined && { active: body.active }),
         ...(body.previewUrl !== undefined && { previewUrl: body.previewUrl }),

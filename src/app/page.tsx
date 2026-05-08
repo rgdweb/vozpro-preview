@@ -19,7 +19,7 @@ import {
 import { toast } from 'sonner'
 import { Label } from '@/components/ui/label'
 import AudioPlayer from '@/components/audio-player'
-import { optimizePronunciation, processControlTags } from '@/lib/pronunciation-optimizer'
+import { optimizePronunciation, processControlTags, containsSSML, type TTSEngine } from '@/lib/pronunciation-optimizer'
 import { preprocessTTS, calculateAutoSpeed } from '@/lib/tts-text-preprocessor'
 
 interface VoiceVariation {
@@ -489,17 +489,31 @@ export default function VozProClient() {
     // ===== OTIMIZAÇÃO DE PRONÚNCIA (pipeline completo) =====
     let textToSend = text.trim()
 
-    // 1. Control tags (sempre ativo)
-    textToSend = processControlTags(textToSend)
+    // Detectar engine e se texto contém SSML
+    const engine: TTSEngine = ttsModel === 'omnivoice' ? 'vozpro' : 'f5tts'
+    const hasSSML = containsSSML(textToSend)
 
-    // 2. Text preprocessor (pontuação, spacing)
-    if (pronunciationOptimization) {
-      textToSend = preprocessTTS(textToSend)
-    }
+    if (hasSSML && engine === 'vozpro') {
+      // VozPro Turbo suporta SSML nativamente — enviar direto sem processar
+      console.log('[Pipeline] SSML detectado + VozPro Turbo → enviando SSML direto ao engine')
+    } else if (hasSSML && engine === 'f5tts') {
+      // F5-TTS NÃO suporta SSML — converter para texto plano
+      console.log('[Pipeline] SSML detectado + F5-TTS → convertendo SSML para texto plano')
+      textToSend = processControlTags(textToSend, 'f5tts')
+    } else {
+      // Texto normal — processar pipeline completo
+      // 1. Control tags (sempre ativo)
+      textToSend = processControlTags(textToSend, engine)
 
-    // 3. Regex + dictionary pipeline
-    if (pronunciationOptimization) {
-      textToSend = optimizePronunciation(textToSend)
+      // 2. Text preprocessor (pontuação, spacing)
+      if (pronunciationOptimization) {
+        textToSend = preprocessTTS(textToSend)
+      }
+
+      // 3. Regex + dictionary pipeline
+      if (pronunciationOptimization) {
+        textToSend = optimizePronunciation(textToSend)
+      }
     }
 
     // 4. LLM pre-processor (opcional, só quando toggle ativo)

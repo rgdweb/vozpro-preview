@@ -440,6 +440,17 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   // Outras correções comuns
   'xícara': 'chícara',
   'Xícara': 'Chícara',
+  // === H MUDO — palavras mais comuns como garantia ===
+  // A regex 1d cobre todas, mas essas entradas garantem que funcionem
+  'hoje': 'oje',
+  'Hoje': 'Oje',
+  'homem': 'omem',
+  'Homem': 'Omem',
+  'honesto': 'onesto',
+  'Honesto': 'Onesto',
+  'higiene': 'igiene',
+  'Higiene': 'Igiene',
+
   'xingar': 'chingar',
   'xingamento': 'chingamento',
   'lapso': 'lápisso',

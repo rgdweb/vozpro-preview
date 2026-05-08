@@ -359,25 +359,75 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
 
   // === PALAVRAS PROBLEMÁTICAS ESPECÍFICAS DO TTS ===
   // O VozPro/F5-TTS frequentemente pronuncia estas errado
-  // === CONSOANTES MUDAS — o modelo DROPA o P/C inicial ===
-  'pneu': 'peneu',
-  'Pneu': 'Peneu',
-  'pneus': 'peneus',
-  'Pneus': 'Peneus',
-  // pneumonia, pneumático, pneumotórax: cobertos por regex PN → neumonia
-  'pneumonia': 'neumonia',
-  'Pneumonia': 'Neumonia',
-  'pneumonita': 'neumonite',
-  'Pneumonita': 'Neumonite',
-  'pneumático': 'neumático',
-  'Pneumático': 'Neumático',
-  'pneumotórax': 'neumotórax',
+  // === GN INICIAL — fonética: GN → "guin" em PT-BR ===
+  'gnomo': 'guinômo',
+  'Gnomo': 'Guinômo',
+  'gnomos': 'guinômos',
+  'Gnomos': 'Guinômos',
+  'gnóstica': 'guinóstica',
+  'Gnóstica': 'Guinóstica',
+  'gnósticas': 'guinósticas',
+  'gnóstico': 'guinóstico',
+  'Gnóstico': 'Guinóstico',
+  'gnósticos': 'guinósticos',
+  'gnose': 'guinose',
+  'Gnose': 'Guinose',
+  'gnosticismo': 'guinosticismo',
+  'Gnosticismo': 'Guinosticismo',
 
+  // === PS INICIAL — fonética: PS → "pisi" em PT-BR ===
+  'psicólogo': 'pisicólogo',
+  'Psicólogo': 'Pisicólogo',
+  'psicóloga': 'pisicóloga',
+  'Psicóloga': 'Pisicóloga',
+  'psicólogos': 'pisicólogos',
+  'psicologia': 'pisicologia',
+  'Psicologia': 'Pisicologia',
+  'psicológico': 'pisicológico',
+  'psicanalista': 'pisicanalista',
+  'psicanálise': 'pisicanálise',
+  'psiquiatra': 'pisiquiatra',
+  'Psiquiatra': 'Pisiquiatra',
+  'psiquiatria': 'pisiquiatria',
+  'psiquiátrico': 'pisiquiátrico',
+  'psicose': 'pisicose',
+  'psicopata': 'pisicopata',
+  'psicossomático': 'pisicossomático',
+  'pseudo': 'piseudo',
+  'Pseudo': 'Piseudo',
+  'pseudônimo': 'piseudônimo',
+  'Pseudônimo': 'Piseudônimo',
+  'pseudociese': 'piseudociese',
+  'pseudônimos': 'piseudônimos',
+  'pseudo-ciência': 'piseudo-ciência',
+
+  // === PN INICIAL — fonética: PN → "pineu" em PT-BR ===
+  'pneumologia': 'pineumologia',
+  'Pneumologia': 'Pineumologia',
+  'pneumônico': 'pineumônico',
+  'Pneumônico': 'Pineumônico',
+  'pneumonia': 'pineumonia',
+  'Pneumonia': 'Pineumonia',
+  'pneumotórax': 'pineumotórax',
+  'pneumático': 'pineumático',
+  'Pneumático': 'Pineumático',
+  'pneumococo': 'pineumococo',
+  'pneu': 'pineu',
+  'Pneu': 'Pineu',
+  'pneus': 'pineus',
+  'Pneus': 'Pineus',
+
+  // === MN INICIAL — fonética: MN → "mineu" em PT-BR ===
+  'mnemônico': 'mineumônico',
+  'Mnemônico': 'Mineumônico',
+  'mnemônica': 'mineumônica',
+  'Mnemônica': 'Mineumônica',
+  'mnemônese': 'mineumônese',
+
+  // === PT INICIAL ===
   'ptialismo': 'petialismo',
   'Ptialismo': 'Petialismo',
   'ptose': 'petose',
-  // gnomo, gnose, gnóstico: cobertos por regex GN → nomo, nose, nóstico
-  // mnemônico, mnemônica: cobertos por regex MN → nemônico, nemônica
   'cpt': 'cê pê tê',
   'CPT': 'cê pê tê',
 
@@ -395,10 +445,7 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
 
   // Palavras com ge/gi inverter para J quando TTS lê G duro
 
-  'quente': 'quente',
-  'questão': 'questão',
-  'química': 'química',
-  'quinto': 'quinto',
+  // quente, questão, química, quinto — removidos (no-op, TTS já pronuncia correto)
 
   // Verbos e palavras comuns com pronúncia não-óbvia
   'sugestão': 'sujestão',
@@ -416,11 +463,12 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'Xícara': 'Chícara',
   'xingar': 'chingar',
   'xingamento': 'chingamento',
-  'lapso': 'lápio',
+  'lapso': 'lápisso',
+  'Lapso': 'Lápisso',
 
   // === NOMES PRÓPRIOS DIFÍCEIS ===
-  'Wolski': 'Volski',
-  'Kowalski': 'Covalski',
+  'Wolski': 'Uíski',
+  'Kowalski': 'Covalsqui',
   'Higashi': 'Rigaxi',
   'Schütz': 'Xuts',
 
@@ -499,7 +547,7 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   // === SAÚDE / MEDICAMENTOS (expansão Fase 1) ===
   // REMOVIDAS instruções [fonema] — VozPro lia literalmente e falava errado
   // ex: colesterol era [colesteróle] e o TTS falava "colesteróle"
-  'hipertensão': 'ipertensão',
+  // hipertensão → coberta pela regex H mudo (h+vogal → vogal) — não precisa de entrada
   'AVC': 'A V Cê',
   'HIV': 'H I V',
   'omicrânio': 'omicron',
@@ -848,8 +896,8 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
  */
 const X_WORD_DICTIONARY: Record<string, string> = {
   // X = CH (som de "ch")
-  'xarope': 'charope',
-  'Xarope': 'Charope',
+  'xarope': 'charópe',
+  'Xarope': 'Charópe',
   'xaxim': 'chachim',
   'Xaxim': 'Chachim',
   'xadrez': 'chadrez',
@@ -939,11 +987,12 @@ const X_WORD_DICTIONARY: Record<string, string> = {
   'Exíguo': 'Ezíguo',
 
   // X = SS (som de "ss")
-  'México': 'Méssico',
-  'mexicano': 'messicano',
-  'Mexicano': 'Messicano',
-  'mexicana': 'messicana',
-  'Mexicana': 'Messicana',
+  // NOTA: México em PT-BR é pronunciado "Méchico" (X = CH)
+  'México': 'Méchico',
+  'mexicano': 'mechicano',
+  'Mexicano': 'Mechicano',
+  'mexicana': 'mechicana',
+  'Mexicana': 'Mechicana',
   'vexame': 'vessame',
   'Vexame': 'Vessame',
   'mexer': 'messer',
@@ -954,8 +1003,8 @@ const X_WORD_DICTIONARY: Record<string, string> = {
   // X = KS (som de "ks")
   'táxi': 'tácsi',
   'Táxi': 'Tácsi',
-  'sexo': 'sessso',
-  'Sexo': 'Sessso',
+  'sexo': 'sesso',
+  'Sexo': 'Sesso',
   'complexo': 'complekso',
   'Complexo': 'Complekso',
   'perplexo': 'perplekso',
@@ -1143,7 +1192,7 @@ export function optimizePronunciation(text: string): string {
   //   - X antes de consonante = S (extensão, explicar, exportar)
   //   - X em palavras específicas = CH (xarope, xaxim, xadrez, enxada)
   //   - X em palavras específicas = Z (exército, exemplo, exercício, existir)
-  //   - X em palavras específicas = SS (México, maxXico, vexame)
+  //   - X em palavras específicas = SS (México pronunciado Méchico, vexame)
   // Implementado como função auxiliar abaixo
   result = preprocessX(result)
 
@@ -1157,34 +1206,6 @@ export function optimizePronunciation(text: string): string {
     if (match[0] === match[0].toUpperCase() && v === v.toUpperCase()) return v
     if (match[0] === match[0].toUpperCase()) return v.toUpperCase()
     return v
-  })
-
-  // GN inicial mudo — "gnomo" → "nomo", "GNÓSTICO" → "NÓSTICO", "Gnomo" → "Nomo"
-  result = result.replace(/\bgn([aeiouáàãâéèêíïóôõúü])/gi, (match, v) => {
-    if (match[0] === match[0].toUpperCase() && v === v.toUpperCase()) return 'N' + v
-    if (match[0] === match[0].toUpperCase()) return 'N' + v
-    return 'n' + v
-  })
-
-  // MN inicial mudo — "mnemônico" → "nemônico", "MNEMÔNICA" → "NEMÔNICA"
-  result = result.replace(/\bmn([aeiouáàãâéèêíïóôõúü])/gi, (match, v) => {
-    if (match[0] === match[0].toUpperCase() && v === v.toUpperCase()) return 'N' + v
-    if (match[0] === match[0].toUpperCase()) return 'N' + v
-    return 'n' + v
-  })
-
-  // PS inicial mudo — "psicólogo" → "sicólogo", "PSICOLOGIA" → "SICOLOGIA"
-  result = result.replace(/\bps([aeiouáàãâéèêíïóôõúü])/gi, (match, v) => {
-    if (match[0] === match[0].toUpperCase() && v === v.toUpperCase()) return 'S' + v
-    if (match[0] === match[0].toUpperCase()) return 'S' + v
-    return 's' + v
-  })
-
-  // PN inicial (P mudo) — "pneumonia" → "neumonia", "PNEUMONIA" → "NEUMONIA"
-  result = result.replace(/\bpn([aeiouáàãâéèêíïóôõúü])/gi, (match, v) => {
-    if (match[0] === match[0].toUpperCase() && v === v.toUpperCase()) return 'N' + v
-    if (match[0] === match[0].toUpperCase()) return 'N' + v
-    return 'n' + v
   })
 
   // ---- 2. NÚMEROS GRANDES POR EXTENSO ----

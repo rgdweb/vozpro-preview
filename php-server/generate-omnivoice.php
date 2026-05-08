@@ -99,89 +99,12 @@ function returnError($msg, $code = 500) {
     exit;
 }
 
-// ===================== STRIP SSML =====================
-/**
- * Remove TODAS as tags SSML e retorna texto limpo para o TTS.
- * Defesa dupla: mesmo se o frontend enviar SSML cru, aqui é removido.
- */
+// ===================== STRIP SSML (defesa) =====================
+// Se o frontend enviar SSML, remove tudo. TTS nao entende tags.
 function stripSSML($text) {
-    // Detectar se tem SSML
-    if (!preg_match('/<(speak|break|emphasis|prosody|say-as|phoneme|sub)\b/i', $text)) {
-        return $text;
-    }
-
-    $result = $text;
-
-    // <speak> wrapper
-    $result = preg_replace('/<\/?speak[^>]*>/i', '', $result);
-
-    // <sub alias="...">original</sub> → alias
-    $result = preg_replace('/<sub\s+alias="([^"]+)">[^<]*<\/sub>/i', '$1', $result);
-
-    // <phoneme ph="...">texto</phoneme> → [fonema]
-    $result = preg_replace('/<phoneme\s+[^>]*ph="([^"]+)"[^>]*>[^<]*<\/phoneme>/i', '[$1]', $result);
-
-    // <say-as interpret-as="characters">ABC</say-as> → A, B, C
-    $result = preg_replace_callback('/<say-as\s+[^>]*interpret-as="characters"[^>]*>([^<]*)<\/say-as>/i', function($m) {
-        return implode(', ', mb_str_split($m[1]));
-    }, $result);
-
-    // <say-as interpret-as="date"> → data por extenso
-    $result = preg_replace_callback('/<say-as\s+[^>]*interpret-as="date"[^>]*>([^<]*)<\/say-as>/i', function($m) {
-        if (preg_match('/(\d{4})-(\d{2})-(\d{2})/', $m[1], $d)) {
-            $months = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
-            return intval($d[3]) . ' de ' . ($months[intval($d[2])-1] ?? $d[2]) . ' de ' . $d[1];
-        }
-        return $m[1];
-    }, $result);
-
-    // Outros <say-as> → conteúdo
-    $result = preg_replace('/<say-as\s[^>]*>([^<]*)<\/say-as>/i', '$1', $result);
-
-    // <break time="500ms"/>
-    $result = preg_replace_callback('/<break\s+[^>]*time="(\d+)(ms|s)"[^>]*\/?>/i', function($m) {
-        $ms = intval($m[1]);
-        if ($m[2] === 's') $ms *= 1000;
-        if ($ms >= 800) return ".\n";
-        if ($ms >= 500) return "...\n";
-        if ($ms >= 300) return ",\n";
-        return ",  ";
-    }, $result);
-
-    // <break strength="..."/>
-    $result = preg_replace('/<break\s+[^>]*strength="x-strong"[^>]*\/?>/i', ".\n", $result);
-    $result = preg_replace('/<break\s+[^>]*strength="strong"[^>]*\/?>/i', "...\n", $result);
-    $result = preg_replace('/<break\s+[^>]*strength="medium"[^>]*\/?>/i', ",\n", $result);
-    $result = preg_replace('/<break\s+[^>]*strength="weak"[^>]*\/?>/i', ",  ", $result);
-    $result = preg_replace('/<break\s*\/?>/i', ',  ', $result);
-
-    // <emphasis>texto</emphasis> → [texto]
-    $result = preg_replace('/<emphasis[^>]*>([\s\S]*?)<\/emphasis>/i', '[$1]', $result);
-
-    // <prosody rate="slow">texto</prosody>
-    $result = preg_replace_callback('/<prosody\s+[^>]*rate="(slow|x-slow)[^"]*"[^>]*>([\s\S]*?)<\/prosody>/i', function($m) {
-        return preg_replace('/(\s+)/', ', $1', $m[2]);
-    }, $result);
-    $result = preg_replace_callback('/<prosody\s+[^>]*rate="([^"]*\d\.\d)[^"]*"[^>]*>([\s\S]*?)<\/prosody>/i', function($m) {
-        if (floatval($m[1]) < 0.9) return preg_replace('/(\s+)/', ', $1', $m[2]);
-        return $m[2];
-    }, $result);
-    $result = preg_replace('/<prosody[^>]*>([\s\S]*?)<\/prosody>/i', '$1', $result);
-
-    // <p> e <s>
-    $result = preg_replace('/<\/p>/i', ".\n\n", $result);
-    $result = preg_replace('/<p[^>]*>/i', '', $result);
-    $result = preg_replace('/<\/s>/i', '. ', $result);
-    $result = preg_replace('/<s[^>]*>/i', '', $result);
-
-    // Fallback: remover QUALQUER tag restante (conteúdo preservado)
-    $result = preg_replace('/<[^>]+>/', '', $result);
-
-    // Limpar
-    $result = preg_replace('/[ \t]+/', ' ', $result);
-    $result = preg_replace('/\n{3,}/', "\n\n", $result);
-
-    return trim($result);
+    if (!preg_match('/<[a-z][^>]*>/i', $text)) return $text;
+    $r = preg_replace('/<[^>]+>/', '', $text);
+    return trim(preg_replace('/\s+/', ' ', $r));
 }
 
 // ===================== LER INPUT JSON =====================

@@ -489,31 +489,26 @@ export default function VozProClient() {
     // ===== OTIMIZAÇÃO DE PRONÚNCIA (pipeline completo) =====
     let textToSend = text.trim()
 
-    // Detectar engine e se texto contém SSML
+    // Se contém SSML, remover todas as tags (abandonado — apenas strip limpo)
+    if (containsSSML(textToSend)) {
+      textToSend = textToSend.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+      console.log('[Pipeline] SSML removido, texto limpo enviado ao TTS')
+    }
+
+    // Pipeline normal (sem SSML)
     const engine: TTSEngine = ttsModel === 'omnivoice' ? 'vozpro' : 'f5tts'
-    const hasSSML = containsSSML(textToSend)
 
-    if (hasSSML) {
-      // SSML detectado — converter para formato nativo do engine (AMBOS)
-      // VozPro: <break> → {{pause:500}}, <emphasis> → {{emphasis}}, <prosody rate="slow"> → {{slow}}
-      // F5-TTS: <break> → pontuação/pausas, <emphasis> → CAPS
-      const engineLabel = engine === 'vozpro' ? 'VozPro Turbo' : 'F5-TTS'
-      console.log(`[Pipeline] SSML detectado + ${engineLabel} → convertendo SSML para formato nativo`)
-      textToSend = processControlTags(textToSend, engine)
-    } else {
-      // Texto normal — processar pipeline completo
-      // 1. Control tags (sempre ativo)
-      textToSend = processControlTags(textToSend, engine)
+    // 1. Control tags (sempre ativo)
+    textToSend = processControlTags(textToSend, engine)
 
-      // 2. Text preprocessor (pontuação, spacing)
-      if (pronunciationOptimization) {
-        textToSend = preprocessTTS(textToSend)
-      }
+    // 2. Text preprocessor (pontuação, spacing)
+    if (pronunciationOptimization) {
+      textToSend = preprocessTTS(textToSend)
+    }
 
-      // 3. Regex + dictionary pipeline
-      if (pronunciationOptimization) {
-        textToSend = optimizePronunciation(textToSend)
-      }
+    // 3. Regex + dictionary pipeline
+    if (pronunciationOptimization) {
+      textToSend = optimizePronunciation(textToSend)
     }
 
     // 4. LLM pre-processor (opcional, só quando toggle ativo)

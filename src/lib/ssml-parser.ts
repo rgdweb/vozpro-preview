@@ -273,98 +273,15 @@ function processSentenceTags(text: string, engine: TTSEngine): string {
 }
 
 // ============================================================
-// STRIP SSML — Remove TODAS as tags SSML e retorna texto limpo
-// Para usar no BACKEND (defesa dupla): remove tags que passaram
-// pelo frontend sem serem processadas
+// STRIP SSML — Remove TODAS as tags e retorna texto limpo
+// Defesa: se SSML chegar ao backend, remove tudo. Sem conversão.
 // ============================================================
 
 /**
- * Remove todas as tags SSML e retorna texto limpo para TTS.
- * Converte tags semânticas em marcadores de texto simples:
- * - <break> → pontuação/pausas (...)
- * - <emphasis> → [colchetes] para ênfase
- * - <prosody rate="slow"> → texto com vírgulas extras
- * - <say-as characters> → letras separadas por vírgula
- * - <phoneme ph="..."> → fonema entre colchetes
- * - <sub alias="..."> → texto do alias
- * - Qualquer outra tag → removida (conteúdo preservado)
- *
- * ESTA FUNÇÃO NÃO DEPENDE DO ENGINE — funciona para ambos.
+ * Remove todas as tags HTML/SSML do texto. Retorna apenas texto limpo.
+ * Não tenta converter — apenas remove tags e preserva conteúdo.
  */
 export function stripSSMLForTTS(text: string): string {
-  if (!containsSSML(text)) return text
-
-  let result = text
-
-  // 1. Remover <speak> wrapper
-  result = result.replace(/<\/?speak[^>]*>/gi, '').trim()
-
-  // 2. <sub alias="...">original</sub> → alias
-  result = result.replace(/<sub\s+alias="([^"]+)">([^<]*)<\/sub>/gi, '$1')
-
-  // 3. <phoneme ph="...">texto</phoneme> → [fonema]
-  result = result.replace(/<phoneme\s+[^>]*ph="([^"]+)"[^>]*>([^<]*)<\/phoneme>/gi, '[$1]')
-
-  // 4. <say-as interpret-as="characters">ABC</say-as> → A, B, C
-  result = result.replace(/<say-as\s+[^>]*interpret-as="characters"[^>]*>([^<]*)<\/say-as>/gi, (_m, c) => c.split('').join(', '))
-
-  // 5. <say-as interpret-as="date">2024-03-15</say-as> → 15 de março de 2024
-  result = result.replace(/<say-as\s+[^>]*interpret-as="date"[^>]*>([^<]*)<\/say-as>/gi, (_m, content) => {
-    const dm = content.match(/(\d{4})-(\d{2})-(\d{2})/)
-    if (dm) {
-      const months = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro']
-      return `${parseInt(dm[3])} de ${months[parseInt(dm[2])-1] || dm[2]} de ${dm[1]}`
-    }
-    return content
-  })
-
-  // 6. <say-as ...>texto</say-as> → texto (outros interpret-as)
-  result = result.replace(/<say-as\s[^>]*>([^<]*)<\/say-as>/gi, '$1')
-
-  // 7. <break time="500ms"/> → pausa via pontuação
-  result = result.replace(/<break\s+[^>]*time="(\d+)(ms|s)"[^>]*\/?>/gi, (_m, v, u) => {
-    let ms = parseInt(v)
-    if (u === 's') ms *= 1000
-    if (ms >= 800) return '.\n'
-    if (ms >= 500) return '...\n'
-    if (ms >= 300) return ',\n'
-    return ',  '
-  })
-  result = result.replace(/<break\s+[^>]*strength="([^"]+)"[^>]*\/?>/gi, (_m, s) => {
-    if (s === 'x-strong') return '.\n'
-    if (s === 'strong') return '...\n'
-    if (s === 'medium') return ',\n'
-    return ',  '
-  })
-  result = result.replace(/<break\s*\/?>/gi, ',  ')
-
-  // 8. <emphasis level="strong">texto</emphasis> → [texto]
-  result = result.replace(/<emphasis[^>]*>([\s\S]*?)<\/emphasis>/gi, '[$1]')
-
-  // 9. <prosody rate="slow">texto</prosody> → texto com pausas
-  result = result.replace(/<prosody\s+[^>]*rate="(slow|x-slow|[^"]*\d\.\d)[^"]*"[^>]*>([\s\S]*?)<\/prosody>/gi, (_m, rate, content) => {
-    if (rate.includes('slow') || parseFloat(rate) < 0.9) {
-      return content.replace(/(\s+)/g, ', $1')
-    }
-    return content
-  })
-  result = result.replace(/<prosody\s+[^>]*pitch="([^"]+)"[^>]*>([\s\S]*?)<\/prosody>/gi, (_m, _p, content) => content)
-  result = result.replace(/<prosody\s+[^>]*volume="([^"]+)"[^>]*>([\s\S]*?)<\/prosody>/gi, (_m, _v, content) => content)
-  result = result.replace(/<prosody[^>]*>([\s\S]*?)<\/prosody>/gi, '$1')
-
-  // 10. <p> e <s> — parágrafos e sentenças
-  result = result.replace(/<\/p>/gi, '.\n\n')
-  result = result.replace(/<p[^>]*>/gi, '')
-  result = result.replace(/<\/s>/gi, '. ')
-  result = result.replace(/<s[^>]*>/gi, '')
-
-  // 11. Fallback: remover QUALQUER tag SSML restante (conteúdo preservado)
-  result = result.replace(/<[^>]+>/g, '')
-
-  // 12. Limpar espaços múltiplos e newlines desnecessários
-  result = result.replace(/[ \t]+/g, ' ')
-  result = result.replace(/\n{3,}/g, '\n\n')
-  result = result.trim()
-
-  return result
+  if (!/<[a-z][^>]*>/i.test(text)) return text
+  return text.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
 }

@@ -375,31 +375,10 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'gnosticismo': 'guinosticismo',
   'Gnosticismo': 'Guinosticismo',
 
-  // === PS INICIAL — fonética: PS → "pisi" em PT-BR ===
-  'psicólogo': 'pisicólogo',
-  'Psicólogo': 'Pisicólogo',
-  'psicóloga': 'pisicóloga',
-  'Psicóloga': 'Pisicóloga',
-  'psicólogos': 'pisicólogos',
-  'psicologia': 'pisicologia',
-  'Psicologia': 'Pisicologia',
-  'psicológico': 'pisicológico',
-  'psicanalista': 'pisicanalista',
-  'psicanálise': 'pisicanálise',
-  'psiquiatra': 'pisiquiatra',
-  'Psiquiatra': 'Pisiquiatra',
-  'psiquiatria': 'pisiquiatria',
-  'psiquiátrico': 'pisiquiátrico',
-  'psicose': 'pisicose',
-  'psicopata': 'pisicopata',
-  'psicossomático': 'pisicossomático',
-  'pseudo': 'piseudo',
-  'Pseudo': 'Piseudo',
-  'pseudônimo': 'piseudônimo',
-  'Pseudônimo': 'Piseudônimo',
-  'pseudociese': 'piseudociese',
-  'pseudônimos': 'piseudônimos',
-  'pseudo-ciência': 'piseudo-ciência',
+  // === PS INICIAL — REMOVIDO ===
+  // O TTS lê "s" como "z" entre vogais (pisicólogo→pizicólogo)
+  // Melhor deixar o TTS falar a palavra original "psicólogo" naturalmente
+  // psicólogo, pseudo, psiquiatra, etc. — sem entrada no dicionário
 
   // === PN INICIAL — fonética: PN → "pineu" em PT-BR ===
   'pneumologia': 'pineumologia',

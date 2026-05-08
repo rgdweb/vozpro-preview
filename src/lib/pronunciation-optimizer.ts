@@ -359,66 +359,64 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
 
   // === PALAVRAS PROBLEMÁTICAS ESPECÍFICAS DO TTS ===
   // O VozPro/F5-TTS frequentemente pronuncia estas errado
-  // CONSOANTES MUDAS — o modelo DROPA o P/C inicial
+  // === CONSOANTES MUDAS — o modelo DROPA o P/C inicial ===
   'pneu': 'peneu',
   'Pneu': 'Peneu',
   'pneus': 'peneus',
   'Pneus': 'Peneus',
-  'pneumonia': 'peneumonia',
-  'Pneumonia': 'Peneumonia',
-  'pneumonita': 'peneumonite',
-  'Pneumonita': 'Peneumonite',
-  'pneumático': 'peneumático',
-  'Pneumático': 'Peneumático',
-  'pneumotórax': 'peneumotórax',
-
+  // pneumonia, pneumático, pneumotórax: cobertos por regex PN → neumonia
+  'pneumonia': 'neumonia',
+  'Pneumonia': 'Neumonia',
+  'pneumonita': 'neumonite',
+  'Pneumonita': 'Neumonite',
+  'pneumático': 'neumático',
+  'Pneumático': 'Neumático',
+  'pneumotórax': 'neumotórax',
 
   'ptialismo': 'petialismo',
   'Ptialismo': 'Petialismo',
   'ptose': 'petose',
-  'gnomo': 'nomo',
-  'Gnomo': 'Nomo',
-  'gnose': 'nose',
-  'Gnose': 'Nose',
-  'gnóstico': 'nóstico',
-  'mnemônico': 'nemônico',
-  'Mnemônico': 'Nemônico',
-  'mnemônica': 'nemônica',
+  // gnomo, gnose, gnóstico: cobertos por regex GN → nomo, nose, nóstico
+  // mnemônico, mnemônica: cobertos por regex MN → nemônico, nemônica
   'cpt': 'cê pê tê',
   'CPT': 'cê pê tê',
 
-  // H MUDO — o modelo lê como se tivesse som
-  // FIX: removido [fonema] porque causava erro no TTS (falava literalmente os colchetes)
-  // Agora usa texto puro — o TTS lê a palavra sem H naturalmente
-  'hidráulico': 'idráulico',
-  'Hidráulico': 'Idráulico',
-  'humor': 'umor',
-  'Humor': 'Umor',
-  'homicídio': 'omicídio',
-  'Homicídio': 'Omicídio',
-  'homem': 'omem',
-  'Homem': 'Omem',
-  'hora': 'ora',
-  'Hora': 'Ora',
-  'hoje': 'oje',
-  'Hoje': 'Oje',
-  'hotel': 'otel',
-  'Hotel': 'Otel',
-  'hierarquia': 'ierarquia',
-  'Hierarquia': 'Ierarquia',
-  'hernia': 'érnia',
-  'Hérnia': 'Érnia',
-  'habilidade': 'abilidade',
-  'história': 'istória',
-  'História': 'Istória',
-  'herança': 'erança',
-  'Herança': 'Erança',
+  // H MUDO — AGORA COBERTO POR REGEX 1d AUTOMÁTICA
+  // A regex h([aeiouáàãâéèêíïóôõúü]) remove H no início de TODAS as palavras
+  // hoje, Hoje, hora, Hora, homem, Homem, hotel, Hotel, hierarquia, Hierarquia,
+  // hernia, Hérnia, habilidade, história, História, herança, Herança,
+  // hidráulico, Hidráulico, humor, Umor, homicídio, Omicídio, hipertensão,
+  // hemodiálise, honesto, horizonte, hexadecimal, helicóptero, harmonia, etc.
+  // Não precisa mais de entrada individual — a regex cobre todas
 
-  // OUTRAS PALAVRAS PROBLEMÁTICAS
+  // === PALAVRAS COMUNS QUE O TTS ERRA ===
 
+  // Palavras com som de X que não são cobertas pelo dicionário X
 
-  'hemodiálise': 'emodiálise',
+  // Palavras com ge/gi inverter para J quando TTS lê G duro
 
+  'quente': 'quente',
+  'questão': 'questão',
+  'química': 'química',
+  'quinto': 'quinto',
+
+  // Verbos e palavras comuns com pronúncia não-óbvia
+  'sugestão': 'sujestão',
+  'Sugestão': 'Sujestão',
+  'sugestões': 'sujestões',
+  'digestão': 'dijestão',
+  'Digestão': 'Dijestão',
+  'gestão': 'jestão',
+  'Gestão': 'Jestão',
+
+  // Ciência e termos comuns
+
+  // Outras correções comuns
+  'xícara': 'chícara',
+  'Xícara': 'Chícara',
+  'xingar': 'chingar',
+  'xingamento': 'chingamento',
+  'lapso': 'lápio',
 
   // === NOMES PRÓPRIOS DIFÍCEIS ===
   'Wolski': 'Volski',
@@ -1148,6 +1146,46 @@ export function optimizePronunciation(text: string): string {
   //   - X em palavras específicas = SS (México, maxXico, vexame)
   // Implementado como função auxiliar abaixo
   result = preprocessX(result)
+
+  // ---- 1d. REGRAS FONÉTICAS PT-BR AUTOMÁTICAS (cobrem milhares de palavras) ----
+  // H MUDO no início de palavras — PT-BR: H inicial é SEMPRE mudo
+  // "hoje" → "oje", "Hoje" → "Oje", "HOMEM" → "OMEM"
+  // "história" → "istória", "hipertensão" → "ipertensão"
+  // "hemodiálise" → "emodiálise", "hidráulico" → "idráulico", "honesto" → "onesto"
+  // Cobertura: TODAS as palavras começando com H + vogal (centenas de palavras)
+  result = result.replace(/\bh([aeiouáàãâéèêíïóôõúü])/gi, (match, v) => {
+    if (match[0] === match[0].toUpperCase() && v === v.toUpperCase()) return v
+    if (match[0] === match[0].toUpperCase()) return v.toUpperCase()
+    return v
+  })
+
+  // GN inicial mudo — "gnomo" → "nomo", "GNÓSTICO" → "NÓSTICO", "Gnomo" → "Nomo"
+  result = result.replace(/\bgn([aeiouáàãâéèêíïóôõúü])/gi, (match, v) => {
+    if (match[0] === match[0].toUpperCase() && v === v.toUpperCase()) return 'N' + v
+    if (match[0] === match[0].toUpperCase()) return 'N' + v
+    return 'n' + v
+  })
+
+  // MN inicial mudo — "mnemônico" → "nemônico", "MNEMÔNICA" → "NEMÔNICA"
+  result = result.replace(/\bmn([aeiouáàãâéèêíïóôõúü])/gi, (match, v) => {
+    if (match[0] === match[0].toUpperCase() && v === v.toUpperCase()) return 'N' + v
+    if (match[0] === match[0].toUpperCase()) return 'N' + v
+    return 'n' + v
+  })
+
+  // PS inicial mudo — "psicólogo" → "sicólogo", "PSICOLOGIA" → "SICOLOGIA"
+  result = result.replace(/\bps([aeiouáàãâéèêíïóôõúü])/gi, (match, v) => {
+    if (match[0] === match[0].toUpperCase() && v === v.toUpperCase()) return 'S' + v
+    if (match[0] === match[0].toUpperCase()) return 'S' + v
+    return 's' + v
+  })
+
+  // PN inicial (P mudo) — "pneumonia" → "neumonia", "PNEUMONIA" → "NEUMONIA"
+  result = result.replace(/\bpn([aeiouáàãâéèêíïóôõúü])/gi, (match, v) => {
+    if (match[0] === match[0].toUpperCase() && v === v.toUpperCase()) return 'N' + v
+    if (match[0] === match[0].toUpperCase()) return 'N' + v
+    return 'n' + v
+  })
 
   // ---- 2. NÚMEROS GRANDES POR EXTENSO ----
   // Anos: "2024" → "[dois mil vinte e quatro]" (quando precedido por "ano" ou similar)

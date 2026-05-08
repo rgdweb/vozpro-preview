@@ -117,7 +117,7 @@ export function currencyToWords(val: string): string {
  */
 const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   // === SIGLAS / ACRÔNIMOS (soletrar) ===
-  // REMOVIDO: API (instrucao [fonema] causava erro no TTS)
+  'API': 'a p i',
   'DVD': '[dê vê dê]',
   'GPS': '[gê pê és]',
   'IPTU': '[i pê tê u]',
@@ -676,7 +676,7 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'AREsp': '[á erre és pê]',
   'AgRg': '[a gê erre gê]',
   'EDcl': '[é dê cê éle]',
-  // REMOVIDO: EI (instrucao [fonema] causava erro no TTS)
+  'EI': 'e i',
   'IRDR': '[i erre dê erre]',
   'RTJ': '[erre tê jota]',
   'RTF': '[erre tê éfe]',
@@ -955,7 +955,7 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'ChatGPT': '[Chat Gê Pê Tê]',
   'GPT-4': '[gê pê tê quatro]',
   'GPT-3': '[gê pê tê três]',
-  // REMOVIDO: OpenAI (instrucao [fonema] causava erro no TTS)
+  'OpenAI': 'Open AI',
   // REMOVIDO: Claude (instrucao [fonema] causava erro no TTS)
   'Gemini': '[Gêmeine]',
   'Copilot': '[Copailete]',
@@ -973,8 +973,8 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'Go': '[Gó]',
   'MongoDB': '[Mongó DB]',
   'Redis': '[Rédise]',
-  // REMOVIDO: PostgreSQL (instrucao [fonema] causava erro no TTS)
-  // REMOVIDO: GraphQL (instrucao [fonema] causava erro no TTS)
+  'PostgreSQL': 'Postgres QL',
+  'GraphQL': 'Graph QL',
   'REST': '[réste]',
   'REST API': '[réste API]',
   'WebSocket': '[Uébe Sócquete]',
@@ -989,7 +989,7 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'Miro': '[Míro]',
   'Trello': '[Trélo]',
   'Asana': '[Azana]',
-  'Slack': '[Slace]',
+  'Slack': 'Slace',
   'Basecamp': '[Beisecâmpe]',
   'Vercel': '[Versel]',
   'Supabase': '[Supabeise]',
@@ -1327,8 +1327,8 @@ const X_WORD_DICTIONARY: Record<string, string> = {
   'Exame': '[Ezame]',
   'exato': '[ezato]',
   'Exato': '[Ezato]',
-  'exceção': '[ezeção]',
-  'Exceção': '[Ezeção]',
+  'exceção': 'ezeção',
+  'Exceção': 'Ezeção',
   'excluir': '[ezcluir]',
   'Excluir': '[Ezcluir]',
   'executar': '[ezecutar]',

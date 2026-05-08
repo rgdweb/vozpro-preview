@@ -636,6 +636,8 @@ export default function VozProClient() {
       textToSend = optimizePronunciation(textToSend)
     }
 
+    console.log('[Pipeline] Texto final enviado ao TTS:', textToSend.substring(0, 200))
+
     // 4. LLM pre-processor (opcional, só quando toggle ativo)
     if (llmPreprocess && textToSend.length > 20) {
       try {

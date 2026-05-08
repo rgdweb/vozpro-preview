@@ -22,6 +22,123 @@ import AudioPlayer from '@/components/audio-player'
 import { optimizePronunciation, processControlTags, containsSSML, type TTSEngine } from '@/lib/pronunciation-optimizer'
 import { preprocessTTS, calculateAutoSpeed } from '@/lib/tts-text-preprocessor'
 
+interface TrackControlsProps {
+  selectedTrack: { id: string; name: string; audioPath: string; [key: string]: unknown } | null
+  trackVolume: number
+  duckVolume: number
+  fadeInMs: number
+  duckFadeMs: number
+  unduckFadeMs: number
+  fadeOutMs: number
+  musicStartLeadMs: number
+  showDuckingSettings: boolean
+  onTrackVolumeChange: (v: number) => void
+  onDuckVolumeChange: (v: number) => void
+  onFadeInMsChange: (v: number) => void
+  onDuckFadeMsChange: (v: number) => void
+  onUnduckFadeMsChange: (v: number) => void
+  onFadeOutMsChange: (v: number) => void
+  onMusicStartLeadMsChange: (v: number) => void
+  onToggleDuckingSettings: () => void
+}
+
+function TrackControls({
+  selectedTrack,
+  trackVolume,
+  duckVolume,
+  fadeInMs,
+  duckFadeMs,
+  unduckFadeMs,
+  fadeOutMs,
+  musicStartLeadMs,
+  showDuckingSettings,
+  onTrackVolumeChange,
+  onDuckVolumeChange,
+  onFadeInMsChange,
+  onDuckFadeMsChange,
+  onUnduckFadeMsChange,
+  onFadeOutMsChange,
+  onMusicStartLeadMsChange,
+  onToggleDuckingSettings,
+}: TrackControlsProps) {
+  if (!selectedTrack) return null
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <label className="text-sm text-slate-400">Volume da Trilha</label>
+        <span className="text-xs text-slate-500">{Math.round(trackVolume * 100)}%</span>
+      </div>
+      <Slider value={[trackVolume]} onValueChange={([v]) => onTrackVolumeChange(v)} min={0} max={1} step={0.05} className="w-full" />
+      <AudioPlayer audioPath={selectedTrack.audioPath} />
+      <div className="pt-3 border-t border-white/10">
+        <button onClick={onToggleDuckingSettings} className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-300 transition-colors w-full">
+          <Volume2 className="w-4 h-4" />
+          Controles de Ducking
+          <ChevronDown className={`w-3 h-3 ml-auto transition-transform ${showDuckingSettings ? 'rotate-180' : ''}`} />
+        </button>
+        {showDuckingSettings && (
+          <div className="mt-3 space-y-3">
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <label className="text-xs text-slate-400">Volume durante a voz</label>
+                <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{Math.round(duckVolume * 100)}%</Badge>
+              </div>
+              <Slider value={[duckVolume]} onValueChange={([v]) => onDuckVolumeChange(v)} min={0} max={1} step={0.01} />
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <label className="text-xs text-slate-400">Fade-in inicial</label>
+                <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{fadeInMs / 1000}s</Badge>
+              </div>
+              <Slider value={[fadeInMs]} onValueChange={([v]) => onFadeInMsChange(v)} min={0} max={5000} step={100} />
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <label className="text-xs text-slate-400">Música antes da voz</label>
+                <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{(musicStartLeadMs / 1000).toFixed(1)}s</Badge>
+              </div>
+              <Slider value={[musicStartLeadMs]} onValueChange={([v]) => onMusicStartLeadMsChange(v)} min={0} max={10000} step={100} />
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <label className="text-xs text-slate-400">Transição Duck</label>
+                <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{duckFadeMs / 1000}s</Badge>
+              </div>
+              <Slider value={[duckFadeMs]} onValueChange={([v]) => onDuckFadeMsChange(v)} min={0} max={3000} step={50} />
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <label className="text-xs text-slate-400">Transição Unduck</label>
+                <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{unduckFadeMs / 1000}s</Badge>
+              </div>
+              <Slider value={[unduckFadeMs]} onValueChange={([v]) => onUnduckFadeMsChange(v)} min={0} max={3000} step={50} />
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <label className="text-xs text-slate-400">Fade-out final</label>
+                <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{fadeOutMs / 1000}s</Badge>
+              </div>
+              <Slider value={[fadeOutMs]} onValueChange={([v]) => onFadeOutMsChange(v)} min={0} max={8000} step={100} />
+            </div>
+            <div className="pt-2 border-t border-white/10">
+              <p className="text-[10px] text-slate-500 mb-2">Timeline do áudio:</p>
+              <div className="flex items-center gap-1 text-[10px]">
+                <div className="bg-purple-500/30 border border-purple-500/50 rounded px-2 py-1 text-purple-300">Música {(musicStartLeadMs / 1000).toFixed(1)}s</div>
+                <span className="text-slate-600">→</span>
+                <div className="bg-green-500/30 border border-green-500/50 rounded px-2 py-1 text-green-300">Voz {duckFadeMs / 1000}s fade</div>
+                <span className="text-slate-600">→</span>
+                <div className="bg-blue-500/30 border border-blue-500/50 rounded px-2 py-1 text-blue-300">Música volta</div>
+                <span className="text-slate-600">→</span>
+                <div className="bg-orange-500/30 border border-orange-500/50 rounded px-2 py-1 text-orange-300">Fade {fadeOutMs / 1000}s</div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 interface VoiceVariation {
   id: string
   label: string
@@ -1588,7 +1705,25 @@ export default function VozProClient() {
                             ))}
                           </div>
                           {selectedTrack && (
-                            <TrackControls />
+                            <TrackControls
+                              selectedTrack={selectedTrack}
+                              trackVolume={trackVolume}
+                              duckVolume={duckVolume}
+                              fadeInMs={fadeInMs}
+                              duckFadeMs={duckFadeMs}
+                              unduckFadeMs={unduckFadeMs}
+                              fadeOutMs={fadeOutMs}
+                              musicStartLeadMs={musicStartLeadMs}
+                              showDuckingSettings={showDuckingSettings}
+                              onTrackVolumeChange={setTrackVolume}
+                              onDuckVolumeChange={setDuckVolume}
+                              onFadeInMsChange={setFadeInMs}
+                              onDuckFadeMsChange={setDuckFadeMs}
+                              onUnduckFadeMsChange={setUnduckFadeMs}
+                              onFadeOutMsChange={setFadeOutMs}
+                              onMusicStartLeadMsChange={setMusicStartLeadMs}
+                              onToggleDuckingSettings={() => setShowDuckingSettings(!showDuckingSettings)}
+                            />
                           )}
                         </>
                       )}
@@ -1636,7 +1771,25 @@ export default function VozProClient() {
                         ))}
                       </div>
                       {selectedTrack && !selectedTrack.category && (
-                        <TrackControls />
+                        <TrackControls
+                          selectedTrack={selectedTrack}
+                          trackVolume={trackVolume}
+                          duckVolume={duckVolume}
+                          fadeInMs={fadeInMs}
+                          duckFadeMs={duckFadeMs}
+                          unduckFadeMs={unduckFadeMs}
+                          fadeOutMs={fadeOutMs}
+                          musicStartLeadMs={musicStartLeadMs}
+                          showDuckingSettings={showDuckingSettings}
+                          onTrackVolumeChange={setTrackVolume}
+                          onDuckVolumeChange={setDuckVolume}
+                          onFadeInMsChange={setFadeInMs}
+                          onDuckFadeMsChange={setDuckFadeMs}
+                          onUnduckFadeMsChange={setUnduckFadeMs}
+                          onFadeOutMsChange={setFadeOutMs}
+                          onMusicStartLeadMsChange={setMusicStartLeadMs}
+                          onToggleDuckingSettings={() => setShowDuckingSettings(!showDuckingSettings)}
+                        />
                       )}
                     </>
                   ) : (

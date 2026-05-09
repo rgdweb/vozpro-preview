@@ -1378,13 +1378,6 @@ export default function VozProClient() {
                                 <span className={`font-medium text-sm flex-1 min-w-0 ${selectedVoiceId === voice.id ? 'text-violet-200' : 'text-slate-300'}`}>
                                   {voice.name}
                                 </span>
-                                <VoicePreviewButton
-                                  audioUrl={getVoicePreviewUrl(voice, selectedVoiceId === voice.id ? selectedVariationId : undefined)}
-                                  voiceId={voice.id}
-                                  currentlyPlayingId={previewingVoiceId}
-                                  onPlayStart={setPreviewingVoiceId}
-                                  onPlayEnd={() => setPreviewingVoiceId(null)}
-                                />
                               </div>
                               <p className="text-xs text-slate-500 line-clamp-1">{voice.description}</p>
                             </button>
@@ -1394,12 +1387,22 @@ export default function VozProClient() {
                           <div>
                             <p className="text-sm font-medium text-slate-300 mb-2">Estilo / Emoção</p>
                             <div className="flex flex-wrap gap-2">
-                              {selectedVoice.variations.map((v) => (
-                                <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
-                                  <span>{v.emoji || '🎙️'}</span>
-                                  <span>{v.label}</span>
-                                </button>
-                              ))}
+                              {selectedVoice.variations.map((v) => {
+                                const varAudioUrl = v.refAudioServerUrl || v.refAudioPath || ''
+                                return (
+                                  <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
+                                    <VoicePreviewButton
+                                      audioUrl={varAudioUrl}
+                                      voiceId={v.id}
+                                      currentlyPlayingId={previewingVoiceId}
+                                      onPlayStart={setPreviewingVoiceId}
+                                      onPlayEnd={() => setPreviewingVoiceId(null)}
+                                    />
+                                    <span>{v.emoji || '🎙️'}</span>
+                                    <span>{v.label}</span>
+                                  </button>
+                                )
+                              })}
                             </div>
                           </div>
                         )}
@@ -1429,13 +1432,6 @@ export default function VozProClient() {
                                 <span className={`font-medium text-sm flex-1 min-w-0 ${selectedVoiceId === voice.id ? 'text-violet-200' : 'text-slate-300'}`}>
                                   {voice.name}
                                 </span>
-                                <VoicePreviewButton
-                                  audioUrl={getVoicePreviewUrl(voice, selectedVoiceId === voice.id ? selectedVariationId : undefined)}
-                                  voiceId={voice.id}
-                                  currentlyPlayingId={previewingVoiceId}
-                                  onPlayStart={setPreviewingVoiceId}
-                                  onPlayEnd={() => setPreviewingVoiceId(null)}
-                                />
                               </div>
                               <p className="text-xs text-slate-500 line-clamp-1">{voice.description}</p>
                             </button>
@@ -1461,12 +1457,22 @@ export default function VozProClient() {
                       <div>
                         <p className="text-sm font-medium text-slate-300 mb-2">Estilo / Emoção</p>
                         <div className="flex flex-wrap gap-2">
-                          {selectedVoice.variations.map((v) => (
-                            <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
-                              <span>{v.emoji || '🎙️'}</span>
-                              <span>{v.label}</span>
-                            </button>
-                          ))}
+                          {selectedVoice.variations.map((v) => {
+                            const varAudioUrl = v.refAudioServerUrl || v.refAudioPath || ''
+                            return (
+                              <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
+                                <VoicePreviewButton
+                                  audioUrl={varAudioUrl}
+                                  voiceId={v.id}
+                                  currentlyPlayingId={previewingVoiceId}
+                                  onPlayStart={setPreviewingVoiceId}
+                                  onPlayEnd={() => setPreviewingVoiceId(null)}
+                                />
+                                <span>{v.emoji || '🎙️'}</span>
+                                <span>{v.label}</span>
+                              </button>
+                            )
+                          })}
                         </div>
                       </div>
                     )}
@@ -1490,13 +1496,6 @@ export default function VozProClient() {
                             <span className={`font-medium text-sm flex-1 min-w-0 ${selectedVoiceId === voice.id ? 'text-violet-200' : 'text-slate-300'}`}>
                               {voice.name}
                             </span>
-                            <VoicePreviewButton
-                              audioUrl={getVoicePreviewUrl(voice, selectedVoiceId === voice.id ? selectedVariationId : undefined)}
-                              voiceId={voice.id}
-                              currentlyPlayingId={previewingVoiceId}
-                              onPlayStart={setPreviewingVoiceId}
-                              onPlayEnd={() => setPreviewingVoiceId(null)}
-                            />
                           </div>
                           <p className="text-xs text-slate-500 line-clamp-1">{voice.description}</p>
                         </button>
@@ -1506,12 +1505,22 @@ export default function VozProClient() {
                       <div>
                         <p className="text-sm font-medium text-slate-300 mb-2">Estilo / Emoção</p>
                         <div className="flex flex-wrap gap-2">
-                          {selectedVoice.variations.map((v) => (
-                            <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
-                              <span>{v.emoji || '🎙️'}</span>
-                              <span>{v.label}</span>
-                            </button>
-                          ))}
+                          {selectedVoice.variations.map((v) => {
+                            const varAudioUrl = v.refAudioServerUrl || v.refAudioPath || ''
+                            return (
+                              <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
+                                <VoicePreviewButton
+                                  audioUrl={varAudioUrl}
+                                  voiceId={v.id}
+                                  currentlyPlayingId={previewingVoiceId}
+                                  onPlayStart={setPreviewingVoiceId}
+                                  onPlayEnd={() => setPreviewingVoiceId(null)}
+                                />
+                                <span>{v.emoji || '🎙️'}</span>
+                                <span>{v.label}</span>
+                              </button>
+                            )
+                          })}
                         </div>
                       </div>
                     )}

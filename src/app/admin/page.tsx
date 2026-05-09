@@ -1973,9 +1973,10 @@ export default function AdminDashboard() {
                             <div className="flex items-center gap-3">
                               <button
                                 onClick={() => toggleTrackPreview(track)}
-                                className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 transition-all ${previewingTrackId === track.id ? 'bg-purple-500 text-white shadow-lg shadow-purple-500/30' : 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30'}`}
+                                className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-all duration-200 ${previewingTrackId === track.id ? 'bg-violet-500 text-white shadow-lg shadow-violet-500/30 scale-110' : 'bg-purple-500/20 text-purple-400 hover:bg-violet-500/20 hover:text-violet-300'}`}
+                                title={previewingTrackId === track.id ? 'Parar preview' : 'Ouvir preview'}
                               >
-                                {previewingTrackId === track.id ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
+                                {previewingTrackId === track.id ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
                               </button>
                               <div>
                                 <div className="flex items-center gap-2">
@@ -2029,7 +2030,8 @@ export default function AdminDashboard() {
                               <div className="flex items-center gap-3">
                                 <button
                                   onClick={() => toggleTrackPreview(track)}
-                                  className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all ${previewingTrackId === track.id ? 'bg-purple-500 text-white shadow-lg shadow-purple-500/30' : 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30'}`}
+                                  className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-all duration-200 ${previewingTrackId === track.id ? 'bg-violet-500 text-white shadow-lg shadow-violet-500/30 scale-110' : 'bg-purple-500/20 text-purple-400 hover:bg-violet-500/20 hover:text-violet-300'}`}
+                                  title={previewingTrackId === track.id ? 'Parar preview' : 'Ouvir preview'}
                                 >
                                   {previewingTrackId === track.id ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 ml-0.5" />}
                                 </button>

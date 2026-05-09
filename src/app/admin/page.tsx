@@ -724,7 +724,7 @@ export default function AdminDashboard() {
     }
   }
 
-  // --- BATCH UPLOAD ---
+  // --- BATCH UPLOAD (individual uploads in parallel to avoid Vercel timeout) ---
   const handleBatchUpload = async () => {
     if (batchFiles.length === 0) {
       toast.error('Selecione pelo menos um arquivo')
@@ -736,36 +736,96 @@ export default function AdminDashboard() {
     }
 
     setBatchUploading(true)
-    setBatchProgress(`Enviando ${batchFiles.length} arquivo(s)...`)
+    let created = 0
+    let failed = 0
+    const errorMessages: string[] = []
+    const validExts = ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.webm']
 
-    try {
-      const formData = new FormData()
-      formData.append('category', batchUploadCategory)
-      batchFiles.forEach(file => formData.append('files', file))
+    // Process up to 3 files in parallel
+    const queue = [...batchFiles]
+    const running: Promise<void>[] = []
 
-      const res = await fetch('/api/batch-upload-tracks', {
-        method: 'POST',
-        body: formData,
-      })
-
-      const data = await res.json()
-
-      if (res.ok) {
-        toast.success(`${data.created} trilha(s) criada(s)!${data.failed > 0 ? ` ${data.failed} falha(s).` : ''}`)
-        setBatchUploadOpen(false)
-        setBatchFiles([])
-        setBatchUploadCategory('')
-        setSelectedTrackCategory(batchUploadCategory)
-        loadData()
-      } else {
-        toast.error(data.error || 'Erro no upload em lote')
+    const processFile = async (file: File) => {
+      const ext = '.' + file.name.split('.').pop()?.toLowerCase()
+      if (!validExts.includes(ext)) {
+        errorMessages.push(`${file.name}: formato não suportado`)
+        failed++
+        return
       }
-    } catch {
-      toast.error('Erro de conexão')
-    } finally {
-      setBatchUploading(false)
-      setBatchProgress('')
+
+      try {
+        setBatchProgress(`${created + failed + 1}/${batchFiles.length} — ${file.name}`)
+
+        // Step 1: Upload file to server
+        const formData = new FormData()
+        formData.append('file', file)
+        const uploadRes = await fetch('/api/upload-track', { method: 'POST', body: formData })
+        const uploadData = await uploadRes.json()
+
+        if (!uploadRes.ok || (!uploadData.path && !uploadData.url)) {
+          errorMessages.push(`${file.name}: ${uploadData.error || 'falha no upload'}`)
+          failed++
+          return
+        }
+
+        // Step 2: Create track record in DB
+        const trackName = file.name.replace(/\.[^.]+$/, '')
+        const createRes = await fetch('/api/tracks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: trackName,
+            description: '',
+            emoji: '',
+            category: batchUploadCategory,
+            audioPath: uploadData.path || uploadData.url,
+            duration: 0,
+          }),
+        })
+
+        if (!createRes.ok) {
+          errorMessages.push(`${file.name}: erro ao criar registro`)
+          failed++
+          return
+        }
+
+        created++
+      } catch {
+        errorMessages.push(`${file.name}: erro de conexão`)
+        failed++
+      }
     }
+
+    while (queue.length > 0 || running.length > 0) {
+      // Fill up to 3 concurrent uploads
+      while (running.length < 3 && queue.length > 0) {
+        const file = queue.shift()!
+        const p = processFile(file).then(() => {
+          const idx = running.indexOf(p)
+          if (idx >= 0) running.splice(idx, 1)
+        })
+        running.push(p)
+      }
+      if (running.length > 0) {
+        await Promise.race(running)
+      }
+    }
+
+    // Show results
+    if (created > 0) toast.success(`${created} trilha(s) criada(s)!`)
+    if (failed > 0) {
+      toast.error(`${failed} falha(s):\n${errorMessages.slice(0, 5).join('\n')}${errorMessages.length > 5 ? `\n...e mais ${errorMessages.length - 5}` : ''}`, { duration: 10000 })
+    }
+    if (created > 0) {
+      setBatchUploadOpen(false)
+      setBatchFiles([])
+      setBatchUploadCategory('')
+      setSelectedTrackCategory(batchUploadCategory)
+      loadData()
+    }
+
+    setBatchUploading(false)
+    setBatchProgress('')
   }
 
   // --- SETTINGS ---

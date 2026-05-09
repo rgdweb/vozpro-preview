@@ -442,14 +442,15 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'Xícara': 'Chícara',
   // === H MUDO — palavras mais comuns como garantia ===
   // A regex 1d cobre todas, mas essas entradas garantem que funcionem
+  // Importante: minúsculo! TTS lê maiúscula como nome próprio e inventa H
   'hoje': 'oje',
-  'Hoje': 'Oje',
+  'Hoje': 'oje',
   'homem': 'omem',
-  'Homem': 'Omem',
+  'Homem': 'omem',
   'honesto': 'onesto',
-  'Honesto': 'Onesto',
+  'Honesto': 'onesto',
   'higiene': 'igiene',
-  'Higiene': 'Igiene',
+  'Higiene': 'igiene',
 
   'xingar': 'chingar',
   'xingamento': 'chingamento',
@@ -1188,15 +1189,9 @@ export function optimizePronunciation(text: string): string {
 
   // ---- 1d. REGRAS FONÉTICAS PT-BR AUTOMÁTICAS (cobrem milhares de palavras) ----
   // H MUDO no início de palavras — PT-BR: H inicial é SEMPRE mudo
-  // "hoje" → "oje", "Hoje" → "Oje", "HOMEM" → "OMEM"
-  // "história" → "istória", "hipertensão" → "ipertensão"
-  // "hemodiálise" → "emodiálise", "hidráulico" → "idráulico", "honesto" → "onesto"
-  // Cobertura: TODAS as palavras começando com H + vogal (centenas de palavras)
-  result = result.replace(/\bh([aeiouáàãâéèêíïóôõúü])/gi, (match, v) => {
-    if (match[0] === match[0].toUpperCase() && v === v.toUpperCase()) return v
-    if (match[0] === match[0].toUpperCase()) return v.toUpperCase()
-    return v
-  })
+  // "hoje" → "oje", "Hoje" → "oje", "HOMEM" → "omem"
+  // IMPORTANTE: manter minúsculo! O TTS lê letra maiúscula como nome próprio e inventa H
+  result = result.replace(/\b[Hh]([aeiouáàãâéèêíïóôõúü])/g, (_, v) => v)
 
   // ---- 2. NÚMEROS GRANDES POR EXTENSO ----
   // Anos: "2024" → "[dois mil vinte e quatro]" (quando precedido por "ano" ou similar)

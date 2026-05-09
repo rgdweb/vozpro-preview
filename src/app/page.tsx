@@ -619,11 +619,9 @@ export default function VozProClient() {
     textToSend = processControlTags(textToSend, engine)
 
     // 1b. H MUDO — remover ANTES de qualquer preprocessamento
-    // O preprocessTTS pode quebrar o word boundary (\b) da regex
-    // Aplicando direto no texto bruto garante que funcione sempre
+    // Importante: manter minúsculo! O TTS lê "Oje" como nome próprio e inventa o H
     if (pronunciationOptimization) {
-      textToSend = textToSend.replace(/\bH([aeiouáàãâéèêíïóôõúü])/g, (_, v) => v.toUpperCase())
-      textToSend = textToSend.replace(/\bh([aeiouáàãâéèêíïóôõúü])/g, (_, v) => v)
+      textToSend = textToSend.replace(/\b[Hh]([aeiouáàãâéèêíïóôõúü])/g, (_, v) => v)
     }
 
     // 2. Text preprocessor (pontuação, spacing)

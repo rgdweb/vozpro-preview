@@ -137,6 +137,8 @@ interface VoiceVariation {
   label: string
   emoji: string
   refAudioPath: string
+  refAudioServerUrl: string
+  refAudioFilename: string
   refAudioName: string
   refText: string
   instruct: string
@@ -1034,8 +1036,8 @@ export default function AdminDashboard() {
               label,
               emoji: '',
               refAudioPath: uploadData.path || '',
-              refAudioServerUrl: uploadData.serverUrl || uploadData.url || '',
-              refAudioFilename: uploadData.filename || '',
+              serverUrl: uploadData.serverUrl || uploadData.url || '',
+              filename: uploadData.filename || '',
               refAudioName: file.name,
               refText: '',
               instruct: '',

@@ -267,9 +267,17 @@ function parseVoiceDesignToParams(text: string): { gender: string; age: string; 
   return { gender, age, pitch, style, accent }
 }
 
-/** Get the preview audio URL for a voice: previewUrl or first variation's refAudioServerUrl */
-function getVoicePreviewUrl(voice: Voice): string | undefined {
+/** Get the preview audio URL for a voice, respecting the selected variation */
+function getVoicePreviewUrl(voice: Voice, selectedVarId?: string): string | undefined {
   if (voice.previewUrl) return voice.previewUrl
+  // If a variation is selected for this voice, use its audio
+  if (selectedVarId) {
+    const selectedVar = voice.variations.find(v => v.id === selectedVarId)
+    if (selectedVar) {
+      return selectedVar.refAudioServerUrl || selectedVar.refAudioPath || undefined
+    }
+  }
+  // Fallback to first active variation
   const firstVariation = voice.variations.find(v => v.active !== false)
   return firstVariation?.refAudioServerUrl || firstVariation?.refAudioPath || undefined
 }
@@ -1306,7 +1314,7 @@ export default function VozProClient() {
                                   {voice.name}
                                 </span>
                                 <VoicePreviewButton
-                                  audioUrl={getVoicePreviewUrl(voice)}
+                                  audioUrl={getVoicePreviewUrl(voice, selectedVoiceId === voice.id ? selectedVariationId : undefined)}
                                   voiceId={voice.id}
                                   currentlyPlayingId={previewingVoiceId}
                                   onPlayStart={setPreviewingVoiceId}
@@ -1357,7 +1365,7 @@ export default function VozProClient() {
                                   {voice.name}
                                 </span>
                                 <VoicePreviewButton
-                                  audioUrl={getVoicePreviewUrl(voice)}
+                                  audioUrl={getVoicePreviewUrl(voice, selectedVoiceId === voice.id ? selectedVariationId : undefined)}
                                   voiceId={voice.id}
                                   currentlyPlayingId={previewingVoiceId}
                                   onPlayStart={setPreviewingVoiceId}
@@ -1418,7 +1426,7 @@ export default function VozProClient() {
                               {voice.name}
                             </span>
                             <VoicePreviewButton
-                              audioUrl={getVoicePreviewUrl(voice)}
+                              audioUrl={getVoicePreviewUrl(voice, selectedVoiceId === voice.id ? selectedVariationId : undefined)}
                               voiceId={voice.id}
                               currentlyPlayingId={previewingVoiceId}
                               onPlayStart={setPreviewingVoiceId}

@@ -724,7 +724,7 @@ export default function AdminDashboard() {
     }
   }
 
-  // --- BATCH UPLOAD (individual uploads in parallel to avoid Vercel timeout) ---
+  // --- BATCH UPLOAD (sequential with retry to avoid server overload) ---
   const handleBatchUpload = async () => {
     if (batchFiles.length === 0) {
       toast.error('Selecione pelo menos um arquivo')
@@ -741,74 +741,70 @@ export default function AdminDashboard() {
     const errorMessages: string[] = []
     const validExts = ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.webm']
 
-    // Process up to 3 files in parallel
-    const queue = [...batchFiles]
-    const running: Promise<void>[] = []
+    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-    const processFile = async (file: File) => {
+    for (let i = 0; i < batchFiles.length; i++) {
+      const file = batchFiles[i]
       const ext = '.' + file.name.split('.').pop()?.toLowerCase()
       if (!validExts.includes(ext)) {
         errorMessages.push(`${file.name}: formato não suportado`)
         failed++
-        return
+        continue
       }
 
-      try {
-        setBatchProgress(`${created + failed + 1}/${batchFiles.length} — ${file.name}`)
+      setBatchProgress(`${i + 1}/${batchFiles.length} — ${file.name}`)
 
-        // Step 1: Upload file to server
-        const formData = new FormData()
-        formData.append('file', file)
-        const uploadRes = await fetch('/api/upload-track', { method: 'POST', body: formData })
-        const uploadData = await uploadRes.json()
+      // Try up to 2 retries
+      let success = false
+      for (let attempt = 1; attempt <= 2 && !success; attempt++) {
+        try {
+          // Upload file to server
+          const formData = new FormData()
+          formData.append('file', file)
+          const uploadRes = await fetch('/api/upload-track', { method: 'POST', body: formData })
+          const uploadData = await uploadRes.json()
 
-        if (!uploadRes.ok || (!uploadData.path && !uploadData.url)) {
-          errorMessages.push(`${file.name}: ${uploadData.error || 'falha no upload'}`)
-          failed++
-          return
+          if (!uploadRes.ok || (!uploadData.path && !uploadData.url)) {
+            if (attempt === 2) errorMessages.push(`${file.name}: ${uploadData.error || 'falha no upload'}`)
+            await sleep(2000)
+            continue
+          }
+
+          // Create track record in DB
+          const trackName = file.name.replace(/\.[^.]+$/, '')
+          const createRes = await fetch('/api/tracks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: trackName,
+              description: '',
+              emoji: '',
+              category: batchUploadCategory,
+              audioPath: uploadData.path || uploadData.url,
+              duration: 0,
+            }),
+          })
+
+          if (!createRes.ok) {
+            if (attempt === 2) errorMessages.push(`${file.name}: erro ao criar registro`)
+            await sleep(2000)
+            continue
+          }
+
+          created++
+          success = true
+        } catch (err) {
+          if (attempt === 2) {
+            errorMessages.push(`${file.name}: ${(err as Error)?.message || 'erro de conexão'}`)
+          }
+          await sleep(3000) // Longer pause after connection error
         }
-
-        // Step 2: Create track record in DB
-        const trackName = file.name.replace(/\.[^.]+$/, '')
-        const createRes = await fetch('/api/tracks', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: trackName,
-            description: '',
-            emoji: '',
-            category: batchUploadCategory,
-            audioPath: uploadData.path || uploadData.url,
-            duration: 0,
-          }),
-        })
-
-        if (!createRes.ok) {
-          errorMessages.push(`${file.name}: erro ao criar registro`)
-          failed++
-          return
-        }
-
-        created++
-      } catch {
-        errorMessages.push(`${file.name}: erro de conexão`)
-        failed++
       }
-    }
 
-    while (queue.length > 0 || running.length > 0) {
-      // Fill up to 3 concurrent uploads
-      while (running.length < 3 && queue.length > 0) {
-        const file = queue.shift()!
-        const p = processFile(file).then(() => {
-          const idx = running.indexOf(p)
-          if (idx >= 0) running.splice(idx, 1)
-        })
-        running.push(p)
-      }
-      if (running.length > 0) {
-        await Promise.race(running)
-      }
+      if (!success) failed++
+
+      // Small pause between files to avoid server overload
+      if (i < batchFiles.length - 1) await sleep(1000)
     }
 
     // Show results

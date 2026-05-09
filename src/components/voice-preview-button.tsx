@@ -34,6 +34,16 @@ export default function VoicePreviewButton({
 
   const isPlaying = currentlyPlayingId === voiceId
 
+  // Stop audio when another instance takes over (currentlyPlayingId changed away from us)
+  useEffect(() => {
+    if (!isPlaying && audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+      wasPlayingRef.current = false
+      setLoading(false)
+    }
+  }, [isPlaying])
+
   // Create audio element when audioUrl is available
   useEffect(() => {
     if (!audioUrl) {

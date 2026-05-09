@@ -468,6 +468,7 @@ export default function VozProClient() {
   const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null)
   const [previewingTrackId, setPreviewingTrackId] = useState<string | null>(null)
   const [selectedTrackId, setSelectedTrackId] = useState<string>('')
+  const [trackShowLimit, setTrackShowLimit] = useState(15)
   const [language, setLanguage] = useState('Portuguese')
 
   // Settings
@@ -1753,7 +1754,7 @@ export default function VozProClient() {
                       ) : (
                         <>
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                            {tracks.filter(t => t.category === selectedTrackCategory).map((track) => (
+                            {tracks.filter(t => t.category === selectedTrackCategory).slice(0, trackShowLimit).map((track) => (
                               <button
                                 key={track.id}
                                 onClick={() => setSelectedTrackId(track.id)}
@@ -1780,6 +1781,11 @@ export default function VozProClient() {
                               </button>
                             ))}
                           </div>
+                          {(() => { const remaining = tracks.filter(t => t.category === selectedTrackCategory).length - trackShowLimit; if (remaining > 0) return (
+                            <button onClick={() => setTrackShowLimit(prev => prev + 15)} className="w-full text-center text-sm text-purple-400 hover:text-purple-300 py-2 rounded-lg border border-white/5 hover:border-purple-500/30 transition-all">
+                              Ver mais {remaining}
+                            </button>
+                          ); return null; })()}
                           {selectedTrack && (
                             <TrackControls
                               selectedTrack={selectedTrack}
@@ -1811,7 +1817,7 @@ export default function VozProClient() {
                         <div className="mb-4">
                           <p className="text-xs text-slate-500 mb-2">Sem categoria</p>
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                            {tracks.filter(t => !t.category).map((track) => (
+                            {tracks.filter(t => !t.category).slice(0, trackShowLimit).map((track) => (
                               <button
                                 key={track.id}
                                 onClick={() => setSelectedTrackId(track.id)}
@@ -1838,6 +1844,11 @@ export default function VozProClient() {
                               </button>
                             ))}
                           </div>
+                          {(() => { const remaining = tracks.filter(t => !t.category).length - trackShowLimit; if (remaining > 0) return (
+                            <button onClick={() => setTrackShowLimit(prev => prev + 15)} className="w-full text-center text-sm text-purple-400 hover:text-purple-300 py-2 rounded-lg border border-white/5 hover:border-purple-500/30 transition-all">
+                              Ver mais {remaining}
+                            </button>
+                          ); return null; })()}
                         </div>
                       )}
                       <div className="flex flex-wrap gap-2">
@@ -1879,7 +1890,7 @@ export default function VozProClient() {
                     /* No categories - flat list */
                     <>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {tracks.map((track) => (
+                        {tracks.slice(0, trackShowLimit).map((track) => (
                           <button
                             key={track.id}
                             onClick={() => setSelectedTrackId(track.id)}
@@ -1906,6 +1917,11 @@ export default function VozProClient() {
                           </button>
                         ))}
                       </div>
+                      {(() => { const remaining = tracks.length - trackShowLimit; if (remaining > 0) return (
+                        <button onClick={() => setTrackShowLimit(prev => prev + 15)} className="w-full text-center text-sm text-purple-400 hover:text-purple-300 py-2 rounded-lg border border-white/5 hover:border-purple-500/30 transition-all">
+                          Ver mais {remaining}
+                        </button>
+                      ); return null; })()}
                       {selectedTrack && (
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">

@@ -724,7 +724,7 @@ export default function AdminDashboard() {
     }
   }
 
-  // --- BATCH UPLOAD (sequential with retry to avoid server overload) ---
+  // --- BATCH UPLOAD (sequential with retry + duplicate check) ---
   const handleBatchUpload = async () => {
     if (batchFiles.length === 0) {
       toast.error('Selecione pelo menos um arquivo')
@@ -737,18 +737,38 @@ export default function AdminDashboard() {
 
     setBatchUploading(true)
     let created = 0
+    let skipped = 0
     let failed = 0
     const errorMessages: string[] = []
+    const skippedMessages: string[] = []
     const validExts = ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.webm']
 
     const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
+    // Build a set of existing track names in this category for fast lookup
+    const existingNames = new Set(
+      tracks
+        .filter(t => t.category === batchUploadCategory)
+        .map(t => t.name.toLowerCase())
+    )
+
     for (let i = 0; i < batchFiles.length; i++) {
       const file = batchFiles[i]
       const ext = '.' + file.name.split('.').pop()?.toLowerCase()
+      const trackName = file.name.replace(/\.[^.]+$/, '')
+
+      // Validate extension
       if (!validExts.includes(ext)) {
         errorMessages.push(`${file.name}: formato não suportado`)
         failed++
+        continue
+      }
+
+      // Check duplicate: same name already exists in this category
+      if (existingNames.has(trackName.toLowerCase())) {
+        skippedMessages.push(file.name)
+        skipped++
+        console.log(`[BatchUpload] Pulado (duplicata): ${file.name}`)
         continue
       }
 
@@ -771,7 +791,6 @@ export default function AdminDashboard() {
           }
 
           // Create track record in DB
-          const trackName = file.name.replace(/\.[^.]+$/, '')
           const createRes = await fetch('/api/tracks', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -792,27 +811,25 @@ export default function AdminDashboard() {
           }
 
           created++
+          existingNames.add(trackName.toLowerCase()) // Mark as existing to catch duplicates within batch
           success = true
         } catch (err) {
           if (attempt === 2) {
             errorMessages.push(`${file.name}: ${(err as Error)?.message || 'erro de conexão'}`)
           }
-          await sleep(3000) // Longer pause after connection error
+          await sleep(3000)
         }
       }
 
       if (!success) failed++
-
-      // Small pause between files to avoid server overload
       if (i < batchFiles.length - 1) await sleep(1000)
     }
 
     // Show results
     if (created > 0) toast.success(`${created} trilha(s) criada(s)!`)
-    if (failed > 0) {
-      toast.error(`${failed} falha(s):\n${errorMessages.slice(0, 5).join('\n')}${errorMessages.length > 5 ? `\n...e mais ${errorMessages.length - 5}` : ''}`, { duration: 10000 })
-    }
-    if (created > 0) {
+    if (skipped > 0) toast.warning(`${skipped} trilha(s) ignorada(s) — já existem:\n${skippedMessages.slice(0, 5).join('\n')}${skippedMessages.length > 5 ? `\n...e mais ${skippedMessages.length - 5}` : ''}`, { duration: 10000 })
+    if (failed > 0) toast.error(`${failed} falha(s):\n${errorMessages.slice(0, 5).join('\n')}${errorMessages.length > 5 ? `\n...e mais ${errorMessages.length - 5}` : ''}`, { duration: 10000 })
+    if (created > 0 || skipped > 0) {
       setBatchUploadOpen(false)
       setBatchFiles([])
       setBatchUploadCategory('')

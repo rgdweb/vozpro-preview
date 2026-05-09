@@ -646,8 +646,14 @@ export default function VozProClient() {
     textToSend = processControlTags(textToSend, engine)
 
     // 1b. H MUDO — remover ANTES de qualquer preprocessamento
-    // Importante: manter minúsculo! O TTS lê "Oje" como nome próprio e inventa o H
+    // Palavras problemáticas que o TTS reinventa H mesmo após remoção
+    // Usamos [pronúncia] que o VozPro interpreta como pronúncia forçada
     if (pronunciationOptimization) {
+      textToSend = textToSend.replace(/\b[Hh]oje\b/gi, '[oje]')
+      textToSend = textToSend.replace(/\b[Hh]ora\b/gi, '[ora]')
+      textToSend = textToSend.replace(/\b[Hh]omem\b/gi, '[omem]')
+      textToSend = textToSend.replace(/\b[Hh]onesto\b/gi, '[onesto]')
+      // H mudo geral — remove H de todas as outras palavras
       textToSend = textToSend.replace(/\b[Hh]([aeiouáàãâéèêíïóôõúü])/g, (_, v) => v)
     }
 

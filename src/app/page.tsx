@@ -1345,16 +1345,16 @@ export default function VozProClient() {
                         </div>
                       </div>
                     )}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                    <div className="flex flex-wrap gap-2">
                       {voiceCategories.map(cat => (
                         <button
                           key={cat.name}
                           onClick={() => { setSelectedVoiceCategory(cat.name); setSelectedVoiceId(''); setSelectedVariationId('') }}
-                          className="flex flex-col items-center gap-2 p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-violet-500/10 hover:border-violet-500/50 hover:scale-105 transition-all duration-200 cursor-pointer group"
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/10 bg-white/5 hover:bg-violet-500/10 hover:border-violet-500/50 transition-all duration-200 cursor-pointer group"
                         >
-                          <span className="text-3xl group-hover:scale-110 transition-transform">{cat.emoji || '📁'}</span>
-                          <span className="text-sm font-medium text-white text-center truncate w-full">{cat.name}</span>
-                          <span className="text-xs text-slate-500">{cat.count} voz(es)</span>
+                          <span className="text-base group-hover:scale-110 transition-transform">{cat.emoji || '📁'}</span>
+                          <span className="text-sm font-medium text-white whitespace-nowrap">{cat.name}</span>
+                          <span className="text-xs text-slate-500 bg-white/5 px-1.5 py-0.5 rounded-md">{cat.count}</span>
                         </button>
                       ))}
                     </div>
@@ -1785,16 +1785,16 @@ export default function VozProClient() {
                           </div>
                         </div>
                       )}
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                      <div className="flex flex-wrap gap-2">
                         {trackCategories.map(cat => (
                           <button
                             key={cat.name}
                             onClick={() => setSelectedTrackCategory(cat.name)}
-                            className="flex flex-col items-center gap-2 p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-purple-500/10 hover:border-purple-500/50 hover:scale-105 transition-all duration-200 cursor-pointer group"
+                            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/10 bg-white/5 hover:bg-purple-500/10 hover:border-purple-500/50 transition-all duration-200 cursor-pointer group"
                           >
-                            <span className="text-3xl group-hover:scale-110 transition-transform">{cat.emoji || '📁'}</span>
-                            <span className="text-sm font-medium text-white text-center truncate w-full">{cat.name}</span>
-                            <span className="text-xs text-slate-500">{cat.count} trilha(s)</span>
+                            <span className="text-base group-hover:scale-110 transition-transform">{cat.emoji || '📁'}</span>
+                            <span className="text-sm font-medium text-white whitespace-nowrap">{cat.name}</span>
+                            <span className="text-xs text-slate-500 bg-white/5 px-1.5 py-0.5 rounded-md">{cat.count}</span>
                           </button>
                         ))}
                       </div>

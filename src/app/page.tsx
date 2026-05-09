@@ -19,6 +19,7 @@ import {
 import { toast } from 'sonner'
 import { Label } from '@/components/ui/label'
 import AudioPlayer from '@/components/audio-player'
+import VoicePreviewButton from '@/components/voice-preview-button'
 import { optimizePronunciation, processControlTags, containsSSML, type TTSEngine } from '@/lib/pronunciation-optimizer'
 import { preprocessTTS } from '@/lib/tts-text-preprocessor'
 
@@ -161,6 +162,7 @@ interface Voice {
   age: string
   accent: string
   pitch: string
+  previewUrl: string
   order: number
   active: boolean
   variations: VoiceVariation[]
@@ -263,6 +265,13 @@ function parseVoiceDesignToParams(text: string): { gender: string; age: string; 
   else if (t.includes('chinese') || t.includes('chinês') || t.includes('chines')) accent = 'Chinese Accent / 中国口音'
 
   return { gender, age, pitch, style, accent }
+}
+
+/** Get the preview audio URL for a voice: previewUrl or first variation's refAudioServerUrl */
+function getVoicePreviewUrl(voice: Voice): string | undefined {
+  if (voice.previewUrl) return voice.previewUrl
+  const firstVariation = voice.variations.find(v => v.active !== false)
+  return firstVariation?.refAudioServerUrl || firstVariation?.refAudioPath || undefined
 }
 
 /**
@@ -448,6 +457,7 @@ export default function VozProClient() {
   // Selections
   const [selectedVoiceId, setSelectedVoiceId] = useState<string>('')
   const [selectedVariationId, setSelectedVariationId] = useState<string>('')
+  const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null)
   const [selectedTrackId, setSelectedTrackId] = useState<string>('')
   const [language, setLanguage] = useState('Portuguese')
 
@@ -610,6 +620,7 @@ export default function VozProClient() {
     setMixedAudioUrl(null)
     setIsMixed(false)
     setGeneratingTime(0)
+    setPreviewingVoiceId(null)
 
     // ===== OTIMIZAÇÃO DE PRONÚNCIA (pipeline completo) =====
     let textToSend = text.trim()
@@ -1291,9 +1302,16 @@ export default function VozProClient() {
                             >
                               <div className="flex items-center gap-2 mb-1">
                                 <Mic className={`w-4 h-4 ${selectedVoiceId === voice.id ? 'text-violet-400' : 'text-slate-500'}`} />
-                                <span className={`font-medium text-sm ${selectedVoiceId === voice.id ? 'text-violet-200' : 'text-slate-300'}`}>
+                                <span className={`font-medium text-sm flex-1 min-w-0 ${selectedVoiceId === voice.id ? 'text-violet-200' : 'text-slate-300'}`}>
                                   {voice.name}
                                 </span>
+                                <VoicePreviewButton
+                                  audioUrl={getVoicePreviewUrl(voice)}
+                                  voiceId={voice.id}
+                                  currentlyPlayingId={previewingVoiceId}
+                                  onPlayStart={setPreviewingVoiceId}
+                                  onPlayEnd={() => setPreviewingVoiceId(null)}
+                                />
                               </div>
                               <p className="text-xs text-slate-500 line-clamp-1">{voice.description}</p>
                             </button>
@@ -1335,9 +1353,16 @@ export default function VozProClient() {
                             >
                               <div className="flex items-center gap-2 mb-1">
                                 <Mic className={`w-4 h-4 ${selectedVoiceId === voice.id ? 'text-violet-400' : 'text-slate-500'}`} />
-                                <span className={`font-medium text-sm ${selectedVoiceId === voice.id ? 'text-violet-200' : 'text-slate-300'}`}>
+                                <span className={`font-medium text-sm flex-1 min-w-0 ${selectedVoiceId === voice.id ? 'text-violet-200' : 'text-slate-300'}`}>
                                   {voice.name}
                                 </span>
+                                <VoicePreviewButton
+                                  audioUrl={getVoicePreviewUrl(voice)}
+                                  voiceId={voice.id}
+                                  currentlyPlayingId={previewingVoiceId}
+                                  onPlayStart={setPreviewingVoiceId}
+                                  onPlayEnd={() => setPreviewingVoiceId(null)}
+                                />
                               </div>
                               <p className="text-xs text-slate-500 line-clamp-1">{voice.description}</p>
                             </button>
@@ -1389,9 +1414,16 @@ export default function VozProClient() {
                         >
                           <div className="flex items-center gap-2 mb-1">
                             <Mic className={`w-4 h-4 ${selectedVoiceId === voice.id ? 'text-violet-400' : 'text-slate-500'}`} />
-                            <span className={`font-medium text-sm ${selectedVoiceId === voice.id ? 'text-violet-200' : 'text-slate-300'}`}>
+                            <span className={`font-medium text-sm flex-1 min-w-0 ${selectedVoiceId === voice.id ? 'text-violet-200' : 'text-slate-300'}`}>
                               {voice.name}
                             </span>
+                            <VoicePreviewButton
+                              audioUrl={getVoicePreviewUrl(voice)}
+                              voiceId={voice.id}
+                              currentlyPlayingId={previewingVoiceId}
+                              onPlayStart={setPreviewingVoiceId}
+                              onPlayEnd={() => setPreviewingVoiceId(null)}
+                            />
                           </div>
                           <p className="text-xs text-slate-500 line-clamp-1">{voice.description}</p>
                         </button>

@@ -585,8 +585,16 @@ export default function VozProClient() {
 
     // Validar baseado no modo de voz
     if (voiceMode === 'clone' && !selectedVariationId && !uploadedVoiceUrl) {
-      toast.error('Selecione uma variação de voz ou faça upload de um áudio')
+      toast.error('Selecione uma voz ou faça upload de um áudio de referência')
       return
+    }
+    // Verificar se a variação selecionada realmente existe na voz selecionada
+    if (selectedVariationId && selectedVoice) {
+      const variationExists = selectedVoice.variations.some(v => v.id === selectedVariationId)
+      if (!variationExists) {
+        toast.error('Selecione uma variação de voz válida')
+        return
+      }
     }
     if (voiceMode === 'design' && !voiceDesignInstruct.trim()) {
       // OK - sem descrição, VozPro vai usar todos os params como Auto
@@ -1074,7 +1082,7 @@ export default function VozProClient() {
       setIsGenerating(false)
       setGeneratingTime(0)
     }
-  }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs, omnivoicePhpUrl])
+  }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs, omnivoicePhpUrl, ttsModel, voiceMode, uploadedVoiceUrl, pronunciationOptimization, llmPreprocess])
 
   // Get the active audio URL
   const activeAudioUrl = mixedAudioUrl || audioUrl
@@ -1494,11 +1502,18 @@ export default function VozProClient() {
                     <div className="flex items-center gap-3">
                       <label className="cursor-pointer px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 text-sm text-slate-300 transition-colors">
                         <input
+                          key={uploadedVoiceUrl || 'upload-input'}
                           type="file"
                           accept="audio/*"
                           onChange={async (e) => {
                             const file = e.target.files?.[0]
                             if (!file) return
+                            // Limpar upload anterior
+                            setUploadedVoiceUrl(null)
+                            setUploadedVoiceFile(null)
+                            // Limpar seleção de voz (upload substitui a seleção)
+                            setSelectedVoiceId('')
+                            setSelectedVariationId('')
                             setUploadedVoiceFile(file)
                             toast.info('Enviando áudio...')
                             const formData = new FormData()
@@ -1511,12 +1526,14 @@ export default function VozProClient() {
                               const data = await res.json()
                               if (data.serverUrl) {
                                 setUploadedVoiceUrl(data.serverUrl)
-                                toast.success(`Áudio "${file.name}" carregado!`)
+                                toast.success(`Áudio "${file.name}" carregado!`) 
                               } else {
                                 toast.error(data.error || 'Falha no upload')
+                                setUploadedVoiceFile(null)
                               }
                             } catch {
                               toast.error('Erro ao enviar áudio')
+                              setUploadedVoiceFile(null)
                             }
                           }}
                           className="hidden"

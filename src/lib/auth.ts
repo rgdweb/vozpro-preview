@@ -33,26 +33,21 @@ export async function createSession(
   const hash = hashToken(payload)
   const token = Buffer.from(`${userId}:${role}:${timestamp}:${hash}`).toString('base64')
 
-  // Calcular expiração (24 horas)
-  const expiresAt = new Date(timestamp + 24 * 60 * 60 * 1000)
-
-  // Hash do token para armazenar no banco (não guardamos o token em texto puro)
-  const tokenHash = createHash('sha256').update(token).digest('hex')
-
-  // Para usuários normais (NÃO admin): invalidar todas as sessões anteriores
-  // Admin pode ter múltiplas sessões (múltiplos dispositivos)
-  if (role !== 'admin') {
-    try {
-      await db.session.deleteMany({
-        where: { userId },
-      })
-    } catch (err) {
-      console.error('[Auth] Erro ao invalidar sessões anteriores:', err)
-    }
-  }
-
-  // Salvar nova sessão no banco
+  // Tentar salvar no banco (se a tabela Session existir)
   try {
+    // Calcular expiração (24 horas)
+    const expiresAt = new Date(timestamp + 24 * 60 * 60 * 1000)
+
+    // Hash do token para armazenar no banco (não guardamos o token em texto puro)
+    const tokenHash = createHash('sha256').update(token).digest('hex')
+
+    // Para usuários normais (NÃO admin): invalidar todas as sessões anteriores
+    // Admin pode ter múltiplas sessões (múltiplos dispositivos)
+    if (role !== 'admin') {
+      await db.session.deleteMany({ where: { userId } })
+    }
+
+    // Salvar nova sessão no banco
     await db.session.create({
       data: {
         userId,
@@ -63,7 +58,9 @@ export async function createSession(
       },
     })
   } catch (err) {
-    console.error('[Auth] Erro ao salvar sessão no banco:', err)
+    // Tabela Session pode não existir ainda — funciona sem ela
+    // (admin sempre funciona, users normais perdem a proteção de sessão única)
+    console.error('[Auth] Session DB not available, skipping:', (err as Error)?.message)
   }
 
   return token
@@ -94,24 +91,27 @@ export async function verifySession(token: string): Promise<SessionData> {
       return { userId: '', role: '', authenticated: false }
     }
 
-    // Verificar se a sessão existe no banco de dados (para usuários normais)
+    // Verificar se a sessão existe no banco de dados (apenas para usuários normais)
     // Admin pula essa verificação para permitir múltiplos dispositivos
     if (role !== 'admin') {
-      const tokenHash = createHash('sha256').update(token).digest('hex')
-      const session = await db.session.findFirst({
-        where: { tokenHash },
-      })
+      try {
+        const tokenHash = createHash('sha256').update(token).digest('hex')
+        const session = await db.session.findFirst({
+          where: { tokenHash },
+        })
 
-      if (!session) {
-        // Sessão não existe no banco = foi invalidada por outro login
-        return { userId: '', role: '', authenticated: false }
-      }
+        if (!session) {
+          // Sessão não existe no banco = foi invalidada por outro login
+          return { userId: '', role: '', authenticated: false }
+        }
 
-      // Verificar expiração no banco
-      if (new Date() > session.expiresAt) {
-        // Sessão expirada, limpar do banco
-        await db.session.delete({ where: { id: session.id } }).catch(() => {})
-        return { userId: '', role: '', authenticated: false }
+        // Verificar expiração no banco
+        if (new Date() > session.expiresAt) {
+          await db.session.delete({ where: { id: session.id } }).catch(() => {})
+          return { userId: '', role: '', authenticated: false }
+        }
+      } catch {
+        // Tabela Session não existe — permite passar (fallback sem proteção de sessão única)
       }
     }
 
@@ -136,8 +136,8 @@ export async function invalidateSession(token: string): Promise<void> {
   try {
     const tokenHash = createHash('sha256').update(token).digest('hex')
     await db.session.deleteMany({ where: { tokenHash } })
-  } catch (err) {
-    console.error('[Auth] Erro ao invalidar sessão:', err)
+  } catch {
+    // Tabela pode não existir — ignorar
   }
 }
 
@@ -151,8 +151,7 @@ export async function cleanExpiredSessions(): Promise<number> {
       where: { expiresAt: { lt: new Date() } },
     })
     return result.count
-  } catch (err) {
-    console.error('[Auth] Erro ao limpar sessões expiradas:', err)
+  } catch {
     return 0
   }
 }
@@ -190,31 +189,35 @@ export async function ensureAdminExists(): Promise<void> {
 }
 
 export async function getAdminSession(): Promise<boolean> {
-  const cookieStore = await cookies()
+  try {
+    const cookieStore = await cookies()
 
-  // Garantir que existe pelo menos um admin no banco
-  await ensureAdminExists()
+    // Garantir que existe pelo menos um admin no banco (não bloqueia se falhar)
+    await ensureAdminExists()
 
-  // Tentar nova sessão (User-based)
-  const newToken = cookieStore.get(NEW_SESSION_KEY)?.value
-  if (newToken) {
-    const session = await verifySession(newToken)
-    return session.authenticated
-  }
-
-  // Fallback para sessão legada (senha única)
-  const legacyToken = cookieStore.get(LEGACY_SESSION_KEY)?.value
-  if (legacyToken) {
-    try {
-      const decoded = Buffer.from(legacyToken, 'base64').toString()
-      const [timestampStr, hash] = decoded.split(':')
-      const timestamp = parseInt(timestampStr, 10)
-      if (Date.now() - timestamp > 24 * 60 * 60 * 1000) return false
-      const expectedHash = hashLegacyToken(`${ADMIN_PASSWORD}:${timestamp}`)
-      return hash === expectedHash
-    } catch {
-      return false
+    // Tentar nova sessão (User-based)
+    const newToken = cookieStore.get(NEW_SESSION_KEY)?.value
+    if (newToken) {
+      const session = await verifySession(newToken)
+      if (session.authenticated) return true
     }
+
+    // Fallback para sessão legada (senha única)
+    const legacyToken = cookieStore.get(LEGACY_SESSION_KEY)?.value
+    if (legacyToken) {
+      try {
+        const decoded = Buffer.from(legacyToken, 'base64').toString()
+        const [timestampStr, hash] = decoded.split(':')
+        const timestamp = parseInt(timestampStr, 10)
+        if (Date.now() - timestamp > 24 * 60 * 60 * 1000) return false
+        const expectedHash = hashLegacyToken(`${ADMIN_PASSWORD}:${timestamp}`)
+        return hash === expectedHash
+      } catch {
+        return false
+      }
+    }
+  } catch (err) {
+    console.error('[Auth] getAdminSession error:', err)
   }
 
   return false

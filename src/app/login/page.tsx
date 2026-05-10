@@ -86,10 +86,11 @@ export default function LoginPage() {
             {[40, 65, 45, 80, 55, 70, 35, 60, 50, 75, 42, 68, 58].map((h, i) => (
               <div
                 key={i}
-                className="w-1 bg-white/40 rounded-full"
+                className="w-1 bg-white/40 rounded-full animate-pulse"
                 style={{
                   height: `${h}px`,
-                  animation: `pulse 2s ease-in-out ${i * 0.1}s infinite`,
+                  animationDelay: `${i * 150}ms`,
+                  animationDuration: `${1.5 + (i % 3) * 0.5}s`,
                 }}
               />
             ))}
@@ -267,13 +268,6 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* CSS Animation for sound bars */}
-      <style jsx>{`
-        @keyframes pulse {
-          0%, 100% { transform: scaleY(1); }
-          50% { transform: scaleY(0.4); }
-        }
-      `}</style>
     </div>
   )
 }

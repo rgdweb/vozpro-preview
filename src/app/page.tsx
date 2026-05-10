@@ -763,7 +763,7 @@ export default function VozProClient() {
           referenceAudioName: voiceMode === 'clone' ? (uploadedVoiceFile?.name || selectedVariation?.refAudioName || 'ref_audio.wav') : '',
           refText: '',
           numStep: 32, // VozPro: 32 = qualidade (padrao), 16 = rapido mas pode errar palavras
-          speed: 1.0,
+          speed,
           language: language, // usa o idioma selecionado pelo usuario (Portuguese, Auto, etc)
           // Voice Design params (usados pelo _design_fn endpoint)
           gender: isAutoMode ? 'Auto' : (isDesignMode ? designParams.gender : 'Auto'),

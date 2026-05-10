@@ -1832,12 +1832,18 @@ export default function AdminDashboard() {
                     <div className="grid grid-cols-2 gap-3">
                       <div className="col-span-2">
                         <Label className="text-slate-300 text-xs">Categoria</Label>
-                        <Input
-                          value={bulkCategory}
-                          onChange={(e) => setBulkCategory(e.target.value)}
-                          placeholder="Ex: Feminina, Masculina, Kids..."
-                          className="mt-1 h-9 bg-slate-900/50 border-slate-600 text-sm"
-                        />
+                        <Select value={bulkCategory} onValueChange={setBulkCategory}>
+                          <SelectTrigger className="mt-1 h-9 bg-slate-900/50 border-slate-600 text-sm">
+                            <SelectValue placeholder="Selecione uma categoria..." />
+                          </SelectTrigger>
+                          <SelectContent className="bg-slate-800 border-slate-600">
+                            {voiceCategories.map(cat => (
+                              <SelectItem key={cat.name} value={cat.name}>
+                                {cat.emoji || '📁'} {cat.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div>
                         <Label className="text-slate-300 text-xs">Gênero</Label>

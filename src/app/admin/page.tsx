@@ -15,7 +15,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import {
   AudioWaveform, LogOut, Plus, Trash2, Edit, Upload, Music, Mic,
   Loader2, RefreshCw, Volume2, FileAudio, CheckCircle2, Settings2,
-  FolderOpen, ChevronLeft, FolderPlus, Folder, Play, Pause, Users, UserPlus, Shield
+  FolderOpen, ChevronLeft, FolderPlus, Folder, Play, Pause, Users, UserPlus, Shield,
+  UploadCloud, X
 } from 'lucide-react'
 import { toast } from 'sonner'
 import AudioPlayer from '@/components/audio-player'
@@ -478,6 +479,18 @@ export default function AdminDashboard() {
   const [editingVoiceId, setEditingVoiceId] = useState<string | null>(null)
   const [voiceDialogOpen, setVoiceDialogOpen] = useState(false)
 
+  // Bulk voice upload state
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
+  const [bulkFiles, setBulkFiles] = useState<File[]>([])
+  const [bulkCategory, setBulkCategory] = useState('')
+  const [bulkGender, setBulkGender] = useState('Auto')
+  const [bulkAccent, setBulkAccent] = useState('Auto')
+  const [bulkPitch, setBulkPitch] = useState('Auto')
+  const [bulkAge, setBulkAge] = useState('Auto')
+  const [bulkUploading, setBulkUploading] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState('')
+  const [bulkDragOver, setBulkDragOver] = useState(false)
+
   // Variation form state (used for both create and edit)
   const [variationForm, setVariationForm] = useState({
     label: '', emoji: '', refAudioPath: '', serverUrl: '', filename: '', refAudioName: '', refText: '', instruct: 'none',
@@ -694,6 +707,98 @@ export default function AdminDashboard() {
       loadData()
     } catch {
       toast.error('Erro ao salvar voz')
+    }
+  }
+
+  // --- BULK VOICE UPLOAD ---
+  const handleBulkFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    if (files.length > 0) {
+      setBulkFiles(prev => [...prev, ...files])
+    }
+  }
+
+  const handleBulkDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setBulkDragOver(false)
+    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|flac|webm)$/i.test(f.name))
+    if (files.length > 0) {
+      setBulkFiles(prev => [...prev, ...files])
+    } else {
+      toast.error('Arraste arquivos de áudio (MP3, WAV, OGG, M4A, FLAC, WEBM)')
+    }
+  }
+
+  const removeBulkFile = (index: number) => {
+    setBulkFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const clearBulkFiles = () => {
+    setBulkFiles([])
+  }
+
+  const handleBulkUpload = async () => {
+    if (bulkFiles.length === 0) {
+      toast.error('Selecione pelo menos um arquivo de áudio')
+      return
+    }
+
+    setBulkUploading(true)
+    setBulkProgress(`Enviando 0 de ${bulkFiles.length}...`)
+
+    try {
+      const formData = new FormData()
+      for (const file of bulkFiles) {
+        formData.append('files', file)
+      }
+      formData.append('category', bulkCategory)
+      formData.append('gender', bulkGender)
+      formData.append('accent', bulkAccent)
+      formData.append('pitch', bulkPitch)
+      formData.append('age', bulkAge)
+
+      // Usar upload direto via PHP para evitar timeout do Vercel
+      const tokenRes = await fetch('/api/upload-token')
+      const { uploadUrl, token } = await tokenRes.json()
+
+      if (!uploadUrl || !token) {
+        toast.error('Servidor de upload não configurado')
+        setBulkUploading(false)
+        return
+      }
+
+      // Progress simulado
+      const progressInterval = setInterval(() => {
+        setBulkProgress(prev => {
+          const match = prev.match(/Enviando (\d+)/)
+          const current = match ? parseInt(match[1]) : 0
+          const next = Math.min(current + 1, bulkFiles.length)
+          return `Enviando ${next} de ${bulkFiles.length}...`
+        })
+      }, 3000)
+
+      const res = await fetch('/api/admin/voices/bulk-upload', {
+        method: 'POST',
+        body: formData,
+      })
+
+      clearInterval(progressInterval)
+
+      const data = await res.json()
+
+      if (res.ok && data.success) {
+        toast.success(`${data.created} voz(es) criada(s)! ${data.failed > 0 ? `${data.failed} falha(s)` : ''}`)
+        setBulkDialogOpen(false)
+        setBulkFiles([])
+        loadData()
+      } else {
+        toast.error(data.error || 'Erro no upload em massa')
+      }
+    } catch {
+      toast.error('Erro de conexão')
+    } finally {
+      setBulkUploading(false)
+      setBulkProgress('')
     }
   }
 
@@ -1641,6 +1746,171 @@ export default function AdminDashboard() {
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
+
+              {/* ====== UPLOAD EM MASSA ====== */}
+              <Dialog open={bulkDialogOpen} onOpenChange={(open) => { setBulkDialogOpen(open); if (!open) { setBulkFiles([]); setBulkProgress('') }}}>
+                <DialogTrigger asChild>
+                  <Button
+                    onClick={() => setBulkDialogOpen(true)}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+                  >
+                    <UploadCloud className="w-4 h-4" />
+                    Upload em Massa
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-2xl max-h-[85vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                      <UploadCloud className="w-5 h-5 text-emerald-400" />
+                      Upload de Vozes em Massa
+                    </DialogTitle>
+                    <DialogDescription className="text-slate-400">
+                      Envie vários arquivos de áudio de uma vez. Cada arquivo vira uma voz com variação padrão.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div className="space-y-4">
+                    {/* Drop zone */}
+                    <div
+                      className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${
+                        bulkDragOver ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-600 hover:border-slate-500'
+                      }`}
+                      onDragOver={(e) => { e.preventDefault(); setBulkDragOver(true) }}
+                      onDragLeave={() => setBulkDragOver(false)}
+                      onDrop={handleBulkDrop}
+                      onClick={() => document.getElementById('bulk-file-input')?.click()}
+                    >
+                      <UploadCloud className={`w-10 h-10 mx-auto mb-3 ${bulkDragOver ? 'text-emerald-400' : 'text-slate-500'}`} />
+                      <p className="text-sm text-slate-300 font-medium">
+                        Arraste arquivos aqui ou clique para selecionar
+                      </p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        MP3, WAV, OGG, M4A, FLAC, WEBM — Máximo 50 arquivos
+                      </p>
+                      <input
+                        id="bulk-file-input"
+                        type="file"
+                        multiple
+                        accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac,.webm"
+                        onChange={handleBulkFiles}
+                        className="hidden"
+                      />
+                    </div>
+
+                    {/* File list */}
+                    {bulkFiles.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-medium text-slate-300">
+                            {bulkFiles.length} arquivo(s) selecionado(s)
+                          </p>
+                          <Button variant="ghost" size="sm" onClick={clearBulkFiles} className="text-slate-500 hover:text-red-400 h-7 text-xs">
+                            Limpar todos
+                          </Button>
+                        </div>
+                        <div className="max-h-40 overflow-y-auto space-y-1 bg-slate-900/50 rounded-lg p-2">
+                          {bulkFiles.map((file, i) => (
+                            <div key={i} className="flex items-center justify-between py-1.5 px-2 rounded-md hover:bg-slate-800/50 group">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <FileAudio className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                <span className="text-sm text-slate-300 truncate">{file.name}</span>
+                                <span className="text-xs text-slate-600 shrink-0">({(file.size / 1024).toFixed(0)}KB)</span>
+                              </div>
+                              <button
+                                onClick={() => removeBulkFile(i)}
+                                className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Category & settings */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="col-span-2">
+                        <Label className="text-slate-300 text-xs">Categoria</Label>
+                        <Input
+                          value={bulkCategory}
+                          onChange={(e) => setBulkCategory(e.target.value)}
+                          placeholder="Ex: Feminina, Masculina, Kids..."
+                          className="mt-1 h-9 bg-slate-900/50 border-slate-600 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-slate-300 text-xs">Gênero</Label>
+                        <Select value={bulkGender} onValueChange={setBulkGender}>
+                          <SelectTrigger className="mt-1 h-9 bg-slate-900/50 border-slate-600 text-sm"><SelectValue /></SelectTrigger>
+                          <SelectContent className="bg-slate-800 border-slate-600">
+                            <SelectItem value="Auto">Auto</SelectItem>
+                            <SelectItem value="Female / 女">Feminino</SelectItem>
+                            <SelectItem value="Male / 男">Masculino</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-slate-300 text-xs">Idade</Label>
+                        <Select value={bulkAge} onValueChange={setBulkAge}>
+                          <SelectTrigger className="mt-1 h-9 bg-slate-900/50 border-slate-600 text-sm"><SelectValue /></SelectTrigger>
+                          <SelectContent className="bg-slate-800 border-slate-600">
+                            <SelectItem value="Auto">Auto</SelectItem>
+                            <SelectItem value="Child / 儿童">Criança</SelectItem>
+                            <SelectItem value="Young Adult / 青年">Jovem</SelectItem>
+                            <SelectItem value="Middle-aged / 中年">Adulto</SelectItem>
+                            <SelectItem value="Elderly / 老年">Idoso</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-slate-300 text-xs">Tom</Label>
+                        <Select value={bulkPitch} onValueChange={setBulkPitch}>
+                          <SelectTrigger className="mt-1 h-9 bg-slate-900/50 border-slate-600 text-sm"><SelectValue /></SelectTrigger>
+                          <SelectContent className="bg-slate-800 border-slate-600">
+                            <SelectItem value="Auto">Auto</SelectItem>
+                            <SelectItem value="Low Pitch / 低音调">Grave</SelectItem>
+                            <SelectItem value="Moderate Pitch / 中音调">Médio</SelectItem>
+                            <SelectItem value="High Pitch / 高音调">Agudo</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-slate-300 text-xs">Sotaque</Label>
+                        <Select value={bulkAccent} onValueChange={setBulkAccent}>
+                          <SelectTrigger className="mt-1 h-9 bg-slate-900/50 border-slate-600 text-sm"><SelectValue /></SelectTrigger>
+                          <SelectContent className="bg-slate-800 border-slate-600">
+                            <SelectItem value="Auto">Auto</SelectItem>
+                            <SelectItem value="Portuguese Accent / 葡萄牙口音">Português</SelectItem>
+                            <SelectItem value="American Accent / 美式口音">Americano</SelectItem>
+                            <SelectItem value="British Accent / 英国口音">Britânico</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {bulkProgress && (
+                      <div className="flex items-center gap-2 text-sm text-emerald-400">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        {bulkProgress}
+                      </div>
+                    )}
+                  </div>
+
+                  <DialogFooter>
+                    <Button variant="ghost" onClick={() => setBulkDialogOpen(false)} className="text-slate-400">Cancelar</Button>
+                    <Button
+                      onClick={handleBulkUpload}
+                      disabled={bulkUploading || bulkFiles.length === 0}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    >
+                      {bulkUploading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <UploadCloud className="w-4 h-4 mr-1" />}
+                      Criar {bulkFiles.length} voz(es)
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
                 <Dialog open={voiceDialogOpen} onOpenChange={setVoiceDialogOpen}>
                 <DialogTrigger asChild>
                   <Button

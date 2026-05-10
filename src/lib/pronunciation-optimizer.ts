@@ -641,6 +641,42 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   // hemodiálise, honesto, horizonte, hexadecimal, helicóptero, harmonia, etc.
   // Não precisa mais de entrada individual — a regex cobre todas
 
+  // === VERBOS DEIXAR / CAIXA / QUEIXA (X = CH) ===
+  // O fallback X entre vogais convertia "ix" → "iks" ("deixar" → "deiksar" = "deikçar")
+  // Correto em PT-BR: X soa como "sh"/"ch" nessas palavras
+  'deixar': 'deichar',
+  'Deixar': 'Deichar',
+  'deixou': 'deichou',
+  'Deixou': 'Deichou',
+  'deixo': 'deicho',
+  'Deixo': 'Deicho',
+  'deixe': 'deiche',
+  'Deixe': 'Deiche',
+  'deixei': 'deichei',
+  'deixada': 'deichada',
+  'deixado': 'deichado',
+  'deixamos': 'deichamos',
+  'deixaram': 'deicharam',
+  'deixem': 'deichem',
+  'deixarão': 'deicharão',
+  'deixaria': 'deicharia',
+  'deixá': 'deichá',
+  'deixaste': 'deichaste',
+  'caixa': 'caicha',
+  'Caixa': 'Caicha',
+  'caixão': 'caichão',
+  'caixa Postal': 'caicha Postal',
+  'queixa': 'queicha',
+  'Queixa': 'Queicha',
+  'queixar': 'queichar',
+  'queixoso': 'queichoso',
+  'queixada': 'queichada',
+  'queixume': 'queichume',
+  'faixa': 'faicha',
+  'Faixa': 'Faicha',
+  'faixas': 'faichas',
+  'enfeixar': 'enfeichar',
+
   // === PALAVRAS COMUNS QUE O TTS ERRA ===
 
   // Palavras com som de X que não são cobertas pelo dicionário X
@@ -663,17 +699,14 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   // Outras correções comuns
   'xícara': 'chícara',
   'Xícara': 'Chícara',
-  // === H MUDO — palavras mais comuns como garantia ===
-  // A regex 1d cobre todas, mas essas entradas garantem que funcionem
-  // Importante: minúsculo! TTS lê maiúscula como nome próprio e inventa H
-  'hoje': 'oje',
-  'Hoje': 'oje',
-  'homem': 'omem',
-  'Homem': 'omem',
-  'honesto': 'onesto',
-  'Honesto': 'onesto',
-  'higiene': 'igiene',
-  'Higiene': 'igiene',
+  // === H MUDO — REMOVIDO DO DICIONÁRIO ===
+  // Antes: 'hoje': 'oje', 'homem': 'omem', etc.
+  // Problema: estar no dicionário adicionava ao H_DICT_WORDS, que PROTEGIA a palavra
+  // da regex do H mudo (step 1d). Se o dicionário falhasse por qualquer motivo,
+  // o H permanecia. Agora essas palavras são tratadas DIRETAMENTE pela regex 1d
+  // (h+vogal → remove H), que cobre TODAS as palavras com H mudo em PT-BR.
+  // palavas afetadas: hoje, homem, honesto, higiene, historia, harmonia,
+  // hernia, heranca, horizonte, hidraulico, humor, homicidio, helicóptero, etc.
 
   'xingar': 'chingar',
   'xingamento': 'chingamento',
@@ -820,12 +853,11 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'IA': 'i á',
   'PC': 'pê cê',
   'TV': 'tê vê',
-  'CNPJ': 'cê ene pê jota',
-  'CPF': 'cê pê éfe',
+  // CNPJ, CPF, INSS, IPTU já definidos na seção de siglas (linhas 123-124, 130-131)
   'PIS': 'pê i esse',
   'PASEP': 'pá sêpe',
   'FGTS': 'éfe gê tê esse',
-  'INSS': 'i éne esse esse',
+  // INSS já definido
   'IRPF': 'i erre pê éfe',
   'IRPJ': 'i erre pê jota',
   'ICMS': 'i cê éme esse',
@@ -843,7 +875,6 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'DPVAT': 'dê pê vê á tê',
   'IPVA': 'i pê vê á',
   'ITBI': 'i tê bê i',
-  'IPTU': 'i pê tê u',
 
   // === JURÍDICO / LEGAL ===
 
@@ -1104,16 +1135,101 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
 // SET DE PALAVRAS DO DICIONÁRIO QUE COMEÇAM COM H
 // ============================================================
 /**
- * Palavras do dicionário que começam com H/h.
+ * Palavras do dicionário que começam com H/h e que devem MANTER o H.
  * Usado para PROTEGER essas palavras da regex do H mudo (passo 1d).
  * Sem essa proteção, "Hello" virava "ello" antes do dicionário poder substituir.
- * Inclui tanto palavras em inglês ("Hello", "Hear") quanto marcas ("Herbalife", "Heroku").
+ * Só inclui palavras em inglês e marcas ("Hello", "Hear", "Herbalife", "Heroku").
+ * Palavras PT-BR com H mudo (hoje, homem, etc.) NÃO estão mais no dicionário,
+ * portanto não são protegidas — a regex do H mudo cuida delas diretamente.
  */
 const H_DICT_WORDS = new Set<string>()
 for (const w of Object.keys(PRONUNCIATION_DICTIONARY)) {
   if (/^[Hh]/.test(w)) {
     H_DICT_WORDS.add(w.toLowerCase())
   }
+}
+
+// ============================================================
+// DICIONÁRIO DE ACENTUAÇÃO FORÇADA (STRESS DICTIONARY)
+// ============================================================
+
+/**
+ * Palavras que o TTS pronuncia com a sílaba tônica ERRADA.
+ * Adiciona acento agudo/circunflexo para forçar a sílaba correta.
+ *
+ * O TTS OmniVoice usa acentos como dica de pronúncia:
+ * - á/é/í/ó/ú = sílaba tônica aberta (som forte)
+ * - â/ê/ô = sílaba tônica fechada
+ *
+ * Exemplos de erros comuns:
+ * - "vídeo" → TTS fala "vi-DÊ-o" → corrigido para "vÍdeo" (errado) → melhor: manter "vídeo"
+ * - "público" → TTS fala "pu-BLI-co" → corrigido para "pÚblico"
+ * - "difícil" → TTS fala "di-fi-CÍL" → corrigido para "dÍficil"
+ *
+ * Formato: palavra_sem_acento → palavra_com_acento_forçado
+ * IMPORTANTE: Só adicionar palavras onde o TTS REALMENTE erra.
+ * Não adicionar palavras que já são pronunciadas corretamente.
+ */
+const STRESS_DICTIONARY: Record<string, string> = {
+  // === PROPAROXÍTONAS (stress na antepenúltima) que o TTS confunde ===
+  // O TTS frequentemente muda o stress para a penúltima sílaba
+  'lampada': 'lâmpada',
+  'medico': 'médico',
+  'medica': 'médica',
+  'publico': 'público',
+  'publica': 'pública',
+  'rapido': 'rápido',
+  'rapida': 'rápida',
+  'musica': 'música',
+  'video': 'vídeo',
+  'dificil': 'difícil',
+  'facil': 'fácil',
+  'possivel': 'possível',
+  'hifen': 'ifen',     // H mudo + stress
+  'artico': 'ártico',
+  'polen': 'pólen',
+  'indice': 'índice',
+  'album': 'álbum',
+  'capsula': 'cápsula',
+  'biblia': 'bíblia',
+  'missil': 'míssil',
+  'carater': 'caráter',
+  'solido': 'sólido',
+  'odio': 'ódio',
+  'transito': 'trânsito',
+  'animo': 'ânimo',
+  'aereo': 'aéreo',
+  'privilegio': 'privilégio',
+
+  // === PAROXÍTONAS (stress na penúltima) que o TTS confunde ===
+  'util': 'útil',
+  'virgula': 'vírgula',
+
+  // === OXÍTONAS (stress na última) que o TTS confunde ===
+  'voce': 'você',
+  'tambem': 'também',
+  'ninguem': 'ninguém',
+  'alguem': 'alguém',
+  'ja': 'já',
+  'nos': 'nós',
+  'tres': 'três',
+  'pais': 'país',
+  'avos': 'avós',
+
+  // === PALAVRAS COM SONS FORTES ESPECÍFICOS ===
+  'cerebro': 'cérebro',
+  'eterno': 'etérno',
+  'governo': 'govérno',
+  'negocio': 'negócio',
+  'escritorio': 'escritório',
+  'diretorio': 'diretório',
+  'seculo': 'século',
+  'historia': 'história',
+  'memoria': 'memória',
+  'vitoria': 'vitória',
+  'gloria': 'glória',
+  'materia': 'matéria',
+  'familia': 'família',
 }
 
 // ============================================================
@@ -1453,11 +1569,24 @@ export function optimizePronunciation(text: string): string {
   // IMPORTANTE: manter minúsculo! O TTS lê letra maiúscula como nome próprio e inventa H
   // ATENÇÃO: Não remover H de palavras que estão no dicionário (ex: "Hello" → dicionário vira "relou")
   result = result.replace(/\b[Hh]([aeiouáàãâéèêíïóôõúü][a-zA-Záàãâéèêíïóôõúüç]*)/g, (match, rest) => {
-    // Se a palavra está no dicionário, manter intacta (será substituída no passo 9)
+    // Se a palavra está no dicionário (inglês/marcas), manter intacta (será substituída no passo 9)
     if (H_DICT_WORDS.has(match.toLowerCase())) return match
     // Senão, remover o H mudo
     return rest
   })
+
+  // ---- 1e. ACENTUAÇÃO FORÇADA (STRESS DICTIONARY) ----
+  // Adiciona acentos em palavras que o TTS pronuncia com sílaba tônica errada.
+  // Ex: "publico" → "público", "tambem" → "também", "video" → "vídeo"
+  // Isso guia o modelo para colocar o stress na sílaba correta.
+  // IMPORTANTE: Usar word boundary (\b) para não trocar substrings.
+  // Usar flag 'gi' (global + case insensitive) para cobrir variações de caixa.
+  for (const [word, accented] of Object.entries(STRESS_DICTIONARY)) {
+    // Pular entradas onde a palavra já tem acento (no-op de reforço)
+    if (word === accented) continue
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    result = result.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), accented)
+  }
 
   // ---- 2. NÚMEROS GRANDES POR EXTENSO ----
   // Anos: "2024" → "[dois mil vinte e quatro]" (quando precedido por "ano" ou similar)

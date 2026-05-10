@@ -802,23 +802,25 @@ export default function VozProClient() {
         const designParams = isDesignMode ? parseVoiceDesignToParams(voiceDesignInstruct) : { gender: 'Auto', age: 'Auto', pitch: 'Auto', style: 'Auto', accent: 'Auto' }
 
         // ===== CHUNKING: gerar frase por frase com pausas reais =====
-        // Resolve: mistura de ref audio, pontuação falada, texto robótico
-        const shouldChunk = (textToSend.length > 50 || /[.!?]/.test(textToSend)) && ttsModel === 'omnivoice'
+        // Estilo NaturalReaders: cada pontuação vira pausa real (silêncio)
+        // O texto chega AQUI com pontuação. O chunker divide em frases.
+        // O backend (route.ts) remove pontuação antes de enviar ao TTS.
+        const shouldChunk = ttsModel === 'omnivoice'
 
         if (shouldChunk) {
-          console.log('[VozPro] Usando chunking (frase por frase)...')
+          console.log('[VozPro] Usando chunking (NaturalReaders style)...')
           const chunks = chunkText(textToSend)
           console.log(`[VozPro] ${chunks.length} chunks identificados`)
+          console.log('[VozPro] Chunks:', chunks.map((c, i) => `  [${i}] "${c.text}" (${c.pauseAfterMs}ms, ${c.punctuation})`).join('\n'))
 
-          if (chunks.length > 1 && chunks.length <= 30) {
-            // Gerar cada chunk separadamente e concatenar
-            const audioBuffers: { buffer: ArrayBuffer; pauseMs: number }[] = []
+          if (chunks.length >= 1 && chunks.length <= 50) {
+            // ===== GERACAO PARALELA: até 3 chunks ao mesmo tempo =====
+            const CONCURRENCY = 3
+            const audioResults: { index: number; buffer: ArrayBuffer; pauseMs: number }[] = []
             let failedCount = 0
 
-            for (let i = 0; i < chunks.length; i++) {
-              const chunk = chunks[i]
-              // Progresso visual
-
+            // Função para gerar um único chunk
+            const generateChunk = async (chunk: TextChunk, chunkIndex: number): Promise<{ buffer: ArrayBuffer; pauseMs: number } | null> => {
               const chunkBody: Record<string, unknown> = {
                 text: chunk.text,
                 mode: voiceMode,
@@ -868,29 +870,56 @@ export default function VozProClient() {
                   const contentType = chunkRes.headers.get('content-type') || ''
                   if (contentType.includes('audio') || contentType.includes('octet-stream')) {
                     const buffer = await chunkRes.arrayBuffer()
-                    audioBuffers.push({ buffer, pauseMs: chunk.pauseAfterMs })
+                    return { buffer, pauseMs: chunk.pauseAfterMs }
                   } else {
-                    failedCount++
-                    console.warn(`[VozPro Chunk ${i + 1}] Resposta não-audio: ${contentType}`)
+                    // Se a resposta é JSON (erro), tenta single-shot fallback
+                    const json = await chunkRes.json().catch(() => null)
+                    console.warn(`[VozPro Chunk ${chunkIndex + 1}] Resposta não-audio: ${contentType}`, json?.error || '')
+                    return null
                   }
                 } else {
-                  failedCount++
-                  console.warn(`[VozPro Chunk ${i + 1}] Erro: ${chunkRes.status}`)
+                  console.warn(`[VozPro Chunk ${chunkIndex + 1}] Erro: ${chunkRes.status}`)
+                  return null
                 }
               } catch (err) {
-                failedCount++
-                console.warn(`[VozPro Chunk ${i + 1}] Falha:`, err)
+                console.warn(`[VozPro Chunk ${chunkIndex + 1}] Falha:`, err)
+                return null
               }
             }
 
+            // Processar chunks em batches paralelos
+            for (let batchStart = 0; batchStart < chunks.length; batchStart += CONCURRENCY) {
+              const batchEnd = Math.min(batchStart + CONCURRENCY, chunks.length)
+              const batch = chunks.slice(batchStart, batchEnd)
+
+              const results = await Promise.all(
+                batch.map((chunk, i) => generateChunk(chunk, batchStart + i))
+              )
+
+              for (let i = 0; i < results.length; i++) {
+                if (results[i]) {
+                  audioResults.push({ index: batchStart + i, ...results[i]! })
+                } else {
+                  failedCount++
+                }
+              }
+
+              // Atualizar progresso
+              const completed = Math.min(batchEnd, chunks.length)
+              console.log(`[VozPro] Progresso: ${completed}/${chunks.length} chunks processados`)
+            }
+
+            // Ordenar resultados pelo índice original (paralelo pode desordenar)
+            audioResults.sort((a, b) => a.index - b.index)
+
             // Concatenar áudios com silêncio entre chunks
-            if (audioBuffers.length > 0) {
-              // Juntando frases...
+            if (audioResults.length > 0) {
+              console.log(`[VozPro] Concatenando ${audioResults.length} áudios (${failedCount} falhas)...`)
               const audioCtx = new AudioContext({ sampleRate: 44100 })
               const offlineCtx = new OfflineAudioContext(1, 44100 * 600, 44100) // max 10 min
 
               let currentTime = 0
-              for (const { buffer, pauseMs } of audioBuffers) {
+              for (const { buffer, pauseMs } of audioResults) {
                 try {
                   const audioBuffer = await audioCtx.decodeAudioData(buffer.slice(0))
                   const source = offlineCtx.createBufferSource()
@@ -904,19 +933,22 @@ export default function VozProClient() {
               }
 
               const renderedBuffer = await offlineCtx.startRendering()
-              // Converter para WAV blob
               const wavBlob = audioBufferToWavBlob(renderedBuffer)
               const finalUrl = URL.createObjectURL(wavBlob)
 
               setAudioUrl(finalUrl)
               setIsGenerating(false)
-              // Cleanup
               clearInterval(timerInterval)
               setGeneratingTime(Math.floor((Date.now() - genStartTime) / 1000))
-              toast.success(`${audioBuffers.length} frases geradas!${failedCount > 0 ? ` (${failedCount} falha(s))` : ''}`)
+
+              if (audioResults.length === chunks.length) {
+                toast.success(`${audioResults.length} frases geradas com sucesso!`)
+              } else {
+                toast.warning(`${audioResults.length}/${chunks.length} frases geradas${failedCount > 0 ? ` (${failedCount} falha(s))` : ''}`)
+              }
               return
             }
-            // Se todos falharam, cai pro fluxo normal
+            // Se todos falharam, cai pro fluxo normal (single-shot)
             console.warn('[VozPro] Todos os chunks falharam, tentando single-shot...')
           }
         }

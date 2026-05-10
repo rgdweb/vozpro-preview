@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { stripSSMLForTTS } from '@/lib/ssml-parser'
 
-// POST /api/omnivoice-generate — Proxy para VozPro (k2-fsa) via tunnel
+// POST /api/omnivoice-generate - Proxy para VozPro (k2-fsa) via tunnel
 // Usa API Gradio nativa do VozPro com parametros corretos
-// NÃO altera nenhum fluxo existente do F5-TTS (tunnel-generate)
+// NAO altera nenhum fluxo existente do F5-TTS (tunnel-generate)
 
 export const dynamic = 'force-dynamic' // Nunca cachar esta rota no Vercel
 
@@ -241,39 +241,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Texto e obrigatorio' }, { status: 400 })
     }
 
-    // DEFESA DUPLA: remover tags SSML que passaram pelo frontend sem processar
+    // PASSO 1: Remover SSML se presente
     let cleanText = stripSSMLForTTS(text)
-    debug.log('SSML Strip', containsSSML(text) ? 'ok' : 'info', containsSSML(text) ? 'SSML detectado, tags removidas' : 'sem SSML')
 
-    // TEXT GUARDRAILS — limpa padrões que causam gagueira e alucinacao
-    // 1. Remover colchetes restantes (pronuncia forçada pode confundir o modelo se mal formatada)
-    // 2. Remover caracteres especiais que o TTS tenta falar
-    // 3. Limitar comprimento máximo por chunk (~500 chars = limite seguro do F5-TTS)
-    // 4. Remover URLs e emails (TTS tenta falar letra por letra)
+    // PASSO 2: Limpar URLs, emails e caracteres especiais
     cleanText = cleanText
-      .replace(/https?:\/\/[^\s]+/g, '')                    // URLs
-      .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '') // Emails
-      .replace(/[^\w\s.,!?;:áàãâéèêíïóôõúüçñÁÀÃÂÉÈÊÍÏÓÔÕÚÜÇÑ\[\]'"()\-/]/g, '') // Chars especiais
-      .replace(/  +/g, ' ')                                  // Espaços múltiplos
-      .trim()
+      .replace(/https?:\/\/[^\s]+/g, '')
+      .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '')
 
-    // Limitar tamanho do texto (chunk máximo seguro para evitar repetição/gagueira)
+    // PASSO 3: Manter apenas letras, numeros, espacos e acentos PT-BR
+    cleanText = cleanText.replace(/[^\w\s\u00C0-\u024F]/g, ' ')
+
+    // PASSO 4: Remover colchetes de pronuncia forçada [palavra] → palavra
+    cleanText = cleanText.replace(/\[([^\]]+)\]/g, '$1')
+
+    // PASSO 5: Limpar espaços multiplos
+    cleanText = cleanText.replace(/  +/g, ' ').trim()
+
+    // PASSO 6: Limitar tamanho (max 800 chars por chunk = seguro)
     if (cleanText.length > 800) {
       cleanText = cleanText.substring(0, 800).trim()
-      debug.log('Text Guard', 'warn', `Texto truncado de ${text.length} para 800 chars`)
+      debug.log('Text Guard', 'warn', `Texto truncado para 800 chars`)
     }
 
-    debug.log('Text Clean', 'ok', `${cleanText.length} chars`)
+    // Sanidade: se ficou vazio, usar original limpo
+    if (!cleanText) {
+      cleanText = text.replace(/[^\w\s\u00C0-\u024F]/g, '').trim().substring(0, 500)
+    }
 
-    // Strip punctuation that TTS might speak aloud (chunking system handles pauses)
-    cleanText = cleanText
-      .replace(/[.,!?;:]+/g, ' ')  // replace punctuation with space
-      .replace(/  +/g, ' ')        // collapse multiple spaces
-      .trim()
+    // PASSO 7: Clamp speed para range seguro do VozPro (0.25 a 4.0)
+    const safeSpeed = Math.max(0.25, Math.min(4.0, parseFloat(speed) || 1.0))
 
-    debug.log('Text Clean (no punct)', 'ok', `${cleanText.length} chars`)
+    debug.log('Input', 'ok', `text: "${cleanText.substring(0, 60)}..." (${cleanText.length} chars, speed: ${safeSpeed})`)
 
-    // Obter tunnel URL dinamicamente do HostGator (igual F5-TTS)
+    // Obter tunnel URL
     debug.log('Tunnel', 'info', 'Descobrindo URL do tunnel...')
     const effectiveUrl = await getTunnelUrl(debug)
 
@@ -284,7 +285,7 @@ export async function POST(request: NextRequest) {
       // MODO CLONE: _clone_fn endpoint
       // Params: text, lang, ref_aud, ref_text, instruct, ns, gs, dn, sp, du, pp, po
       // =============================================================
-      debug.log('VozPro Clone', 'info', `text: "${cleanText.substring(0, 60)}..."`)
+      debug.log('VozPro Clone', 'info', `Gerando voz clonada...`)
 
       // 1. Baixar e fazer upload do audio de referencia
       let refAudioPath: string | null = null
@@ -312,27 +313,27 @@ export async function POST(request: NextRequest) {
 
       // 2. Montar dados para o Gradio
       const gradioData = [
-        cleanText,                   // text
-        language || 'Auto',      // lang
-        {                        // ref_aud (FileData)
+        cleanText,                   // text (SEM pontuacao - chunker cria pausas)
+        language || 'Auto',          // lang
+        {                            // ref_aud (FileData)
           path: refAudioPath,
           orig_name: referenceAudioName,
           mime_type: referenceAudioName.endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav',
           is_stream: false,
           meta: { _type: 'gradio.FileData' },
         },
-        refText,                 // ref_text
-        instruct,                // instruct
-        numStep,                 // ns (inference steps)
-        2.0,                     // gs (guidance scale / CFG)
-        true,                    // dn (denoise)
-        speed,                   // sp (speed)
-        null,                    // du (duration, null = auto)
-        true,                    // pp (preprocess prompt)
-        true,                    // po (postprocess output)
+        refText,                     // ref_text
+        instruct,                    // instruct
+        numStep,                     // ns (inference steps)
+        2.0,                         // gs (guidance scale / CFG)
+        true,                        // dn (denoise)
+        safeSpeed,                   // sp (speed) - clamped
+        null,                        // du (duration, null = auto)
+        true,                        // pp (preprocess prompt)
+        true,                        // po (postprocess output)
       ]
 
-      debug.log('Params', 'info', `lang:${language} steps:${numStep} speed:${speed}`)
+      debug.log('Params', 'info', `lang:${language} steps:${numStep} speed:${safeSpeed}`)
 
       // 3. Submeter e acompanhar
       let eventId: string | null = null
@@ -379,24 +380,24 @@ export async function POST(request: NextRequest) {
       // Params: text, lang, ns, gs, dn, sp, du, pp, po, gender, age, pitch, style, accent, dialect
       // =============================================================
       const modeLabel = mode === 'design' ? 'Design' : 'Auto'
-      debug.log(`VozPro ${modeLabel}`, 'info', `text: "${cleanText.substring(0, 60)}..."`)
+      debug.log(`VozPro ${modeLabel}`, 'info', `Gerando voz...`)
 
       const gradioData = [
-        cleanText,                      // text
-        language || 'Auto',          // lang
-        numStep,                     // ns (inference steps)
-        2.0,                         // gs (guidance scale / CFG)
-        true,                        // dn (denoise)
-        speed,                       // sp (speed)
-        null,                        // du (duration, null = auto)
-        true,                        // pp (preprocess prompt)
-        true,                        // po (postprocess output)
-        gender || 'Auto',            // gender
-        age || 'Auto',               // age
-        pitch || 'Auto',             // pitch
-        style || 'Auto',             // style
-        accent || 'Auto',            // english accent
-        'Auto',                      // chinese dialect
+        cleanText,                      // text (SEM pontuacao - chunker cria pausas)
+        language || 'Auto',             // lang
+        numStep,                        // ns (inference steps)
+        2.0,                            // gs (guidance scale / CFG)
+        true,                           // dn (denoise)
+        safeSpeed,                      // sp (speed) - clamped
+        null,                           // du (duration, null = auto)
+        true,                           // pp (preprocess prompt)
+        true,                           // po (postprocess output)
+        gender || 'Auto',               // gender
+        age || 'Auto',                  // age
+        pitch || 'Auto',                // pitch
+        style || 'Auto',                // style
+        accent || 'Auto',               // accent
+        'Auto',                         // chinese dialect
       ]
 
       // Se modo design com instruct, injetar no style
@@ -404,7 +405,7 @@ export async function POST(request: NextRequest) {
         gradioData[12] = instruct // style = instruct
       }
 
-      debug.log('Params', 'info', `lang:${language} steps:${numStep} gender:${gradioData[9]} pitch:${gradioData[11]}`)
+      debug.log('Params', 'info', `lang:${language} steps:${numStep} gender:${gradioData[9]} pitch:${gradioData[11]} speed:${safeSpeed}`)
 
       let eventId: string | null = null
       for (let attempt = 0; attempt < 3; attempt++) {
@@ -454,11 +455,10 @@ export async function POST(request: NextRequest) {
 }
 
 // ============================================================
-// GET HANDLER — Health check
+// GET HANDLER - Health check
 // ============================================================
 
 export async function GET() {
-  // Tenta obter tunnel URL do HostGator (igual F5-TTS)
   let reachable = false
   let effectiveUrl = ''
 
@@ -468,19 +468,14 @@ export async function GET() {
       const data = await res.json()
       if (data.status === 'online' && data.tunnelUrl) {
         effectiveUrl = data.tunnelUrl
-        // Verifica se o Gradio API responde
         const healthRes = await fetch(effectiveUrl + '/gradio_api/info/', {
           cache: 'no-store', signal: AbortSignal.timeout(8000),
         })
-        // Verifica se tem _design_fn (endpoint exclusivo do VozPro)
         if (healthRes.ok) {
           const info = await healthRes.json()
           const endpoints = info?.named_endpoints || {}
-          // Gradio API retorna nomes com "/" prefixo: "/_design_fn", "/_clone_fn"
-          // Verifica com e sem slash para ser compativel com diferentes versoes
           const hasDesign = !!endpoints['/_design_fn'] || !!endpoints['_design_fn']
           const hasClone = !!endpoints['/_clone_fn'] || !!endpoints['_clone_fn']
-          // Se tem _design_fn, e VozPro. Se so tem _clone_fn, pode ser F5-TTS
           reachable = hasDesign || hasClone
         }
       }

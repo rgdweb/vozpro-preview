@@ -1677,10 +1677,11 @@ export function optimizePronunciation(text: string): string {
   // ---- 0. PROCESSAR TAGS DE CONTROLE ANTES DE TUDO ----
   result = processControlTags(result)
 
-  // ---- 1. ARTIGOS APÓS PONTUAÇÃO (elimina hesitação do TTS) ----
-  // ". O sistema" → ", o sistema" (troca ponto por vírgula = une frases)
-  result = result.replace(/([.!?])\s+([OoAa])\s(?=[a-záàãâéèêíïóôõúüç])/g, ',$2 ')
-  result = result.replace(/([.!?])\s+([Oo]s|[Aa]s|[Uu]m(?:[oa]s)?)\s(?=[a-záàãâéèêíïóôõúüç])/g, ',$2 ')
+  // ---- 1. ARTIGOS APÓS PONTUAÇÃO ----
+  // DESATIVADO: O chunking agora gera cada frase separadamente.
+  // Não precisamos mais trocar ". O" por ", o" porque cada frase vai pro TTS isolada.
+  // Manter a pontuação intacta para o chunker criar as pausas corretas.
+  // (Antes: ". O sistema" → ", o sistema" — isso UNIA frases e destruía os chunks)
 
   // ---- 1b. ARTIGOS INICIAIS O/A ANTES DE NOMES PRÓPRIOS E TÍTULOS ----
   // O modelo ENGOLE o "O" antes de nomes próprios maiúsculos

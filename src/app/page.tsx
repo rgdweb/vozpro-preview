@@ -738,7 +738,7 @@ export default function VozProClient() {
         language,
         refAudioUrl: selectedVariation?.refAudioServerUrl || '',
         refAudioPath: selectedVariation?.refAudioPath || '',
-        refText: '',  // SEMPRE vazio - texto no refText causa alucinacao (fala "to", "ba", outra lingua)
+        refText: selectedVariation?.refText || '',  // usa texto preenchido pelo admin; vazio = Whisper auto-transcreve (pode errar)
         instruct: instructStr,
         refAudioName: selectedVariation?.refAudioName || 'ref_audio.wav',
         speed,
@@ -761,7 +761,7 @@ export default function VozProClient() {
           instruct: '', // _design_fn não usa instruct (usa dropdowns)
           referenceAudioUrl: voiceMode === 'clone' ? (uploadedVoiceUrl || selectedVariation?.refAudioServerUrl || '') : '',
           referenceAudioName: voiceMode === 'clone' ? (uploadedVoiceFile?.name || selectedVariation?.refAudioName || 'ref_audio.wav') : '',
-          refText: '',
+          refText: selectedVariation?.refText || '',
           numStep: 32, // VozPro: 32 = qualidade (padrao), 16 = rapido mas pode errar palavras
           speed,
           language: language, // usa o idioma selecionado pelo usuario (Portuguese, Auto, etc)

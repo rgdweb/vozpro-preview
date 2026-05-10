@@ -226,7 +226,7 @@ export async function POST(request: NextRequest) {
       referenceAudioUrl = '',  // URL do audio de referencia (clone mode)
       referenceAudioName = 'ref_audio.wav',
       refText = '',            // transcricao (vazio = auto Whisper)
-      numStep = 16,            // 16=rapido, 32=qualidade
+      numStep = 32,            // 32=qualidade (padrao), 16=rapido mas pode gaguejar
       speed = 1.0,
       language = 'Auto',       // Auto = detectar
       // Voice Design params (usados no modo design)
@@ -242,8 +242,28 @@ export async function POST(request: NextRequest) {
     }
 
     // DEFESA DUPLA: remover tags SSML que passaram pelo frontend sem processar
-    const cleanText = stripSSMLForTTS(text)
+    let cleanText = stripSSMLForTTS(text)
     debug.log('SSML Strip', containsSSML(text) ? 'ok' : 'info', containsSSML(text) ? 'SSML detectado, tags removidas' : 'sem SSML')
+
+    // TEXT GUARDRAILS — limpa padrões que causam gagueira e alucinacao
+    // 1. Remover colchetes restantes (pronuncia forçada pode confundir o modelo se mal formatada)
+    // 2. Remover caracteres especiais que o TTS tenta falar
+    // 3. Limitar comprimento máximo por chunk (~500 chars = limite seguro do F5-TTS)
+    // 4. Remover URLs e emails (TTS tenta falar letra por letra)
+    cleanText = cleanText
+      .replace(/https?:\/\/[^\s]+/g, '')                    // URLs
+      .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '') // Emails
+      .replace(/[^\w\s.,!?;:áàãâéèêíïóôõúüçñÁÀÃÂÉÈÊÍÏÓÔÕÚÜÇÑ\[\]'"()\-/]/g, '') // Chars especiais
+      .replace(/  +/g, ' ')                                  // Espaços múltiplos
+      .trim()
+
+    // Limitar tamanho do texto (chunk máximo seguro para evitar repetição/gagueira)
+    if (cleanText.length > 800) {
+      cleanText = cleanText.substring(0, 800).trim()
+      debug.log('Text Guard', 'warn', `Texto truncado de ${text.length} para 800 chars`)
+    }
+
+    debug.log('Text Clean', 'ok', `${cleanText.length} chars`)
 
     // Obter tunnel URL dinamicamente do HostGator (igual F5-TTS)
     debug.log('Tunnel', 'info', 'Descobrindo URL do tunnel...')

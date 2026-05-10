@@ -1180,22 +1180,14 @@ const STRESS_DICTIONARY: Record<string, string> = {
   'pais': 'país',
   'avos': 'avós',
 
-  // === PALAVRAS COM SONS FORTES ESPECÍFICOS ===
-  'cerebro': 'cérebro',
-  'eterno': 'etérno',
-  'governo': 'govérno',
-  'negocio': 'negócio',
-  'escritorio': 'escritório',
-  'diretorio': 'diretório',
-  'seculo': 'século',
-  'historia': 'história',
-  'memoria': 'memória',
-  'vitoria': 'vitória',
-  'gloria': 'glória',
-  'materia': 'matéria',
-  'familia': 'família',
+  // === PAROXÍTONAS COMUNS removidas — o TTS já fala naturalmente ===
+  // Palavras como cerebro, governo, historia, memoria, negocio, materia, familia
+  // são paroxítonas regulares (stress na penúltima = padrão do PT-BR).
+  // O TTS pronuncia corretamente SEM acento. Não adicionar aqui.
 
   // === PROPAROXÍTONAS COMUNS (stress na antepenúltima) ===
+  // Proparoxítonas SÃO as que mais precisam de acento pois o TTS tende
+  // a colocar o stress na penúltima (padrão) ao invés da antepenúltima.
   // TODAS as proparoxítonas precisam de acento em PT-BR
   // Se o usuário digitar sem acento, o TTS pode errar a sílaba tônica
   'matematica': 'matemática',
@@ -1340,11 +1332,12 @@ const STRESS_DICTIONARY: Record<string, string> = {
   'alem': 'além',
   'alem_disso': 'além disso',
 
-  // === H MUDO — correção de stress após remoção do H ===
-  // Após o regex de H mudo (step 1d), "hoje" vira "oje" sem acento.
-  // O TTS pode stressar a sílaba errada sem o acento.
-  'oje': 'ojé',
-  'omem': 'omém',
+  // === H MUDO — SEM correção de stress ===
+  // Após o regex de H mudo (step 1d), "hoje" vira "oje" e "homem" vira "omem".
+  // O TTS pronuncia essas palavras corretamente SEM acento adicional.
+  // NÃO adicionar acentos aqui — o TTS já fala naturalmente.
+  // Exemplo errado: "oje" → "ojé" (TTS já fala "oje" correto)
+  // Exemplo errado: "omem" → "omém" (se fosse acentuar seria "ômem", não "omém")
 }
 
 // ============================================================

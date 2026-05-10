@@ -2,6 +2,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -452,6 +453,8 @@ function writeString(view: DataView, offset: number, str: string) {
 }
 
 export default function VozProClient() {
+  const router = useRouter()
+  const [authChecked, setAuthChecked] = useState(false)
   const [voices, setVoices] = useState<Voice[]>([])
   const [tracks, setTracks] = useState<Track[]>([])
   const [voiceCategories, setVoiceCategories] = useState<CategoryInfo[]>([])
@@ -518,8 +521,20 @@ export default function VozProClient() {
   const selectedVariation = selectedVoice?.variations.find(v => v.id === selectedVariationId)
   const selectedTrack = tracks.find(t => t.id === selectedTrackId)
 
+  // Check auth — redireciona para /login se não autenticado
+  useEffect(() => {
+    fetch('/api/auth/verify').then(res => res.json()).then(data => {
+      if (!data.authenticated) {
+        router.push('/login')
+      } else {
+        setAuthChecked(true)
+      }
+    }).catch(() => router.push('/login'))
+  }, [router])
+
   // Load voices and tracks
   useEffect(() => {
+    if (!authChecked) return
     const loadData = async () => {
       setLoading(true)
       try {
@@ -583,7 +598,7 @@ export default function VozProClient() {
       }
     }
     loadData()
-  }, [])
+  }, [authChecked])
 
   // Auto-select first variation when voice changes
   useEffect(() => {
@@ -1246,6 +1261,18 @@ export default function VozProClient() {
     )
   }
 
+  // Aguardar verificação de autenticação
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-violet-950 via-slate-900 to-slate-950">
+        <div className="text-center text-slate-400">
+          <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p>Verificando acesso...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-violet-950 via-slate-900 to-slate-950">
 
@@ -1261,10 +1288,22 @@ export default function VozProClient() {
               <p className="text-xs text-violet-300/70">Vozes Profissionais com IA</p>
             </div>
           </div>
-          <Badge variant="outline" className="border-violet-500/30 text-violet-300 gap-1">
-            <Globe className="w-3 h-3" />
-            Online
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="border-violet-500/30 text-violet-300 gap-1">
+              <Globe className="w-3 h-3" />
+              Online
+            </Badge>
+            <button
+              onClick={async () => {
+                await fetch('/api/auth', { method: 'DELETE' })
+                router.push('/login')
+              }}
+              className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+              title="Sair"
+            >
+              Sair
+            </button>
+          </div>
         </div>
       </header>
 

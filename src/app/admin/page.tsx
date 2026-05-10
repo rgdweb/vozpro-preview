@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import {
   AudioWaveform, LogOut, Plus, Trash2, Edit, Upload, Music, Mic,
   Loader2, RefreshCw, Volume2, FileAudio, CheckCircle2, Settings2,
-  FolderOpen, ChevronLeft, FolderPlus, Folder, Play, Pause
+  FolderOpen, ChevronLeft, FolderPlus, Folder, Play, Pause, Users, UserPlus, Shield
 } from 'lucide-react'
 import { toast } from 'sonner'
 import AudioPlayer from '@/components/audio-player'
@@ -227,6 +227,243 @@ const INSTRUCT_OPTIONS = [
   { value: 'moderate pitch', label: 'Moderado' },
 ]
 
+// ============================================================
+// COMPONENTE: Seção de Gestão de Usuários
+// ============================================================
+function UsersSection({ users, loaded, onRefresh }: {
+  users: Array<{ id: string; name: string; email: string; role: string; active: boolean; createdAt: string }>
+  loaded: boolean
+  onRefresh: () => void
+}) {
+  const [showAddDialog, setShowAddDialog] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newEmail, setNewEmail] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [newRole, setNewRole] = useState('user')
+  const [saving, setSaving] = useState(false)
+  const [editingUser, setEditingUser] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editRole, setEditRole] = useState('')
+  const [editPassword, setEditPassword] = useState('')
+
+  const handleCreateUser = async () => {
+    if (!newName.trim() || !newEmail.trim() || !newPassword.trim()) {
+      toast.error('Preencha nome, email e senha')
+      return
+    }
+    setSaving(true)
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName, email: newEmail, password: newPassword, role: newRole }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Usuário criado com sucesso!')
+        setShowAddDialog(false)
+        setNewName('')
+        setNewEmail('')
+        setNewPassword('')
+        setNewRole('user')
+        onRefresh()
+      } else {
+        toast.error(data.error || 'Erro ao criar usuário')
+      }
+    } catch {
+      toast.error('Erro de conexão')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleUpdateUser = async (id: string) => {
+    setSaving(true)
+    try {
+      const body: Record<string, unknown> = { id, name: editName, email: editEmail, role: editRole }
+      if (editPassword) body.password = editPassword
+
+      const res = await fetch('/api/admin/users', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Usuário atualizado!')
+        setEditingUser(null)
+        onRefresh()
+      } else {
+        toast.error(data.error || 'Erro ao atualizar')
+      }
+    } catch {
+      toast.error('Erro de conexão')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteUser = async (id: string, name: string) => {
+    if (!confirm(`Deletar usuário "${name}"?`)) return
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Usuário deletado')
+        onRefresh()
+      } else {
+        toast.error(data.error || 'Erro ao deletar')
+      }
+    } catch {
+      toast.error('Erro de conexão')
+    }
+  }
+
+  const handleToggleActive = async (id: string, currentActive: boolean) => {
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, active: !currentActive }),
+      })
+      if (res.ok) {
+        toast.success(currentActive ? 'Usuário desativado' : 'Usuário ativado')
+        onRefresh()
+      }
+    } catch {
+      toast.error('Erro de conexão')
+    }
+  }
+
+  const startEdit = (user: typeof users[0]) => {
+    setEditingUser(user.id)
+    setEditName(user.name)
+    setEditEmail(user.email)
+    setEditRole(user.role)
+    setEditPassword('')
+  }
+
+  if (!loaded) {
+    return (
+      <div className="flex items-center justify-center py-12 text-slate-400">
+        <Loader2 className="w-5 h-5 animate-spin mr-2" /> Carregando usuários...
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-white">Usuários Cadastrados</h2>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={onRefresh} className="border-slate-600 text-slate-300 hover:bg-slate-700">
+            <RefreshCw className="w-3 h-3 mr-1" /> Atualizar
+          </Button>
+          <Button size="sm" onClick={() => setShowAddDialog(true)} className="bg-violet-600 hover:bg-violet-700 text-white">
+            <UserPlus className="w-3 h-3 mr-1" /> Novo Usuário
+          </Button>
+        </div>
+      </div>
+
+      {/* Lista de Usuários */}
+      <div className="space-y-2">
+        {users.length === 0 ? (
+          <p className="text-slate-500 text-center py-8">Nenhum usuário cadastrado</p>
+        ) : (
+          users.map(user => (
+            <Card key={user.id} className="bg-white/5 border-white/10">
+              <CardContent className="py-3 px-4">
+                {editingUser === user.id ? (
+                  /* Modo edição */
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input value={editName} onChange={e => setEditName(e.target.value)} placeholder="Nome" className="bg-slate-900/50 border-slate-600 text-white text-sm" />
+                    <Input value={editEmail} onChange={e => setEditEmail(e.target.value)} placeholder="Email" className="bg-slate-900/50 border-slate-600 text-white text-sm" />
+                    <Input value={editPassword} onChange={e => setEditPassword(e.target.value)} placeholder="Nova senha (vazio = manter)" type="password" className="bg-slate-900/50 border-slate-600 text-white text-sm" />
+                    <select value={editRole} onChange={e => setEditRole(e.target.value)} className="bg-slate-900/50 border-slate-600 text-white text-sm rounded-md px-3 py-1.5">
+                      <option value="admin">Admin</option>
+                      <option value="user">Usuário</option>
+                    </select>
+                    <div className="col-span-2 flex gap-2">
+                      <Button size="sm" onClick={() => handleUpdateUser(user.id)} disabled={saving} className="bg-violet-600 hover:bg-violet-700 text-white">
+                        {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />} Salvar
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => setEditingUser(null)} className="border-slate-600 text-slate-300">
+                        Cancelar
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  /* Modo visualização */
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${user.role === 'admin' ? 'bg-violet-600 text-white' : 'bg-slate-600 text-slate-300'}`}>
+                        {user.role === 'admin' ? <Shield className="w-4 h-4" /> : user.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-white">{user.name}</p>
+                        <p className="text-xs text-slate-400">{user.email}</p>
+                      </div>
+                      <Badge variant="outline" className={`text-xs ml-2 ${user.role === 'admin' ? 'border-violet-500/50 text-violet-400' : 'border-slate-600 text-slate-400'}`}>
+                        {user.role === 'admin' ? 'Admin' : 'Usuário'}
+                      </Badge>
+                      {!user.active && (
+                        <Badge variant="outline" className="border-red-500/50 text-red-400 text-xs">
+                          Inativo
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => handleToggleActive(user.id, user.active)} className="text-slate-400 hover:text-white h-8 w-8 p-0" title={user.active ? 'Desativar' : 'Ativar'}>
+                        {user.active ? '✓' : '○'}
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => startEdit(user)} className="text-slate-400 hover:text-white h-8 w-8 p-0" title="Editar">
+                        <Edit className="w-3 h-3" />
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => handleDeleteUser(user.id, user.name)} className="text-slate-400 hover:text-red-400 h-8 w-8 p-0" title="Deletar">
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))
+        )}
+      </div>
+
+      {/* Dialog: Novo Usuário */}
+      <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+        <DialogContent className="bg-slate-800 border-slate-700 text-white">
+          <DialogHeader>
+            <DialogTitle>Novo Usuário</DialogTitle>
+            <DialogDescription className="text-slate-400">Preencha os dados para criar um novo usuário</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Nome completo" className="bg-slate-900/50 border-slate-600 text-white" />
+            <Input value={newEmail} onChange={e => setNewEmail(e.target.value)} placeholder="Email (login)" type="email" className="bg-slate-900/50 border-slate-600 text-white" />
+            <Input value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Senha" type="password" className="bg-slate-900/50 border-slate-600 text-white" />
+            <select value={newRole} onChange={e => setNewRole(e.target.value)} className="bg-slate-900/50 border-slate-600 text-white rounded-md px-3 py-2">
+              <option value="user">Usuário</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddDialog(false)} className="border-slate-600 text-slate-300">Cancelar</Button>
+            <Button onClick={handleCreateUser} disabled={saving} className="bg-violet-600 hover:bg-violet-700 text-white">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null} Criar Usuário
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
 export default function AdminDashboard() {
   const router = useRouter()
   const [voices, setVoices] = useState<Voice[]>([])
@@ -354,6 +591,10 @@ export default function AdminDashboard() {
   const [enableVoiceUpload, setEnableVoiceUpload] = useState(false)
   const [settingsLoaded, setSettingsLoaded] = useState(false)
 
+  // Users state
+  const [users, setUsers] = useState<Array<{ id: string; name: string; email: string; role: string; active: boolean; createdAt: string }>>([])
+  const [usersLoaded, setUsersLoaded] = useState(false)
+
   // Check auth
   useEffect(() => {
     fetch('/api/auth/verify').then(res => res.json()).then(data => {
@@ -399,6 +640,22 @@ export default function AdminDashboard() {
       setLoading(false)
     }
   }, [])
+
+  // Load users (separate since it's a different API)
+  const loadUsers = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/users')
+      if (res.ok) {
+        const data = await res.json()
+        setUsers(data.users || [])
+        setUsersLoaded(true)
+      }
+    } catch { /* silent */ }
+  }, [])
+
+  useEffect(() => {
+    if (authChecked) loadUsers()
+  }, [authChecked, loadUsers])
 
   useEffect(() => {
     if (authChecked) loadData()
@@ -1306,6 +1563,10 @@ export default function AdminDashboard() {
             <TabsTrigger value="settings" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white gap-2">
               <Settings2 className="w-4 h-4" />
               Config
+            </TabsTrigger>
+            <TabsTrigger value="users" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white gap-2">
+              <Users className="w-4 h-4" />
+              Usuários ({users.length})
             </TabsTrigger>
           </TabsList>
 
@@ -2219,6 +2480,15 @@ export default function AdminDashboard() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* USERS TAB */}
+          <TabsContent value="users" className="space-y-4 mt-4">
+            <UsersSection
+              users={users}
+              loaded={usersLoaded}
+              onRefresh={loadUsers}
+            />
           </TabsContent>
         </Tabs>
       </main>

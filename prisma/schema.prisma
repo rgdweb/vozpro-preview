@@ -10,6 +10,17 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id        String   @id @default(cuid())
+  name      String   // nome do usuario
+  email     String   @unique // login
+  password  String   // hash SHA-256 da senha
+  role      String   @default("user") // "admin" ou "user"
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model Voice {
   id          String            @id @default(cuid())
   name        String            // e.g. "Ana", "Carlos"

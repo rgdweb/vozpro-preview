@@ -1230,6 +1230,23 @@ const X_WORD_DICTIONARY: Record<string, string> = {
   'mexida': 'messida',
   'Mexida': 'Messida',
 
+  // X = SS (som de "ss") — continuação
+  // máximo/máxima em PT-BR usam som de SS (mássimo, mássima), não KS
+  'máximo': 'mássimo',
+  'Máximo': 'Mássimo',
+  'MÁXIMO': 'MÁSSIMO',
+  'máxima': 'mássima',
+  'Máxima': 'Mássima',
+  'MÁXIMA': 'MÁSSIMA',
+  'máximos': 'mássimos',
+  'Máximos': 'Mássimos',
+  'máximas': 'mássimas',
+  'Máximas': 'Mássimas',
+  'maximizar': 'massimizar',
+  'Maximizar': 'Massimizar',
+  'maximização': 'massimização',
+  'Maximização': 'Massimização',
+
   // X = KS (som de "ks")
   'táxi': 'tácsi',
   'Táxi': 'Tácsi',
@@ -1252,10 +1269,6 @@ const X_WORD_DICTIONARY: Record<string, string> = {
   'Fixo': 'Fikso',
   'fixar': 'fiksar',
   'Fixar': 'Fiksar',
-  'maximizar': 'maksimizar',
-  'Maximizar': 'Maksimizar',
-  'máximo': 'máksimo',
-  'Máximo': 'Máksimo',
   'taxa': 'taksa',
   'Taxa': 'Taksa',
   'oxigênio': 'oksijênio',

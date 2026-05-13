@@ -1795,6 +1795,70 @@ export async function optimizePronunciation(text: string): Promise<string> {
     return `[${numberToWords(n)} por cento]`
   })
 
+  // ---- 4b. UNIDADES DE MEDIDA ----
+  // Converte abreviações para texto completo para o TTS pronunciar corretamente
+  // Pattern: numero + opcional espaço + unidade
+  // Ex: "1.200 kg" → "[mil e duzentos] quilogramas"
+  // Ex: "200 g" → "[duzentos] gramas" (não "g" sozinho que o TTS ignora)
+  const UNITS: Record<string, string> = {
+    'kg': 'quilogramas', 'kgf': 'quilogramas-força',
+    'g': 'gramas', 'mg': 'miligramas', 'ug': 'microgramas', 'μg': 'microgramas',
+    'km': 'quilômetros', 'hm': 'hectômetros', 'dam': 'decâmetros',
+    'm': 'metros', 'dm': 'decímetros', 'cm': 'centímetros', 'mm': 'milímetros',
+    'km²': 'quilômetros quadrados', 'km2': 'quilômetros quadrados',
+    'm²': 'metros quadrados', 'm2': 'metros quadrados',
+    'cm²': 'centímetros quadrados', 'ha': 'hectares',
+    'l': 'litros', 'ml': 'mililitros', 'dl': 'decilitros',
+    'w': 'watts', 'kw': 'quilowatts', 'mw': 'megawatts',
+    'kwh': 'quilowatts-hora', 'kwh': 'quilowatts-hora',
+    'hpa': 'hectopascais', 'pa': 'pascais', 'atm': 'atmosferas',
+    '°c': 'graus celsius', '°f': 'graus fahrenheit', '°k': 'graus kelvin',
+    'kb': 'quilobytes', 'mb': 'megabytes', 'gb': 'gigabytes', 'tb': 'terabytes',
+    'kbps': 'quilobits por segundo', 'mbps': 'megabits por segundo',
+    'rpm': 'rotações por minuto', 'hz': 'hertz', 'khz': 'quilohertz', 'mhz': 'megahertz', 'ghz': 'gigahertz',
+    'ms': 'milissegundos', 'μs': 'microssegundos', 'ns': 'nanossegundos',
+    'km/h': 'quilômetros por hora', 'kmh': 'quilômetros por hora',
+    'm/s': 'metros por segundo', 'mph': 'milhas por hora',
+  }
+
+  // Pattern: número + espaço + unidade (com ou sem /h)
+  const unitPattern = new RegExp(
+    '(\\d[\\d.,]*\\d|\\d)\\s*(' +
+    Object.keys(UNITS).sort((a, b) => b.length - a.length).map(u => u.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') +
+    ')(?=\\s|[,;.!?)]|$)',
+    'gi'
+  )
+  result = result.replace(unitPattern, (match, numStr, unit) => {
+    const unitLower = unit.toLowerCase().replace(/\s/g, '')
+    const unitText = UNITS[unitLower]
+    if (!unitText) return match
+    // Converter o número para palavras
+    const numClean = numStr.replace(/\./g, '').replace(',', '.')
+    const n = parseFloat(numClean)
+    if (isNaN(n)) return match
+    const numWords = n === Math.floor(n) && n <= 999999999
+      ? numberToWords(n)
+      : numStr
+    // Formatar: "[mil e duzentos] quilogramas"
+    return `[${numWords}] ${unitText}`
+  })
+
+  // Unidades sozinhas sem número (só unidades com 3+ letras para evitar falsos)
+  // "m", "g", "l", "w" etc. são muito curtas — só converter com número antes (pattern acima)
+  const SAFE_LONE_UNITS = Object.keys(UNITS).filter(u => u.length >= 3)
+  if (SAFE_LONE_UNITS.length > 0) {
+    const loneUnitPattern = new RegExp(
+      '\\s+(' + SAFE_LONE_UNITS.sort((a, b) => b.length - a.length).map(u => u.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')(?=\\s|[,;.!?)]|$)',
+      'gi'
+    )
+    result = result.replace(loneUnitPattern, (match, unit) => {
+      const unitLower = unit.toLowerCase().replace(/\s/g, '')
+      const unitText = UNITS[unitLower]
+      if (!unitText) return match
+      return ` ${unitText}`
+    })
+  }
+
   // ---- 5. HORÁRIOS COMPLETOS ----
   // "14h30" ou "14h30min" → "[quatorze] horas e [trinta] minutos"
   result = result.replace(/(\d{1,2})h(\d{2})(?:min)?/gi, (match, hourStr, minStr) => {

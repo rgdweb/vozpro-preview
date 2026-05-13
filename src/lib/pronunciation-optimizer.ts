@@ -1796,52 +1796,15 @@ export async function optimizePronunciation(text: string): Promise<string> {
     })
   }
 
-  // ---- 3. NÚMEROS GRANDES POR EXTENSO ----
-  // Anos: "2024" → "[dois mil vinte e quatro]" (quando precedido por "ano" ou similar)
-  result = result.replace(/(?:ano|Ano|ANO)\s+(\d{4})/g, (match, year) => {
-    const y = parseInt(year)
-    if (y >= 1000 && y <= 2100) return match.replace(year, `[${numberToWords(y)}]`)
-    return match
-  })
+  // ============================================================
+  // PADRÕES ESPECÍFICOS COM NÚMEROS — ANTES DOS GENÉRICOS
+  // Regra: padrão mais específico primeiro, genérico por último
+  // ============================================================
 
-  // Números isolados grandes (1.000, 2.500, etc. — com ponto de milhar PT-BR)
-  result = result.replace(/\b(\d{1,3}(?:\.\d{3})+)\b/g, (match) => {
-    const n = parseInt(match.replace(/\./g, ''))
-    if (n <= 999999999) return `[${numberToWords(n)}]`
-    return match
-  })
-
-  // Números decimais: "3,5" → "[três vírgula cinco]"
-  result = result.replace(/\b(\d+),(\d+)\b/g, (match, intPart, decPart) => {
-    const n = parseInt(intPart)
-    if (n > 0 && n <= 999) {
-      const intWord = numberToWords(n)
-      const decDigits = decPart.split('').map(d => numberToWords(parseInt(d))).join(' ')
-      return `[${intWord} vírgula ${decDigits}]`
-    }
-    return match
-  })
-
-  // Números isolados pequenos (1-999) em contexto textual
-  result = result.replace(/\b(\d{1,3})\b/g, (match, numStr) => {
-    const n = parseInt(numStr)
-    // Só converte se estiver em contexto textual (não dentro de colchetes, URLs, etc.)
-    if (n > 0 && n <= 999) {
-      // Verifica se está dentro de colchetes (já processado)
-      const before = result.substring(Math.max(0, result.indexOf(match) - 1), result.indexOf(match))
-      if (before === '[') return match
-      return `[${numberToWords(n)}]`
-    }
-    return match
-  })
-
-  // ---- 3. VALORES MONETÁRIOS ----
-  // R$ com valor completo: "R$ 1.599,90" → "[mil quinhentos e noventa e nove reais e noventa centavos]"
+  // ---- 3a. VALORES MONETÁRIOS ----
   result = result.replace(/R\$\s*([\d.,]+)/g, (match, val) => {
     return `[${currencyToWords(val)}]`
   })
-
-  // Dólar: "$ 100" ou "US$ 100"
   result = result.replace(/(?:US\$|\$)\s*([\d.,]+)/g, (match, val) => {
     const clean = val.replace(/\./g, '').replace(',', '.')
     const n = parseFloat(clean)
@@ -1849,79 +1812,25 @@ export async function optimizePronunciation(text: string): Promise<string> {
     return `[${n === 1 ? 'um dólar' : numberToWords(Math.floor(n)) + ' dólares'}]`
   })
 
-  // ---- 4. PORCENTAGENS ----
-  result = result.replace(/(\d+)(?:\s*%|\s*por cento)/gi, (match, numStr) => {
-    const n = parseInt(numStr)
+  // ---- 3b. PORCENTAGENS ----
+  result = result.replace(/(\d+(?:,\d+)?)(?:\s*%|\s*por cento)/gi, (match, numStr) => {
+    const clean = numStr.replace(',', '.')
+    const n = parseFloat(clean)
     if (isNaN(n)) return match
-    return `[${numberToWords(n)} por cento]`
-  })
-
-  // ---- 5. HORÁRIOS COMPLETOS ----
-  // "14h30" ou "14h30min" → "[quatorze] horas e [trinta] minutos"
-  result = result.replace(/(\d{1,2})h(\d{2})(?:min)?/gi, (match, hourStr, minStr) => {
-    const h = parseInt(hourStr)
-    const m = parseInt(minStr)
-    if (h < 0 || h > 23 || m < 0 || m > 59) return match
-    let text = `[${numberToWords(h)}] horas`
-    if (m > 0) text += ` e [${numberToWords(m)}] minutos`
-    return text
-  })
-
-  // "14h" simples → "[quatorze] horas"
-  result = result.replace(/(\d{1,2})\s*h(?!\w)/gi, (match, numStr) => {
-    const n = parseInt(numStr)
-    if (isNaN(n) || n < 0 || n > 23) return match
-    return `[${numberToWords(n)}] horas`
-  })
-
-  // "08:30" como horário → "[oito] horas e [trinta] minutos"
-  result = result.replace(/\b(\d{1,2}):(\d{2})\b/g, (match, hourStr, minStr) => {
-    const h = parseInt(hourStr)
-    const m = parseInt(minStr)
-    // Verifica se é horário (0-23h, 0-59min) e não data
-    if (h >= 0 && h <= 23 && m >= 0 && m <= 59 && m > 0) {
-      return `[${numberToWords(h)}] horas e [${numberToWords(m)}] minutos`
+    const nInt = Math.floor(n)
+    if (n === nInt && nInt <= 999999999) {
+      return `[${numberToWords(nInt)} por cento]`
     }
     return match
   })
 
-  // ---- 6. DATAS ----
-  // "15/03/2024" → "[quinze de março de dois mil vinte e quatro]"
-  const MONTHS: Record<string, string> = {
-    '01': 'janeiro', '02': 'fevereiro', '03': 'março', '04': 'abril',
-    '05': 'maio', '06': 'junho', '07': 'julho', '08': 'agosto',
-    '09': 'setembro', '10': 'outubro', '11': 'novembro', '12': 'dezembro',
-  }
-  result = result.replace(/\b(\d{1,2})\/(\d{2})\/(\d{4})\b/g, (match, day, month, year) => {
-    const d = parseInt(day)
-    const m = MONTHS[month]
-    const y = parseInt(year)
-    if (d >= 1 && d <= 31 && m && y >= 1000) {
-      return `[${numberToWords(d)} de ${m} de ${numberToWords(y)}]`
-    }
-    return match
-  })
-
-  // Data curta: "15/03" → "[quinze de março]"
-  result = result.replace(/\b(\d{1,2})\/(\d{2})\b/g, (match, day, month) => {
-    const d = parseInt(day)
-    const m = MONTHS[month]
-    if (d >= 1 && d <= 31 && m) {
-      return `[${numberToWords(d)} de ${m}]`
-    }
-    return match
-  })
-
-  // ---- 7. TELEFONES ----
-  // "(11) 99999-9999" → "[onze] [nove nove nove nove nove] [nove nove nove nove]"
+  // ---- 3c. TELEFONES ----
   result = result.replace(/\((\d{2})\)\s*(\d{4,5})-?(\d{4})/g, (match, ddd, prefix, suffix) => {
     const dddWord = `[${numberToWords(parseInt(ddd))}]`
     const prefixDigits = prefix.split('').map(d => numberToWords(parseInt(d))).join(' ')
     const suffixDigits = suffix.split('').map(d => numberToWords(parseInt(d))).join(' ')
     return `${dddWord} [${prefixDigits}] [${suffixDigits}]`
   })
-
-  // "11 99999-9999" → mesma lógica
   result = result.replace(/\b(\d{2})\s*(\d{4,5})-?(\d{4})\b/g, (match, ddd, prefix, suffix) => {
     const dddN = parseInt(ddd)
     if (dddN >= 11 && dddN <= 99) {
@@ -1933,8 +1842,43 @@ export async function optimizePronunciation(text: string): Promise<string> {
     return match
   })
 
-  // ---- 8. ORDINAIS ----
-  // "1º" → "[primeiro]", "2ª" → "[segunda]", etc.
+  // ---- 3d. DATAS ----
+  const MONTHS: Record<string, string> = {
+    '01': 'janeiro', '02': 'fevereiro', '03': 'março', '04': 'abril',
+    '05': 'maio', '06': 'junho', '07': 'julho', '08': 'agosto',
+    '09': 'setembro', '10': 'outubro', '11': 'novembro', '12': 'dezembro',
+  }
+  result = result.replace(/\b(\d{1,2})\/(\d{2})\/(\d{4})\b/g, (match, day, month, year) => {
+    const d = parseInt(day); const m = MONTHS[month]; const y = parseInt(year)
+    if (d >= 1 && d <= 31 && m && y >= 1000) return `[${numberToWords(d)} de ${m} de ${numberToWords(y)}]`
+    return match
+  })
+  result = result.replace(/\b(\d{1,2})\/(\d{2})\b/g, (match, day, month) => {
+    const d = parseInt(day); const m = MONTHS[month]
+    if (d >= 1 && d <= 31 && m) return `[${numberToWords(d)} de ${m}]`
+    return match
+  })
+
+  // ---- 3e. HORÁRIOS ----
+  result = result.replace(/(\d{1,2})h(\d{2})(?:min)?/gi, (match, hourStr, minStr) => {
+    const h = parseInt(hourStr); const m = parseInt(minStr)
+    if (h < 0 || h > 23 || m < 0 || m > 59) return match
+    let text = `[${numberToWords(h)}] horas`
+    if (m > 0) text += ` e [${numberToWords(m)}] minutos`
+    return text
+  })
+  result = result.replace(/(\d{1,2})\s*h(?!\w)/gi, (match, numStr) => {
+    const n = parseInt(numStr)
+    if (isNaN(n) || n < 0 || n > 23) return match
+    return `[${numberToWords(n)}] horas`
+  })
+  result = result.replace(/\b(\d{1,2}):(\d{2})\b/g, (match, hourStr, minStr) => {
+    const h = parseInt(hourStr); const m = parseInt(minStr)
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59 && m > 0) return `[${numberToWords(h)}] horas e [${numberToWords(m)}] minutos`
+    return match
+  })
+
+  // ---- 3f. ORDINAIS ----
   const ORDINALS_MASC: Record<string, string> = {
     '1': 'primeiro', '2': 'segundo', '3': 'terceiro', '4': 'quarto',
     '5': 'quinto', '6': 'sexto', '7': 'sétimo', '8': 'oitavo',
@@ -1945,18 +1889,51 @@ export async function optimizePronunciation(text: string): Promise<string> {
     '5': 'quinta', '6': 'sexta', '7': 'sétima', '8': 'oitava',
     '9': 'nona', '10': 'décima',
   }
-
   result = result.replace(/(\d+)º/g, (match, num) => {
     if (ORDINALS_MASC[num]) return `[${ORDINALS_MASC[num]}]`
     return `[${numberToWords(parseInt(num))}ésimo]`
   })
-
   result = result.replace(/(\d+)ª/g, (match, num) => {
     if (ORDINALS_FEM[num]) return `[${ORDINALS_FEM[num]}]`
     return `[${numberToWords(parseInt(num))}ésima]`
   })
 
-  // ---- 9-10-11. DICIONÁRIO (abreviações + siglas + estrangeirismos + problemáticas) ----
+  // ============================================================
+  // PADRÕES GENÉRICOS DE NÚMEROS — POR ÚLTIMO
+  // ============================================================
+
+  // ---- 4. NÚMEROS POR EXTENSO ----
+  result = result.replace(/(?:ano|Ano|ANO)\s+(\d{4})/g, (match, year) => {
+    const y = parseInt(year)
+    if (y >= 1000 && y <= 2100) return match.replace(year, `[${numberToWords(y)}]`)
+    return match
+  })
+  result = result.replace(/\b(\d{1,3}(?:\.\d{3})+)\b/g, (match) => {
+    const n = parseInt(match.replace(/\./g, ''))
+    if (n <= 999999999) return `[${numberToWords(n)}]`
+    return match
+  })
+  result = result.replace(/\b(\d+),(\d+)\b/g, (match, intPart, decPart) => {
+    const n = parseInt(intPart)
+    if (n > 0 && n <= 999) {
+      const intWord = numberToWords(n)
+      const decDigits = decPart.split('').map(d => numberToWords(parseInt(d))).join(' ')
+      return `[${intWord} vírgula ${decDigits}]`
+    }
+    return match
+  })
+  // Números isolados pequenos (1-999) — ABSOLUTAMENTE POR ÚLTIMO
+  result = result.replace(/\b(\d{1,3})\b/g, (match, numStr) => {
+    const n = parseInt(numStr)
+    if (n > 0 && n <= 999) {
+      const before = result.substring(Math.max(0, result.indexOf(match) - 1), result.indexOf(match))
+      if (before === '[') return match
+      return `[${numberToWords(n)}]`
+    }
+    return match
+  })
+
+  // ---- 5. DICIONÁRIO (abreviações + siglas + estrangeirismos + problemáticas) ----
   for (const [word, pronunciation] of Object.entries(PRONUNCIATION_DICTIONARY)) {
     // Usar word boundary para não substituir substrings
     const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

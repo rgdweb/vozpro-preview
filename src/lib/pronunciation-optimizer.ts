@@ -443,8 +443,8 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'Influencer': 'Influenser',
   'live': 'laive',
   'Live': 'Laive',
-  'streaming': 'estrimingue',
-  'Streaming': 'Estrimgue',
+  'streaming': 'estrimíngue',
+  'Streaming': 'Estrimíngue',
   'know-how': 'nou rau',
   'showroom': 'chorume', // aportuguesado
   'background': 'bécigraunde',
@@ -540,7 +540,7 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'shoot': 'chute',
   'match': 'metxe',
   'round': 'raunde',
-  'set': 'sete',
+  'set': 'sét',
 
   // === ABREVIAÇÕES (expandir) ===
   'Sr.': 'Senhor',
@@ -691,11 +691,11 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'Frequência': 'Frequencia',
   'FREQUÊNCIA': 'FREQUENCIA',
 
-  'lapso': 'lápisso',
-  'Lapso': 'Lápisso',
+  'lapso': 'lápsso',
+  'Lapso': 'Lápsso',
 
   // === NOMES PRÓPRIOS DIFÍCEIS ===
-  'Wolski': 'Uíski',
+  'Wolski': 'Vólsqui',
   'Kowalski': 'Covalsqui',
   'Higashi': 'Rigaxi',
   'Schütz': 'Xuts',
@@ -710,7 +710,7 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
 
   'Apple': 'Épel',
   'Microsoft': 'Maicrósofte',
-  'Amazon': 'Amazônia',
+  'Amazon': 'Amázón',
   'Magazine Luiza': 'Magazine Luíza',
 
 
@@ -745,7 +745,7 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'Land Rover': 'Lande Rover',
 
   // === TECNOLOGIA (expansão Fase 1) ===
-  'TikTok': 'TíTóque',
+  'TikTok': 'Títóque',
 
 
   'Discord': 'Discorde',
@@ -789,19 +789,19 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
 
 
   // === GERAL / OUTROS (expansão Fase 1) ===
-  'QR code': 'cúder code',
-  'CEO': 'cê e i ó',
+  'QR code': 'quér code',
+  'CEO': 'cê i ó',
   'CFO': 'cê éfe ó',
   'CTO': 'cê tê ó',
-  'RH': 'erre águe',
+  'RH': 'erre agá',
   'PK': 'pê cá',
-  'NGO': 'ênge ô',
+  'NGO': 'êne gê ô',
   'GPT': 'gê pê tê',
   'LLM': 'éle éleême',
   'SSR': 'és és ér',
   'VPN': 'vê pê éne',
-  'LAN': 'éle águe éne',
-  'RAM': 'erre águe éme',
+  'LAN': 'éle agá éne',
+  'RAM': 'erre agá éme',
   'ROM': 'erre ó éme',
   'BI': 'bê i',
   'DB': 'dê bê',
@@ -828,7 +828,7 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'TV': 'tê vê',
   // CNPJ, CPF, INSS, IPTU já definidos na seção de siglas (linhas 123-124, 130-131)
   'PIS': 'pê i esse',
-  'PASEP': 'pá sêpe',
+  'PASEP': 'pá êse é pê',
   'FGTS': 'éfe gê tê esse',
   // INSS já definido
   'IRPF': 'i erre pê éfe',
@@ -934,7 +934,7 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'OKR': 'ó cê erre',
   'SLA': 'és éle a',
   'NPS': 'ême pê és',
-  'CAGR': 'cáge arre',
+  'CAGR': 'cê a gê erre',
   'LTV': 'éle tê vê',
 
   // === EDUCAÇÃO ===
@@ -994,12 +994,48 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'GPT-4': 'gê pê tê quatro',
   'GPT-3': 'gê pê tê três',
   'OpenAI': 'Open AI',
-  'Gemini': 'Gêmeine',
+  'Gemini': 'Gêmini',
   'Copilot': 'Copailete',
   'Midjourney': 'Midjórnei',
   'Stable Diffusion': 'Steibol Difiújion',
   'Hugging Face': 'Raguein Feice',
   'Gradio': 'Grádio',
+
+  // === APPS E SERVIÇOS POPULARES (essenciais PT-BR) ===
+  'Netflix': 'Nétflíx',
+  'Spotify': 'Spótaifei',
+  'WhatsApp': 'Uótsape',
+  'YouTube': 'Iútube',
+  'Instagram': 'Instagrãe',
+  'Facebook': 'Feisbúque',
+  'Uber': 'Úber',
+  'Twitter': 'Tuíter',
+  'Telegram': 'Telegreime',
+  'Pinterest': 'Pintéreste',
+  'LinkedIn': 'Línquede In',
+  'Twitch': 'Tuítche',
+  'TikTok': 'Títóque',
+
+  // === MARCAS GLOBAIS COMUNS ===
+  'Samsung': 'Sãssum',
+  'Nike': 'Náique',
+  'Adidas': 'Adídace',
+  'Xiaomi': 'Xáomi',
+  'Motorola': 'Motoróla',
+  'Sony': 'Sóne',
+  'Panasonic': 'Panassóneque',
+  'Philips': 'Fílipe',
+  'Nvidia': 'Envídia',
+  'Intel': 'Íntel',
+  'AMD': 'A Éme Dê',
+
+  // === INGLÊS COM H (protegidas do H-mudo) ===
+  'hosting': 'róstinge',
+  'hackathon': 'rácáton',
+  'holding': 'rôldingue',
+  'headset': 'rédset',
+  'hotspot': 'rótspot',
+
   'PyTorch': 'Páitorche',
   'TensorFlow': 'Ténsorflou',
   'Flutter': 'Fláuter',
@@ -1029,7 +1065,7 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'Vercel': 'Versel',
   'Supabase': 'Supabeise',
   'Firebase': 'Faíberbeise',
-  'Heroku': 'Herócue',
+  'Heroku': 'Herôcue',
   'DigitalOcean': 'Digital Océan',
   'AWS': 'a dábliu és',
   'GCP': 'gê cê pê',
@@ -1158,7 +1194,7 @@ const STRESS_DICTIONARY: Record<string, string> = {
   'dificil': 'difícil',
   'facil': 'fácil',
   'possivel': 'possível',
-  'hifen': 'ifen',     // H mudo + stress
+  'ifen': 'ífen',     // H mudo já rodou antes — key é pos-H-mudo
   'artico': 'ártico',
   'polen': 'pólen',
   'indice': 'índice',
@@ -1295,7 +1331,7 @@ const STRESS_DICTIONARY: Record<string, string> = {
 
   // === PAROXÍTONAS terminadas em ditongo ===
   'agua': 'água',
-  'agueda': 'Águeda',
+  'agueda': 'águeda',
   'regua': 'régua',
   'papeis': 'papéis',
   'misterio': 'mistério',
@@ -1306,6 +1342,55 @@ const STRESS_DICTIONARY: Record<string, string> = {
   'fosseis': 'fósseis',
   'aneis': 'anéis',
   'veroes': 'verões',
+  'variavel': 'variável',
+  'notavel': 'notável',
+  'duravel': 'durável',
+  'memoravel': 'memorável',
+  'indispensavel': 'indispensável',
+  'comercial': 'comercial',
+  'acessivel': 'acessível',
+  'compativel': 'compatível',
+  'incontrolavel': 'incontrolável',
+  'inevitavel': 'inevitável',
+  'improvavel': 'improvável',
+
+  // === PROPAROXÍTONAS comuns que o TTS confunde ===
+  'otimo': 'ótimo',
+  'otima': 'ótima',
+  'arvore': 'árvore',
+  'proximo': 'próximo',
+  'proxima': 'próxima',
+  'minimo': 'mínimo',
+  'minima': 'mínima',
+  'maximo': 'máximo',
+  'maxima': 'máxima',
+  'liquido': 'líquido',
+  'tecnicas': 'técnicas',
+  'tecnica': 'técnica',
+  'cientifico': 'científico',
+  'economia': 'economia',
+  'estrategia': 'estratégia',
+  'energetico': 'energético',
+  'medico': 'médico',
+  'historico': 'histórico',
+  'periodo': 'período',
+  'metodo': 'método',
+  'matematica': 'matemática',
+  'quimica': 'química',
+  'fisica': 'física',
+  'geometria': 'geometria',
+  'arquitetura': 'arquitetura',
+  'biblioteca': 'biblioteca',
+  'misterio': 'mistério',
+  'terapeutico': 'terapêutico',
+  'preventivo': 'preventivo',
+  'perspectiva': 'perspectiva',
+  'obrigatorio': 'obrigatório',
+  'temporario': 'temporário',
+  'voluntario': 'voluntário',
+  'complementar': 'complementar',
+  'excepcional': 'excepcional',
+  'extraordinario': 'extraordinário',
 
   // === PAROXÍTONAS terminadas em -l (precisam de acento) ===
   'amavel': 'amável',
@@ -1723,9 +1808,13 @@ export async function optimizePronunciation(text: string): Promise<string> {
   // "hoje" → "oje", "Hoje" → "oje", "HOMEM" → "omem"
   // IMPORTANTE: manter minúsculo! O TTS lê letra maiúscula como nome próprio e inventa H
   // ATENÇÃO: Não remover H de palavras que estão no dicionário (ex: "Hello" → dicionário vira "relou")
+  // Verificar tanto palavra completa quanto prefixos (para "Hugging Face" → "hugging" deve ser protegido)
   result = result.replace(/\b[Hh]([aeiouáàãâéèêíïóôõúü][a-zA-Záàãâéèêíïóôõúüç]*)/g, (match, rest) => {
-    // Se a palavra está no dicionário (inglês/marcas), manter intacta (será substituída no passo 9)
-    if (H_DICT_WORDS.has(match.toLowerCase())) return match
+    // Se a palavra está no dicionário (inglês/marcas), manter intacta
+    const lower = match.toLowerCase()
+    if (H_DICT_WORDS.has(lower)) return match
+    // Verificar se é o início de uma palavra multi-word protegida (ex: "Hugging" em "Hugging Face")
+    if ([...H_DICT_WORDS].some(w => w.startsWith(lower + ' '))) return match
     // Senão, remover o H mudo
     return rest
   })
@@ -2148,12 +2237,58 @@ export async function optimizePronunciation(text: string): Promise<string> {
 
   // ---- 13. EMAILS ----
   // Regex não captura pontuação final — evita quebrar frase
+  // Dicionário de pronúncia fonética para partes de domínios
+  const DOMAIN_PHONETICS: Record<string, string> = {
+    'stech': 'xisték',
+    'xanxere': 'xanxere',          // já fala correto
+    'tech': 'têque',
+    'dev': 'dêve',
+    'web': 'uébec',
+    'cloud': 'cláude',
+    'app': 'épi',
+    'pro': 'pró',
+    'lab': 'lébe',
+    'hub': 'rábe',
+    'io': 'ío',
+    'ai': 'ei ai',
+    'info': 'ínfo',
+    'gmail': 'jímeil',
+    'hotmail': 'rótmeil',
+    'outlook': 'áutlúque',
+    'yahoo': 'yáhu',
+    'live': 'láive',
+    'icloud': 'aiclaude',
+    'terra': 'térra',
+    'uol': 'uól',
+    'bol': 'bol',
+    'ig': 'íge',
+    'r7': 'érre sête',
+    'globo': 'glóbo',
+    'g1': 'gê úm',
+    'google': 'gúgol',
+    'github': 'gítabe',
+    'gitlab': 'gítlebe',
+    'bitbucket': 'bítabáquete',
+    'docker': 'dóquer',
+    'aws': 'a dábliu és',
+    'azure': 'ézurre',
+  }
+
   result = result.replace(/(\S+)@([^\s.,;:!?\)]+(?:\.[^\s.,;:!?\)]+)*)/g, (match, user, domain) => {
     const domainSpelled = domain.split('').map(c => {
       if (c === '.') return ' ponto '
       return c
     }).join('')
-    return `[${user} arroba ${domainSpelled}]`
+    // Verificar se o domínio inteiro tem pronúncia fonética
+    const domainLower = domain.toLowerCase()
+    const phonetic = DOMAIN_PHONETICS[domainLower]
+    if (phonetic) {
+      return `[${user} arroba ${phonetic}]`
+    }
+    // Tentar pronunciar cada parte do domínio separadamente
+    const parts = domainLower.split('.')
+    const partsPhonetic = parts.map(part => DOMAIN_PHONETICS[part] || part).join(' ponto ')
+    return `[${user} arroba ${partsPhonetic}]`
   })
 
   // ---- 14. G2P FALLBACK — espeak-ng para palavras desconhecidas ----

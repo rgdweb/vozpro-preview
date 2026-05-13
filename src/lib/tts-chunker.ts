@@ -41,6 +41,8 @@ const PAUSE_DURATION: Record<string, number> = {
   '!': 450,     // exclamação → pausa expressiva
   '?': 500,     // interrogação → pausa expressiva
   '...': 600,   // reticências → pausa alongada
+  ';': 300,     // ponto-e-vírgula → pausa média (adicional PT-BR)
+  ':': 350,     // dois pontos → pausa média-longa (adicional PT-BR)
 }
 
 const MIN_CHUNK_CHARS = 3     // mínimo de caracteres por chunk
@@ -102,8 +104,8 @@ interface BreakPoint {
 }
 
 /**
- * Encontra pontos de quebra FORTE no texto (. ! ? ...).
- * Vírgulas e ponto-e-vírgula NÃO são pontos de quebra — ficam no texto.
+ * Encontra pontos de quebra FORTE no texto (. ! ? ... ; :).
+ * Vírgulas NÃO são pontos de quebra — ficam no texto.
  */
 function findBreakPoints(text: string): BreakPoint[] {
   const breaks: BreakPoint[] = []
@@ -155,9 +157,15 @@ function findBreakPoints(text: string): BreakPoint[] {
       continue
     }
     
-    // Vírgula, ponto-e-vírgula e dois pontos — NÃO quebram
-    // Elas ficam no texto do chunk (o TTS respeita naturalmente)
-    if (char === ',' || char === ';' || char === ':') {
+    // Ponto-e-vírgula e dois pontos → quebra de pausa média (PT-BR)
+    if (char === ';' || char === ':') {
+      breaks.push({ index: i, punctuation: char, length: 1 })
+      i++
+      continue
+    }
+    
+    // Vírgula — NÃO quebra. Fica no texto do chunk (o TTS respeita naturalmente)
+    if (char === ',') {
       i++
       continue
     }
@@ -190,7 +198,7 @@ function splitAtBreakPoints(text: string, breakPoints: BreakPoint[]): TextChunk[
       // Manter vírgulas e pontuação fraca no texto
       // Remover apenas a pontuação forte do final se tiver
       let cleanText = textBefore
-      if (/[.!?]$/.test(cleanText) && !/\.{3}$/.test(cleanText)) {
+      if (/[.!?;:]$/.test(cleanText) && !/\.{3}$/.test(cleanText)) {
         cleanText = cleanText.slice(0, -1).trim()
       }
       
@@ -277,10 +285,17 @@ function splitLongChunks(chunks: TextChunk[]): TextChunk[] {
       continue
     }
 
-    // Procura ponto natural de quebra em conjunções
+    // Procura ponto natural de quebra em conjunções (PT-BR expandido)
     const breakWords = ['e', 'mas', 'porem', 'contudo', 'porque', 'pois', 'portanto',
       'alem', 'tambem', 'quando', 'onde', 'como', 'para', 'com', 'mais', 'nao',
-      'se', 'ou', 'essa', 'esse', 'esta', 'este', 'que', 'num', 'uma']
+      'se', 'ou', 'essa', 'esse', 'esta', 'este', 'que', 'num', 'uma',
+      // Adicionais para PT-BR
+      'embora', 'entretanto', 'todavia', 'conforme',
+      'inclusive', 'principalmente', 'geralmente',
+      'sobretudo', 'atualmente',
+      'durante', 'atraves', 'mediante', 'segundo',
+      'jah', 'ainda', 'bem', 'logo', 'depois', 'antes', 'sempre',
+      'enfim', 'afinal']
 
     const subChunks: string[][] = [[]]
     let wordCount = 0

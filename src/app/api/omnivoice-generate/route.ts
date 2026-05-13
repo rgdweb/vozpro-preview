@@ -249,13 +249,16 @@ export async function POST(request: NextRequest) {
       .replace(/https?:\/\/[^\s]+/g, '')
       .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '')
 
-    // PASSO 3: Manter letras, numeros, espacos, acentos PT-BR E pontuação de pausa
+    // PASSO 3: Manter letras, numeros, espacos, acentos PT-BR, pontuação E colchetes de pronúncia
     // Preservar: vírgula (,) ponto-e-vírgula (;) dois pontos (:) exclamação (!) interrogação (?)
+    // Preservar: colchetes [] para pronúncia forçada suportada pelo VozPro
     // O GPT-SoVITS respeita vírgulas naturalmente — isso garante pausas corretas
-    cleanText = cleanText.replace(/[^\w\s\u00C0-\u024F,;:!?.]/g, ' ')
+    cleanText = cleanText.replace(/[^\w\s\u00C0-\u024F,;:!?.\[\]]/g, ' ')
 
-    // PASSO 4: Remover colchetes de pronuncia forçada [palavra] → palavra
-    cleanText = cleanText.replace(/\[([^\]]+)\]/g, '$1')
+    // PASSO 4: PRESERVAR colchetes de pronúncia forçada [palavra]
+    // O VozPro suporta [pronúncia] nativamente — NÃO remover!
+    // Antes essa linha destruía todas as pronúncias forçadas:
+    //   cleanText = cleanText.replace(/\[([^\]]+)\]/g, '$1')  // BUG REMOVIDO
 
     // PASSO 5: Limpar espaços multiplos (mas não remover espaços após vírgula)
     cleanText = cleanText.replace(/  +/g, ' ').trim()

@@ -578,6 +578,14 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
   'Min.': 'Ministro',
   'Maj.': 'Major',
   'Cel.': 'Coronel',
+
+  // === Nº / n.º (ABREVIATURA DE "NÚMERO") ===
+  'Nº': 'número', 'nº': 'número', 'N.º': 'número', 'n.º': 'número',
+  'Noº': 'número', 'noº': 'número', 'N.º': 'número', 'n.º': 'número',
+
+  // === a.m. / p.m. (PERÍODOS DO DIA) ===
+  'a.m.': 'da manhã', 'A.M.': 'da manhã', 'am': 'da manhã', 'AM': 'da manhã',
+  'p.m.': 'da tarde', 'P.M.': 'da tarde', 'pm': 'da tarde', 'PM': 'da tarde',
   'Gen.': 'General',
   'Emb.': 'Embaixador',
 
@@ -1813,7 +1821,7 @@ export async function optimizePronunciation(text: string): Promise<string> {
   })
 
   // ---- 3b. PORCENTAGENS ----
-  result = result.replace(/(\d+(?:,\d+)?)(?:\s*%|\s*por cento)/gi, (match, numStr) => {
+  result = result.replace(/(\d+(?:[,.]\d+)?)(?:\s*%|\s*por cento)/gi, (match, numStr) => {
     const clean = numStr.replace(',', '.')
     const n = parseFloat(clean)
     if (isNaN(n)) return match
@@ -1857,6 +1865,85 @@ export async function optimizePronunciation(text: string): Promise<string> {
     const d = parseInt(day); const m = MONTHS[month]
     if (d >= 1 && d <= 31 && m) return `[${numberToWords(d)} de ${m}]`
     return match
+  })
+
+  // ---- 3e-0. NÚMEROS NEGATIVOS ----
+  result = result.replace(/(-)\s*(\d[\d.,]*\d|\d)(?=\s|$|[,;.!?°)])/g, (match, minus, numStr) => {
+    const clean = numStr.replace(/\./g, '').replace(',', '.')
+    const n = parseFloat(clean)
+    if (isNaN(n)) return match
+    if (n === Math.floor(n) && n <= 999999999) {
+      return `[menos ${numberToWords(n)}]`
+    }
+    return `[menos ${numStr}]`
+  })
+
+  // ---- 3e-0a. PLACARES ESPORTIVOS (N x N) ----
+  // Ex: "2x1", "3 X 0", "2 a 1" — lê como "dois a um"
+  result = result.replace(/\b(\d+)\s*[xX]\s*(\d+)\b/g, (match, n1, n2) => {
+    return `[${numberToWords(parseInt(n1))}] a [${numberToWords(parseInt(n2))}]`
+  })
+
+  // ---- 3e-0b. TEMPERATURA SEM SÍMBOLO ° ----
+  // Ex: "72 graus fahrenheit", "0 graus celsius", "38 graus"
+  result = result.replace(/\b(\d+)\s*graus?\s*(celsius|fahrenheit|kelvin|centígrados)?/gi, (match, numStr, scale) => {
+    const n = parseInt(numStr)
+    if (isNaN(n)) return match
+    const scaleMap: Record<string, string> = {
+      'celsius': 'graus celsius', 'fahrenheit': 'graus fahrenheit',
+      'kelvin': 'graus kelvin', 'centígrados': 'graus centígrados',
+    }
+    const numWords = (n >= 0 && n <= 999999999) ? numberToWords(n) : numStr
+    const scaleText = scale ? scaleMap[scale.toLowerCase()] || `graus ${scale.toLowerCase()}` : 'graus'
+    return `[${numWords}] ${scaleText}`
+  })
+
+  // ---- 3e-0c. NÚMEROS ROMANOS ----
+  // Ex: "Capítulo IV", "Papa Francisco I", "Seção II", "Rei Henrique VIII"
+  // Apenas romanos I-XIX e múltiplos de X até XX (mais comuns em PT-BR)
+  const ROMAN_TO_ORDINAL: Record<string, string> = {
+    'I': 'primeiro', 'II': 'segundo', 'III': 'terceiro', 'IV': 'quarto',
+    'V': 'quinto', 'VI': 'sexto', 'VII': 'sétimo', 'VIII': 'oitavo',
+    'IX': 'nono', 'X': 'décimo', 'XI': 'décimo primeiro', 'XII': 'décimo segundo',
+    'XIII': 'décimo terceiro', 'XIV': 'décimo quarto', 'XV': 'décimo quinto',
+    'XVI': 'décimo sexto', 'XVII': 'décimo sétimo', 'XVIII': 'décimo oitavo',
+    'XIX': 'décimo nono', 'XX': 'vigésimo',
+  }
+  // Detectar romanos após palavras-título
+  const ROMAN_TITLES = /(?:capítulo|capitulo|seção|seccao|parte|tomo|volume|vol|livro|papa|rei|rainha|imperador|imperatriz|presidente|diretor|santo|santa|doutor|professor|congresso|artigo|art|lei|emenda|parágrafo|inciso|alínea)\s+(I{1,3}|IV|V|VI{0,3}|IX|X{1,3}|XIV|XV|XVI{0,3}|XIX|XX)/gi
+  result = result.replace(ROMAN_TITLES, (match, title, roman) => {
+    const ordinal = ROMAN_TO_ORDINAL[roman.toUpperCase()]
+    if (ordinal) return `${title} [${ordinal}]`
+    return match
+  })
+
+  // ---- 3e-0d. CEP (XXXXX-XXX) — soletrar dígito por dígito ----
+  result = result.replace(/\b(\d{5})-(\d{3})\b/g, (match, p1, p2) => {
+    const spell = (p1 + p2).split('').map(d => numberToWords(parseInt(d))).join(' ')
+    return `[${spell}]`
+  })
+
+  // ---- 3e-0e. PLACAS DE VEÍCULOS ----
+  // Formato antigo: ABC-1234, Mercosul: ABC1D23
+  result = result.replace(/\b([A-Z]{3})-(\d{4})\b/g, (match, letters, digits) => {
+    const spellLetters = letters.split('').map(l => l === 'A' ? 'á' : l === 'E' ? 'é' : l === 'I' ? 'í' : l === 'O' ? 'ó' : l === 'U' ? 'ú' : l).join(' ')
+    const spellDigits = digits.split('').map(d => numberToWords(parseInt(d))).join(' ')
+    return `[${spellLetters}] [${spellDigits}]`
+  })
+  result = result.replace(/\b([A-Z]{3})(\d)([A-Z])(\d{2})\b/g, (match, l1, d1, l2, d2) => {
+    const spellL1 = l1.split('').map(l => l === 'A' ? 'á' : l === 'E' ? 'é' : l === 'I' ? 'í' : l === 'O' ? 'ó' : l === 'U' ? 'ú' : l).join(' ')
+    return `[${spellL1}] [${numberToWords(parseInt(d1))}] [${l2.toLowerCase() === 'a' ? 'á' : l2.toLowerCase() === 'e' ? 'é' : l2.toLowerCase() === 'i' ? 'í' : l2.toLowerCase() === 'o' ? 'ó' : l2.toLowerCase()}] [${d2.split('').map(d => numberToWords(parseInt(d))).join(' ')}]`
+  })
+
+  // ---- 3e-0f. APROXIMAÇÃO (~N) ----
+  result = result.replace(/~\s*(\d[\d.,]*\d|\d)/g, (match, numStr) => {
+    const clean = numStr.replace(/\./g, '').replace(',', '.')
+    const n = parseFloat(clean)
+    if (isNaN(n)) return match
+    if (n === Math.floor(n) && n <= 999999999) {
+      return `[aproximadamente ${numberToWords(n)}]`
+    }
+    return `[aproximadamente ${numStr}]`
   })
 
   // ---- 3e. HORÁRIOS ----

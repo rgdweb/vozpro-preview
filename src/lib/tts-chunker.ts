@@ -142,10 +142,15 @@ function findBreakPoints(text: string): BreakPoint[] {
       const prevChar = text[i - 1] || ''
       
       // Ponto seguido de letra = abreviação (não quebrar)
-      // Ex: "Dr. Silva", "Av. Paulista"
-      if (char === '.' && /[a-zA-ZÀ-ÿ]/.test(nextChar) && /[a-zA-ZÀ-ÿ]/.test(prevChar)) {
-        i++
-        continue
+      // Ex: "Dr. Silva", "Av. Paulista", "Sr. João"
+      // IMPORTANTE: olhar além do espaço — "Dr." + " " + "Silva" = abreviação
+      if (char === '.' && /[a-zA-ZÀ-ÿ]/.test(prevChar)) {
+        // Verificar se o próximo caractere (ignorando espaços) é letra
+        const restAfterDot = text.substring(i + 1).trimStart()
+        if (restAfterDot.length > 0 && /[a-zA-ZÀ-ÿ]/.test(restAfterDot[0])) {
+          i++
+          continue
+        }
       }
       
       // Ponto como parte de número decimal (3.14) — não quebrar
@@ -165,8 +170,23 @@ function findBreakPoints(text: string): BreakPoint[] {
       continue
     }
     
-    // Ponto-e-vírgula e dois pontos → quebra de pausa média (PT-BR)
-    if (char === ';' || char === ':') {
+    // Ponto-e-vírgula → quebra de pausa média (PT-BR)
+    if (char === ';') {
+      breaks.push({ index: i, punctuation: char, length: 1 })
+      i++
+      continue
+    }
+    
+    // Dois pontos — quebra de pausa média, EXCETO entre dígitos (horário/placar)
+    // Ex: "14:30" (hora) ou "2:1" (placar) — não quebrar
+    if (char === ':') {
+      const prevChar = text[i - 1] || ''
+      const nextChar = text[i + 1] || ''
+      if (/\d/.test(prevChar) && /\d/.test(nextChar)) {
+        // : entre dígitos = horário ou placar, não quebrar
+        i++
+        continue
+      }
       breaks.push({ index: i, punctuation: char, length: 1 })
       i++
       continue

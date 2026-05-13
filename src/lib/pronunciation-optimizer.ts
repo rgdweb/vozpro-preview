@@ -1899,14 +1899,23 @@ export async function optimizePronunciation(text: string): Promise<string> {
   // ============================================================
 
   // ---- 3a. VALORES MONETÁRIOS ----
-  result = result.replace(/R\$\s*([\d.,]+)/g, (match, val) => {
-    return `[${currencyToWords(val)}]`
+  result = result.replace(/R\$\s*([\d.,]+)\s*(mil|milh[oõ]es|bilh[oõ]es|trilh[oõ]es)?/gi, (match, val, mult) => {
+    const words = currencyToWords(val)
+    if (mult) {
+      const multClean = mult.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      return `[${words} ${mult}]`
+    }
+    return `[${words}]`
   })
-  result = result.replace(/(?:US\$|\$)\s*([\d.,]+)/g, (match, val) => {
+  result = result.replace(/(?:US\$|\$)\s*([\d.,]+)\s*(mil|milh[oõ]es|bilh[oõ]es|trilh[oõ]es)?/gi, (match, val, mult) => {
     const clean = val.replace(/\./g, '').replace(',', '.')
     const n = parseFloat(clean)
     if (isNaN(n)) return match
-    return `[${n === 1 ? 'um dólar' : numberToWords(Math.floor(n)) + ' dólares'}]`
+    let dollarWord = n === 1 ? 'um dólar' : numberToWords(Math.floor(n)) + ' dólares'
+    if (mult) {
+      dollarWord += ' ' + mult
+    }
+    return `[${dollarWord}]`
   })
 
   // ---- 3b. PORCENTAGENS ----
@@ -2154,11 +2163,19 @@ export async function optimizePronunciation(text: string): Promise<string> {
   // ============================================================
 
   // ---- 4. NÚMEROS POR EXTENSO ----
+  // 4a. Anos (com ou sem a palavra "ano")
   result = result.replace(/(?:ano|Ano|ANO)\s+(\d{4})/g, (match, year) => {
     const y = parseInt(year)
     if (y >= 1000 && y <= 2100) return match.replace(year, `[${numberToWords(y)}]`)
     return match
   })
+  // Anos soltos: 4 dígitos que parecem ano (1900-2199)
+  result = result.replace(/\b((?:19|20)\d{2})\b/g, (match, year) => {
+    const y = parseInt(year)
+    if (y >= 1900 && y <= 2199) return `[${numberToWords(y)}]`
+    return match
+  })
+  // Números com separador de milhar (1.200, 100.000, etc)
   result = result.replace(/\b(\d{1,3}(?:\.\d{3})+)\b/g, (match) => {
     const n = parseInt(match.replace(/\./g, ''))
     if (n <= 999999999) return `[${numberToWords(n)}]`

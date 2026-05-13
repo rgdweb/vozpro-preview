@@ -306,6 +306,7 @@ function mergeShortChunks(chunks: TextChunk[]): TextChunk[] {
 /**
  * Quebra chunks com mais de MAX_CHUNK_WORDS palavras.
  * Procura conjunções como ponto natural de quebra.
+ * IMPORTANTE: NÃO quebra dentro de colchetes [pronúncia forçada].
  */
 function splitLongChunks(chunks: TextChunk[]): TextChunk[] {
   const result: TextChunk[] = []
@@ -323,7 +324,7 @@ function splitLongChunks(chunks: TextChunk[]): TextChunk[] {
       'alem', 'tambem', 'quando', 'onde', 'como', 'para', 'com', 'mais', 'nao',
       'se', 'ou', 'essa', 'esse', 'esta', 'este', 'que', 'num', 'uma',
       // Adicionais para PT-BR
-      'embora', 'entretanto', 'todavia', 'conforme',
+      'embola', 'entretanto', 'todavia', 'conforme',
       'inclusive', 'principalmente', 'geralmente',
       'sobretudo', 'atualmente',
       'durante', 'atraves', 'mediante', 'segundo',
@@ -332,22 +333,33 @@ function splitLongChunks(chunks: TextChunk[]): TextChunk[] {
 
     const subChunks: string[][] = [[]]
     let wordCount = 0
+    let bracketDepth = 0  // rastrear profundidade de colchetes
 
     for (let w = 0; w < words.length; w++) {
-      const cleanWord = words[w].toLowerCase().replace(/[,;:.!?]/g, '')
-      subChunks[subChunks.length - 1].push(words[w])
-      wordCount++
+      const word = words[w]
 
-      // Quebra em conjunção dentro do limite
-      if (wordCount >= Math.floor(MAX_CHUNK_WORDS / 2) && breakWords.includes(cleanWord)) {
-        subChunks.push([])
-        wordCount = 0
+      // Rastrear colchetes — NÃO quebrar dentro de [pronúncia forçada]
+      for (const ch of word) {
+        if (ch === '[') bracketDepth++
+        if (ch === ']') bracketDepth = Math.max(0, bracketDepth - 1)
       }
 
-      // Hard limit
-      if (wordCount >= MAX_CHUNK_WORDS) {
-        subChunks.push([])
-        wordCount = 0
+      subChunks[subChunks.length - 1].push(word)
+      wordCount++
+
+      // Só quebrar se NÃO estamos dentro de colchetes
+      if (bracketDepth === 0) {
+        const cleanWord = word.toLowerCase().replace(/[,;:.!?]/g, '')
+        // Quebra em conjunção dentro do limite
+        if (wordCount >= Math.floor(MAX_CHUNK_WORDS / 2) && breakWords.includes(cleanWord)) {
+          subChunks.push([])
+          wordCount = 0
+        }
+        // Hard limit
+        if (wordCount >= MAX_CHUNK_WORDS) {
+          subChunks.push([])
+          wordCount = 0
+        }
       }
     }
 

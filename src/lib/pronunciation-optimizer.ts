@@ -1980,7 +1980,7 @@ export async function optimizePronunciation(text: string): Promise<string> {
     'w': 'watts', 'kw': 'quilowatts', 'mw': 'megawatts',
     'kwh': 'quilowatts-hora', 'kWh': 'quilowatts-hora',
     'hpa': 'hectopascais', 'pa': 'pascais', 'atm': 'atmosferas',
-    '°c': 'graus celsius', '°f': 'graus fahrenheit', '°k': 'graus kelvin',
+    '°c': 'graus', '°f': 'graus fahrenheit', '°k': 'graus kelvin',
     'kb': 'quilobytes', 'mb': 'megabytes', 'gb': 'gigabytes', 'tb': 'terabytes',
     'kbps': 'quilobits por segundo', 'mbps': 'megabits por segundo',
     'rpm': 'rotações por minuto', 'hz': 'hertz', 'khz': 'quilohertz', 'mhz': 'megahertz', 'ghz': 'gigahertz',
@@ -2157,8 +2157,8 @@ export async function optimizePronunciation(text: string): Promise<string> {
     const n = parseInt(numStr)
     if (isNaN(n)) return match
     const scaleMap: Record<string, string> = {
-      'celsius': 'graus celsius', 'fahrenheit': 'graus fahrenheit',
-      'kelvin': 'graus kelvin', 'centígrados': 'graus centígrados',
+      'celsius': 'graus', 'fahrenheit': 'graus fahrenheit',
+      'kelvin': 'graus kelvin', 'centígrados': 'graus',
     }
     const numWords = (n >= 0 && n <= 999999999) ? numberToWords(n) : numStr
     const scaleText = scale ? scaleMap[scale.toLowerCase()] || `graus ${scale.toLowerCase()}` : 'graus'

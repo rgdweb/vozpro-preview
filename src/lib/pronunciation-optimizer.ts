@@ -2549,6 +2549,11 @@ export async function optimizePronunciation(text: string): Promise<string> {
   // Ex: info@xtech.com.br → [ínfo], arroba, [équis téqui], ponto com, ponto [bê érre]
   // Isso ajuda o ouvinte a entender e anotar o email
   result = result.replace(/(\S+)@([^\s.,;:!?\)]+(?:\.[^\s.,;:!?\)]+)*)/g, (match, user, domain) => {
+    // Verificar se já tem pontuação antes do email (não duplicar vírgula)
+    const matchIndex = result.indexOf(match)
+    const charBefore = matchIndex > 0 ? result[matchIndex - 1] : ''
+    const needsComma = charBefore && !/[,:;.!?]/.test(charBefore) ? ', ' : ''
+
     // Verificar se o user precisa de fonética (ex: info → ínfo)
     const userLower = user.toLowerCase()
     const userPhonetic = DOMAIN_PHONETICS[userLower]
@@ -2558,7 +2563,7 @@ export async function optimizePronunciation(text: string): Promise<string> {
     const domainLower = domain.toLowerCase()
     const phonetic = DOMAIN_PHONETICS[domainLower]
     if (phonetic) {
-      return `${userPart}, arroba, [${phonetic}]`
+      return `${needsComma}${userPart}, arroba, [${phonetic}]`
     }
     // Tentar pronunciar cada parte do domínio separadamente
     const parts = domainLower.split('.')
@@ -2567,7 +2572,7 @@ export async function optimizePronunciation(text: string): Promise<string> {
       if (ph !== part) return `[${ph}]`
       return part
     }).join(', ponto ')
-    return `${userPart}, arroba, ${partsPhonetic}`
+    return `${needsComma}${userPart}, arroba, ${partsPhonetic}`
   })
 
   // ---- 12b. MARCAS COM X (não dentro de email/URL) ----

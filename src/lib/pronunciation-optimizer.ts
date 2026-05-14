@@ -2165,6 +2165,19 @@ export async function optimizePronunciation(text: string): Promise<string> {
     return `[${numWords}] ${scaleText}`
   })
 
+  // ---- 3e-0b. GRAUS COM SÍMBOLO ° SOLTO (12°, 28°, 35°C) ----
+  // Pessoas escrevem "mínimo de 12° e máximo de 28°" sem o "C"
+  // Detecta: número + ° (com ou sem C/F/K depois)
+  result = result.replace(/(\d+)\s*°\s*([CFKcfk])?/g, (match, numStr, scale) => {
+    const n = parseInt(numStr)
+    if (isNaN(n)) return match
+    const numWords = (n >= 0 && n <= 999999999) ? numberToWords(n) : numStr
+    if (scale && /f/i.test(scale)) return `[${numWords}] graus fahrenheit`
+    if (scale && /k/i.test(scale)) return `[${numWords}] graus kelvin`
+    // Sem escala ou C = celsius → só "graus" (todo mundo entende)
+    return `[${numWords}] graus`
+  })
+
   // ---- 3e-0c. NÚMEROS ROMANOS ----
   // Ex: "Capítulo IV", "Papa Francisco I", "Seção II", "Rei Henrique VIII"
   // Apenas romanos I-XIX e múltiplos de X até XX (mais comuns em PT-BR)

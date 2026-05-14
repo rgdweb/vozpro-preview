@@ -455,6 +455,35 @@ function writeString(view: DataView, offset: number, str: string) {
 }
 
 /**
+ * Normaliza volume RMS de um AudioBuffer para um target dB.
+ * Evita saltos de volume entre chunks que causam sensação de "corte".
+ */
+function rmsNormalize(audioBuffer: AudioBuffer, targetDb = -16): AudioBuffer {
+  const data = audioBuffer.getChannelData(0)
+  const targetLinear = Math.pow(10, targetDb / 20)
+
+  // Calcular RMS atual
+  let sumSquares = 0
+  for (let i = 0; i < data.length; i++) sumSquares += data[i] * data[i]
+  const rms = Math.sqrt(sumSquares / data.length)
+
+  if (rms < 0.001) return audioBuffer // silêncio, não normalizar
+
+  const gain = targetLinear / rms
+  // Limitar ganho (evitar amplificar ruído demais)
+  const safeGain = Math.min(gain, 4.0)
+  // Aplicar ganho suave (não clipar)
+  const ctx = new AudioContext({ sampleRate: audioBuffer.sampleRate })
+  const normalized = ctx.createBuffer(1, data.length, audioBuffer.sampleRate)
+  const out = normalized.getChannelData(0)
+  for (let i = 0; i < data.length; i++) {
+    out[i] = Math.max(-1, Math.min(1, data[i] * safeGain))
+  }
+  ctx.close()
+  return normalized
+}
+
+/**
  * Converte AudioBuffer multi-channel para mono (média dos canais).
  */
 function toMono(audioBuffer: AudioBuffer): AudioBuffer {
@@ -990,17 +1019,18 @@ export default function VozProClient() {
               console.log(`[VozPro] Concatenando ${audioResults.length} áudios (${failedCount} falhas)...`)
               const audioCtx = new AudioContext({ sampleRate: 44100 })
 
-              // Passo 1: Decodificar todos os buffers + trim de silêncio client-side
+              // Passo 1: Decodificar todos os buffers + trim + normalize + fade
               // O postprocess do VozPro (po) foi desativado para não cortar sílabas.
-              // Agora fazemos trim controlado no cliente com buffer de segurança (60ms).
+              // Pipeline client-side: trim → normalize → fade-in/fade-out
               const decodedChunks: { audioBuffer: AudioBuffer; pauseMs: number }[] = []
               for (const { buffer, pauseMs } of audioResults) {
                 try {
                   const raw = await audioCtx.decodeAudioData(buffer.slice(0))
                   const mono = raw.numberOfChannels > 1 ? toMono(raw) : raw
-                  const audioBuffer = trimSilence(mono)
-                  decodedChunks.push({ audioBuffer, pauseMs })
-                  console.log(`[VozPro Chunk] Decodificado: ${(buffer.byteLength / 1024).toFixed(0)}KB → ${(audioBuffer.duration * 1000).toFixed(0)}ms (após trim)`)
+                  const trimmed = trimSilence(mono)
+                  const normalized = rmsNormalize(trimmed, -16)
+                  decodedChunks.push({ audioBuffer: normalized, pauseMs })
+                  console.log(`[VozPro Chunk] Decodificado: ${(buffer.byteLength / 1024).toFixed(0)}KB → ${(normalized.duration * 1000).toFixed(0)}ms (após trim+normalize)`)
                 } catch {
                   console.warn('[VozPro Chunk] Falha ao decodificar áudio')
                 }
@@ -1009,16 +1039,19 @@ export default function VozProClient() {
               if (decodedChunks.length === 0) {
                 console.warn('[VozPro] Nenhum chunk decodificado')
               } else {
-                // Passo 2: Concatenação simples com silêncio entre chunks
-                // O TTS agora recebe pontuação → produz finais naturais → sem corte de sílabas
+                // Passo 2: Concatenação com crossfade suave (15ms) para eliminar cliques
+                // O TTS gera áudio com fade natural no final — sem crossfade, a junção causa 'click'
                 const SAMPLE_RATE = 44100
+                const CROSSFADE_MS = 15 // crossfade ultra-curto (elimina click sem cortar sílaba)
+                const crossfadeSamples = Math.floor(SAMPLE_RATE * (CROSSFADE_MS / 1000))
 
-                // Calcular duração total
+                // Calcular duração total (subtrair crossfade overlaps)
                 let totalSamples = 0
                 for (let i = 0; i < decodedChunks.length; i++) {
                   totalSamples += decodedChunks[i].audioBuffer.length
                   if (i < decodedChunks.length - 1) {
                     totalSamples += Math.floor((decodedChunks[i].pauseMs / 1000) * SAMPLE_RATE)
+                    totalSamples -= crossfadeSamples // crossfade reduz silêncio
                   }
                 }
                 // Margem de segurança
@@ -1033,17 +1066,55 @@ export default function VozProClient() {
                   const { audioBuffer, pauseMs } = decodedChunks[i]
                   const data = audioBuffer.getChannelData(0)
 
-                  // Copiar dados do chunk
-                  for (let s = 0; s < data.length && writePos < outputData.length; s++) {
-                    outputData[writePos++] = data[s]
-                  }
-
-                  // Adicionar silêncio entre chunks (exceto após o último)
-                  if (i < decodedChunks.length - 1) {
-                    const pauseSamples = Math.floor((pauseMs / 1000) * SAMPLE_RATE)
-                    // Preencher com silêncio (zeros)
-                    // writePos já está nos zeros (não precisa escrever explicitamente)
+                  if (i === 0) {
+                    // Primeiro chunk: copiar tudo + fade-out suave
+                    for (let s = 0; s < data.length && writePos < outputData.length; s++) {
+                      outputData[writePos++] = data[s]
+                    }
+                    // Fade-out nos últimos 40ms para transição suave
+                    if (decodedChunks.length > 1) {
+                      const fadeOutSamples = Math.min(Math.floor(SAMPLE_RATE * 0.04), data.length)
+                      for (let f = 0; f < fadeOutSamples; f++) {
+                        const idx = writePos - fadeOutSamples + f
+                        if (idx >= 0 && idx < outputData.length) {
+                          outputData[idx] *= (1 - f / fadeOutSamples)
+                        }
+                      }
+                    }
+                  } else {
+                    // Chunks subsequentes: silêncio + crossfade + copiar
+                    const pauseSamples = Math.max(0,
+                      Math.floor((pauseMs / 1000) * SAMPLE_RATE) - crossfadeSamples)
                     writePos += pauseSamples
+
+                    // Crossfade: mixar fim do chunk anterior com início deste
+                    const prevData = decodedChunks[i - 1].audioBuffer.getChannelData(0)
+                    const fadeStart = Math.max(0, writePos - crossfadeSamples)
+                    for (let f = 0; f < crossfadeSamples; f++) {
+                      const t = f / crossfadeSamples
+                      const outIdx = fadeStart + f
+                      const prevIdx = prevData.length - crossfadeSamples + f
+                      if (outIdx < outputData.length && prevIdx < prevData.length) {
+                        outputData[outIdx] = prevData[prevIdx] * (1 - t) + data[f] * t
+                      }
+                    }
+
+                    // Copiar restante do chunk
+                    writePos = fadeStart + crossfadeSamples
+                    for (let s = crossfadeSamples; s < data.length && writePos < outputData.length; s++) {
+                      outputData[writePos++] = data[s]
+                    }
+
+                    // Fade-out para chunks que não são o último
+                    if (i < decodedChunks.length - 1) {
+                      const fadeOutSamples = Math.min(Math.floor(SAMPLE_RATE * 0.04), data.length)
+                      for (let f = 0; f < fadeOutSamples; f++) {
+                        const idx = writePos - fadeOutSamples + f
+                        if (idx >= 0 && idx < outputData.length) {
+                          outputData[idx] *= (1 - f / fadeOutSamples)
+                        }
+                      }
+                    }
                   }
                 }
 

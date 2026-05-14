@@ -910,7 +910,7 @@ const PRONUNCIATION_DICTIONARY: Record<string, string> = {
 
   'DRE': 'dê erre e',
   'EBITDA': 'ebitida',
-  'ROI': 'erre ó i',
+  'ROI': '[érre ô í]',
   'ROE': 'erre ó e',
   'ROA': 'erre ó a',
   'EBIT': 'e bê i tê',

@@ -2428,26 +2428,39 @@ export async function optimizePronunciation(text: string): Promise<string> {
   }
 
   // www.domínio.com — não captura pontuação final
+  // Mesma estratégia: colchetes curtos só onde precisa de fonética
   result = result.replace(/www\.([^\s.,;:!?\)]+(?:\.[^\s.,;:!?\)]+)*)/gi, (match, domain) => {
     const parts = domain.split('.')
-    const spelled = parts.map(part => pronunciarParteDominio(part)).join(' ponto ')
-    return `[dábliu dábliu dábliu ponto ${spelled}]`
+    const spelled = parts.map(part => {
+      const ph = pronunciarParteDominio(part)
+      if (ph !== part) return `[${ph}]`
+      return part
+    }).join(' ponto ')
+    return `[dábliu dábliu dábliu] ponto ${spelled}`
   })
 
   // Emails: user@domínio.com — não captura pontuação final
+  // ESTRATÉGIA: colchetes SÓ nas partes que precisam de fonética (diferente do original).
+  // Isso evita um colchete enorme que confunde o VozPro/GPT-SoVITS.
+  // Antes: [info arroba xisték ponto com ponto bê érre] (um colchete gigante)
+  // Depois: info arroba [xisték] ponto com ponto [bê érre] (colchetes curtos + fala natural)
   result = result.replace(/(\S+)@([^\s.,;:!?\)]+(?:\.[^\s.,;:!?\)]+)*)/g, (match, user, domain) => {
     // Verificar se o domínio inteiro tem pronúncia fonética
     const domainLower = domain.toLowerCase()
     const phonetic = DOMAIN_PHONETICS[domainLower]
     if (phonetic) {
-      console.log(`[PronDict] Email domínio completo: ${domainLower} → ${phonetic}`)
-      return `[${user} arroba ${phonetic}]`
+      return `${user} arroba [${phonetic}]`
     }
     // Tentar pronunciar cada parte do domínio separadamente
-    // Se a parte não está no dicionário → soletra letra por letra em PT-BR
     const parts = domainLower.split('.')
-    const partsPhonetic = parts.map(part => pronunciarParteDominio(part)).join(' ponto ')
-    return `[${user} arroba ${partsPhonetic}]`
+    const partsPhonetic = parts.map(part => {
+      const ph = pronunciarParteDominio(part)
+      // Só coloca colchetes se a pronúncia for DIFERENTE do original
+      // (precisa de correção fonética ou soletração)
+      if (ph !== part) return `[${ph}]`
+      return part // palavra pronunciável → fala natural, sem colchetes
+    }).join(' ponto ')
+    return `${user} arroba ${partsPhonetic}`
   })
 
   // ---- 14. G2P FALLBACK — espeak-ng para palavras desconhecidas ----

@@ -1,12 +1,21 @@
 <?php
-// generate-omnivoice.php - Geracao de voz TTS via VozPro (PHP direto do browser)
+// generate-omnivoice.php - Geracao de voz TTS via OmniVoice (PHP direto do browser)
 // Suporta 3 modos: clone (_clone_fn), design (_design_fn), auto (_design_fn com Auto)
 // Usa o mesmo padrao HMAC do generate.php
 // Bypassa o Vercel completamente - zero gasto de serverless
+//
+// CORRECOES (15/05/2026):
+// - Adicionada cleanText() para remover caracteres de controle invisiveis
+// - memory_limit 256M -> 512M (base64 de audio longo precisa mais memoria)
+// - SSE timeout 300s -> 600s (textos longos nao estouram)
+// - po (postprocess) true -> false (evita cortes no final do audio)
+// - CURLOPT_ENCODING => '' adicionado no fetch da tunnel URL
+// - Timeout submit job 60s -> 90s
+// - Timeout download audio 120s -> 180s
 
 set_time_limit(0);
 ini_set('max_input_time', 0);
-ini_set('memory_limit', '256M');
+ini_set('memory_limit', '512M');
 
 require_once __DIR__ . '/config.php';
 
@@ -102,9 +111,21 @@ function returnError($msg, $code = 500) {
 // ===================== STRIP SSML (defesa) =====================
 // Se o frontend enviar SSML, remove tudo. TTS nao entende tags.
 function stripSSML($text) {
+    if (!is_string($text)) return '';
     if (!preg_match('/<[a-z][^>]*>/i', $text)) return $text;
     $r = preg_replace('/<[^>]+>/', '', $text);
+    $r = html_entity_decode($r, ENT_QUOTES | ENT_XML1, 'UTF-8');
     return trim(preg_replace('/\s+/', ' ', $r));
+}
+
+// ===================== LIMPAR TEXTO (defesa extra) =====================
+// Remove caracteres de controle invisiveis que podem causar garbling
+function cleanText($text) {
+    if (!is_string($text)) return '';
+    $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text);
+    $text = str_replace(["\r\n", "\r"], "\n", $text);
+    $text = preg_replace('/\n{3,}/', "\n\n", $text);
+    return trim($text);
 }
 
 // ===================== LER INPUT JSON =====================
@@ -131,10 +152,11 @@ $pitch = $input['pitch'] ?? 'Auto';
 $style = $input['style'] ?? 'Auto';
 $accent = $input['accent'] ?? 'Auto';
 
-// ===================== DEFESA DUPLA: STRIP SSML =====================
+// ===================== DEFESA: STRIP SSML + CLEAN TEXTO =====================
 // Se o frontend enviou tags SSML sem processar, remove aqui antes de enviar ao TTS.
 // O TTS NAO entende SSML — tags seriam lidas como texto literal.
 $texto = stripSSML($texto);
+$texto = cleanText($texto);
 
 debugLog('Input', 'info', "modo: $mode | texto: " . mb_substr($texto, 0, 50) . " | lang: $idioma | steps: $numStep");
 
@@ -150,31 +172,39 @@ if ($mode === 'clone' && empty($refAudioUrl)) {
 debugLog('Tunnel', 'info', 'Descobrindo URL do tunnel...');
 
 $tunnelUrl = null;
-$tunnelCh = curl_init(BASE_URL . '/get_tunnel.php');
-curl_setopt_array($tunnelCh, [
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_TIMEOUT => 15,
-    CURLOPT_CONNECTTIMEOUT => 10,
-    CURLOPT_SSL_VERIFYPEER => false,
-]);
-$tunnelResp = curl_exec($tunnelCh);
-$tunnelCode = curl_getinfo($tunnelCh, CURLINFO_HTTP_CODE);
-curl_close($tunnelCh);
+// Primeiro tenta a constante TUNNEL_URL do config (atualizada pelo start_tunnel.ps1)
+if (defined('TUNNEL_URL') && !empty(TUNNEL_URL)) {
+    $tunnelUrl = TUNNEL_URL;
+    debugLog('Tunnel', 'info', 'Usando TUNNEL_URL do config');
+} else {
+    // Fallback: tenta via get_tunnel.php
+    $tunnelCh = curl_init(BASE_URL . '/get_tunnel.php');
+    curl_setopt_array($tunnelCh, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 15,
+        CURLOPT_CONNECTTIMEOUT => 10,
+        CURLOPT_ENCODING => '',
+        CURLOPT_SSL_VERIFYPEER => false,
+    ]);
+    $tunnelResp = curl_exec($tunnelCh);
+    $tunnelCode = curl_getinfo($tunnelCh, CURLINFO_HTTP_CODE);
+    curl_close($tunnelCh);
 
-if ($tunnelCode == 200 && $tunnelResp) {
-    $tunnelData = json_decode($tunnelResp, true);
-    if (($tunnelData['status'] ?? '') === 'online' && !empty($tunnelData['tunnelUrl'])) {
-        $tunnelUrl = $tunnelData['tunnelUrl'];
+    if ($tunnelCode == 200 && $tunnelResp) {
+        $tunnelData = json_decode($tunnelResp, true);
+        if (($tunnelData['status'] ?? '') === 'online' && !empty($tunnelData['tunnelUrl'])) {
+            $tunnelUrl = $tunnelData['tunnelUrl'];
+        }
     }
 }
 
 if (!$tunnelUrl) {
-    // Fallback para HF_SPACE_URL do config
+    // Fallback final para HF_SPACE_URL
     $tunnelUrl = defined('HF_SPACE_URL') ? HF_SPACE_URL : '';
 }
 
 if (empty($tunnelUrl)) {
-    returnError('Servidor VozPro offline - tunnel nao disponivel', 503);
+    returnError('Servidor OmniVoice offline - tunnel nao disponivel', 503);
 }
 
 debugLog('Tunnel', 'ok', mb_substr($tunnelUrl, 0, 60) . '...');
@@ -246,7 +276,7 @@ function submitJob($baseUrl, $endpoint, $gradioData) {
         CURLOPT_POSTFIELDS => json_encode(['data' => $gradioData]),
         CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 60,
+        CURLOPT_TIMEOUT => 90,
         CURLOPT_CONNECTTIMEOUT => 20,
         CURLOPT_ENCODING => '',
         CURLOPT_SSL_VERIFYPEER => false,
@@ -272,8 +302,8 @@ function submitJob($baseUrl, $endpoint, $gradioData) {
     return $eventId;
 }
 
-function streamResult($baseUrl, $endpoint, $eventId, $timeoutSec = 300) {
-    debugLog('SSE Stream', 'info', "Abrindo conexao para $eventId...");
+function streamResult($baseUrl, $endpoint, $eventId, $timeoutSec = 600) {
+    debugLog('SSE Stream', 'info', "Abrindo conexao para $eventId (timeout: {$timeoutSec}s)...");
 
     $audioUrl = null;
     $error = null;
@@ -423,7 +453,7 @@ if ($mode === 'clone') {
         (float)$speed,                     // sp (speed)
         null,                              // du (duration, null = auto)
         true,                              // pp (preprocess)
-        true                               // po (postprocess)
+        false                              // po (postprocess) - false evita cortes no final do audio
     ];
 
 } else {
@@ -448,7 +478,7 @@ if ($mode === 'clone') {
         (float)$speed,                     // sp (speed)
         null,                              // du (duration)
         true,                              // pp (preprocess)
-        true,                              // po (postprocess)
+        false,                             // po (postprocess) - false evita cortes no final do audio
         $gender,                           // gender
         $age,                              // age
         $pitch,                            // pitch
@@ -472,7 +502,7 @@ for ($attempt = 0; $attempt < $maxRetries && !$audioUrl; $attempt++) {
         debugLog('Retry', 'warn', "Tentativa " . ($attempt + 1) . "/$maxRetries - aguardando ${waitSec}s...");
         sleep($waitSec);
     } else {
-        debugLog('Geracao', 'info', "Iniciando VozPro via PHP DIRECT ($endpoint)...");
+        debugLog('Geracao', 'info', "Iniciando OmniVoice via PHP DIRECT ($endpoint)...");
     }
 
     // Upload audio de referencia (clone mode only)
@@ -500,12 +530,12 @@ for ($attempt = 0; $attempt < $maxRetries && !$audioUrl; $attempt++) {
     }
 
     if (!$eventId) {
-        $lastError = 'Falha ao submeter job ao VozPro';
+        $lastError = 'Falha ao submeter job ao OmniVoice';
         continue;
     }
 
-    // Stream resultado
-    $result = streamResult($tunnelUrl, $endpoint, $eventId, 300);
+    // Stream resultado (timeout 600s para textos longos)
+    $result = streamResult($tunnelUrl, $endpoint, $eventId, 600);
 
     if ($result['audioUrl']) {
         $audioUrl = $result['audioUrl'];
@@ -536,13 +566,13 @@ for ($attempt = 0; $attempt < $maxRetries && !$audioUrl; $attempt++) {
 if ($tempRefFile && file_exists($tempRefFile)) unlink($tempRefFile);
 
 if (!$audioUrl) {
-    $userMsg = 'VozPro falhou: ' . $lastError;
+    $userMsg = 'OmniVoice falhou: ' . $lastError;
     if ($lastError === 'null') {
-        $userMsg = 'VozPro instavel. Tente novamente em instantes.';
+        $userMsg = 'OmniVoice instavel. Tente novamente em instantes.';
     } elseif ($lastError === '404') {
-        $userMsg = 'VozPro reiniciou. Tente novamente.';
+        $userMsg = 'OmniVoice reiniciou. Tente novamente.';
     } elseif ($lastError === 'timeout') {
-        $userMsg = 'VozPro demorou demais. Tente um texto mais curto.';
+        $userMsg = 'OmniVoice demorou demais. Tente um texto mais curto.';
     }
     returnError($userMsg, 504);
 }
@@ -556,7 +586,7 @@ $fp = fopen($tempAudioFile, 'w');
 curl_setopt_array($ch, [
     CURLOPT_FILE => $fp,
     CURLOPT_FOLLOWLOCATION => true,
-    CURLOPT_TIMEOUT => 120,
+    CURLOPT_TIMEOUT => 180,
     CURLOPT_ENCODING => '',
     CURLOPT_SSL_VERIFYPEER => false,
 ]);
@@ -580,7 +610,7 @@ $dataUri = 'data:' . $mimeType . ';base64,' . $audioBase64;
 
 if ($tempAudioFile && file_exists($tempAudioFile)) unlink($tempAudioFile);
 
-debugLog('FINAL', 'ok', 'VozPro via PHP DIRECT - zero Vercel');
+debugLog('FINAL', 'ok', 'OmniVoice via PHP DIRECT - zero Vercel');
 
 echo json_encode([
     'audioUrl' => $dataUri,

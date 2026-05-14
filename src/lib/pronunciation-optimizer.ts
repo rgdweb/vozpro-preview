@@ -2329,7 +2329,7 @@ export async function optimizePronunciation(text: string): Promise<string> {
     'aws': 'a dábliu és',
     'azure': 'ézurre',
     // TLDs country codes — soletrar ao invés de pronunciar como palavra
-    'br': 'bê erre',
+    'br': 'bê érre',
     'com': 'com',
     'org': 'ôre gê',
     'net': 'nête',

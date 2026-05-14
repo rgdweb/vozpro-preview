@@ -2280,71 +2280,12 @@ export async function optimizePronunciation(text: string): Promise<string> {
     return `[${protocol.replace('https', 'agá tê tê pê és').replace('http', 'agá tê tê pê').replace('://', ' dois pontos barra barra')} ${spelled}]`
   })
 
-  // Função auxiliar: verificar se uma string parece pronunciável em PT-BR
-  // Palavras com muitas vogais e clusters consonantais válidos → o TTS lê naturalmente
-  // Strings com poucas vogais e clusters inválidos → soletrar letra por letra
-  function isPronounceable(part: string): boolean {
-    const alpha = part.replace(/[^a-zàáâãäéèêëíìîïóòôõöúùûü]/gi, '')
-    if (alpha.length === 0) return false
-
-    // Contar vogais
-    const vowels = (alpha.match(/[aeiouàáâãäéèêëíìîïóòôõöúùûü]/gi) || []).length
-    const ratio = vowels / alpha.length
-
-    // Menos de 30% vogais → provavelmente abreviação ou string aleatória
-    if (ratio < 0.3) return false
-
-    // 4+ consoantes consecutivas → provavelmente string aleatória (ex: ggxph)
-    if (/[bcdfghjklmnpqrstvwxyz]{4,}/i.test(alpha)) return false
-
-    // 3 consoantes consecutivas seguidas de vogal e depois 3+ consoantes → padrão aleatório
-    if (/[bcdfghjklmnpqrstvwxyz]{3}[aeiouàáâãäéèêëíìîïóòôõöúùûü][bcdfghjklmnpqrstvwxyz]{3,}/i.test(alpha)) return false
-
-    return true
-  }
-
-  // Função auxiliar: pronunciar parte de domínio
-  // 1) No dicionário fonético → pronúncia fonética
-  // 2) Parece palavra pronunciável → deixa o TTS ler naturalmente (entre colchetes)
-  // 3) String aleatória → soletra letra por letra em PT-BR
-  function pronunciarParteDominio(part: string): string {
-    // 1. Dicionário fonético
-    const lookup = DOMAIN_PHONETICS[part.toLowerCase()]
-    if (lookup) return lookup
-
-    // 2. Parece pronunciável → TTS lê naturalmente
-    if (isPronounceable(part)) return part
-
-    // 3. String aleatória → soletrar letra por letra
-    const nomesLetras: Record<string, string> = {
-      a: 'a', b: 'bê', c: 'cê', d: 'dê', e: 'e', f: 'efe', g: 'gê',
-      h: 'agá', i: 'i', j: 'jota', k: 'cá', l: 'ele', m: 'ême',
-      n: 'ene', o: 'o', p: 'pê', q: 'quê', r: 'erre', s: 'esse',
-      t: 'tê', u: 'u', v: 'vê', w: 'dábliu', x: 'xis', y: 'ípsilon', z: 'zê',
-      '0': 'zero', '1': 'um', '2': 'dois', '3': 'três', '4': 'quatro',
-      '5': 'cinco', '6': 'seis', '7': 'sete', '8': 'oito', '9': 'nove',
-    }
-    return part.split('').map(c => {
-      const lower = c.toLowerCase()
-      if (nomesLetras[lower]) return nomesLetras[lower]
-      return c // fallback: char original
-    }).join(' ')
-  }
-
-  // www.domínio.com — não captura pontuação final
-  result = result.replace(/www\.([^\s.,;:!?\)]+(?:\.[^\s.,;:!?\)]+)*)/gi, (match, domain) => {
-    const parts = domain.split('.')
-    const spelled = parts.map(part => pronunciarParteDominio(part)).join(' ponto ')
-    return `[dábliu dábliu dábliu ponto ${spelled}]`
-  })
-
-  // ---- 13. EMAILS ----
-  // Regex não captura pontuação final — evita quebrar frase
+  // ---- 12. DOMÍNIOS / EMAILS ----
   // Dicionário de pronúncia fonética para partes de domínios
   const DOMAIN_PHONETICS: Record<string, string> = {
     'xtech': 'xisték',
     'stech': 'ésseték',
-    'xanxere': 'xanxere',          // já fala correto
+    'xanxere': 'xanxere',
     'tech': 'têque',
     'dev': 'dêve',
     'web': 'uébec',
@@ -2410,6 +2351,65 @@ export async function optimizePronunciation(text: string): Promise<string> {
     'ch': 'cê agá',
   }
 
+  // Função auxiliar: verificar se uma string parece pronunciável em PT-BR
+  // Palavras com muitas vogais e clusters consonantais válidos → o TTS lê naturalmente
+  // Strings com poucas vogais e clusters inválidos → soletrar letra por letra
+  function isPronounceable(part: string): boolean {
+    const alpha = part.replace(/[^a-zàáâãäéèêëíìîïóòôõöúùûü]/gi, '')
+    if (alpha.length === 0) return false
+
+    // Contar vogais
+    const vowels = (alpha.match(/[aeiouàáâãäéèêëíìîïóòôõöúùûü]/gi) || []).length
+    const ratio = vowels / alpha.length
+
+    // Menos de 30% vogais → provavelmente abreviação ou string aleatória
+    if (ratio < 0.3) return false
+
+    // 4+ consoantes consecutivas → provavelmente string aleatória (ex: ggxph)
+    if (/[bcdfghjklmnpqrstvwxyz]{4,}/i.test(alpha)) return false
+
+    // 3 consoantes consecutivas seguidas de vogal e depois 3+ consoantes → padrão aleatório
+    if (/[bcdfghjklmnpqrstvwxyz]{3}[aeiouàáâãäéèêëíìîïóòôõöúùûü][bcdfghjklmnpqrstvwxyz]{3,}/i.test(alpha)) return false
+
+    return true
+  }
+
+  // Função auxiliar: pronunciar parte de domínio
+  // 1) No dicionário fonético → pronúncia fonética
+  // 2) Parece palavra pronunciável → deixa o TTS ler naturalmente (entre colchetes)
+  // 3) String aleatória → soletra letra por letra em PT-BR
+  function pronunciarParteDominio(part: string): string {
+    // 1. Dicionário fonético
+    const lookup = DOMAIN_PHONETICS[part.toLowerCase()]
+    if (lookup) return lookup
+
+    // 2. Parece pronunciável → TTS lê naturalmente
+    if (isPronounceable(part)) return part
+
+    // 3. String aleatória → soletrar letra por letra
+    const nomesLetras: Record<string, string> = {
+      a: 'a', b: 'bê', c: 'cê', d: 'dê', e: 'e', f: 'efe', g: 'gê',
+      h: 'agá', i: 'i', j: 'jota', k: 'cá', l: 'ele', m: 'ême',
+      n: 'ene', o: 'o', p: 'pê', q: 'quê', r: 'erre', s: 'esse',
+      t: 'tê', u: 'u', v: 'vê', w: 'dábliu', x: 'xis', y: 'ípsilon', z: 'zê',
+      '0': 'zero', '1': 'um', '2': 'dois', '3': 'três', '4': 'quatro',
+      '5': 'cinco', '6': 'seis', '7': 'sete', '8': 'oito', '9': 'nove',
+    }
+    return part.split('').map(c => {
+      const lower = c.toLowerCase()
+      if (nomesLetras[lower]) return nomesLetras[lower]
+      return c // fallback: char original
+    }).join(' ')
+  }
+
+  // www.domínio.com — não captura pontuação final
+  result = result.replace(/www\.([^\s.,;:!?\)]+(?:\.[^\s.,;:!?\)]+)*)/gi, (match, domain) => {
+    const parts = domain.split('.')
+    const spelled = parts.map(part => pronunciarParteDominio(part)).join(' ponto ')
+    return `[dábliu dábliu dábliu ponto ${spelled}]`
+  })
+
+  // Emails: user@domínio.com — não captura pontuação final
   result = result.replace(/(\S+)@([^\s.,;:!?\)]+(?:\.[^\s.,;:!?\)]+)*)/g, (match, user, domain) => {
     // Verificar se o domínio inteiro tem pronúncia fonética
     const domainLower = domain.toLowerCase()

@@ -1197,7 +1197,9 @@ const STRESS_DICTIONARY: Record<string, string> = {
   'ifen': 'ífen',     // H mudo já rodou antes — key é pos-H-mudo
   'otel': 'ôtel',    // hotel → H mudo → otel — acento força o-TÉL
   'oras': 'óras',    // horas → H mudo → oras — acento força Ó-ras
-  'acesse': 'acésse', // TTS pode trocar stress → força a-CÉS-se
+  'acesse': 'acésse', // a-CÉS-se (paroxítona, imperativo)
+  'acessar': 'acesár', // a-ce-SSÁR (oxítona, terminada em "r")
+  'acessou': 'acesôu', // a-ce-SSÓU (oxítona, terminada em "ou")
   'artico': 'ártico',
   'polen': 'pólen',
   'indice': 'índice',

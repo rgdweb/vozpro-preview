@@ -2285,11 +2285,12 @@ export async function optimizePronunciation(text: string): Promise<string> {
 
   // ---- 12. DOMÍNIOS / EMAILS ----
   // Dicionário de pronúncia fonética para partes de domínios
+  // v2.1: xtech=xistek, tech=téc, stech=ésseték
   const DOMAIN_PHONETICS: Record<string, string> = {
     'xtech': 'xisték',
     'stech': 'ésseték',
     'xanxere': 'xanxere',
-    'tech': 'têque',
+    'tech': 'téc',
     'dev': 'dêve',
     'web': 'uébec',
     'cloud': 'cláude',
@@ -2418,11 +2419,13 @@ export async function optimizePronunciation(text: string): Promise<string> {
     const domainLower = domain.toLowerCase()
     const phonetic = DOMAIN_PHONETICS[domainLower]
     if (phonetic) {
+      console.log(`[PronDict] Email domínio completo: ${domainLower} → ${phonetic}`)
       return `[${user} arroba ${phonetic}]`
     }
     // Tentar pronunciar cada parte do domínio separadamente
     // Se a parte não está no dicionário → soletra letra por letra em PT-BR
     const parts = domainLower.split('.')
+    console.log(`[PronDict] Email partes: ${parts.map(p => `${p}→${DOMAIN_PHONETICS[p] || '(natural)'}`).join(', ')}`)
     const partsPhonetic = parts.map(part => pronunciarParteDominio(part)).join(' ponto ')
     return `[${user} arroba ${partsPhonetic}]`
   })

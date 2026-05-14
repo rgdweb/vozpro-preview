@@ -211,7 +211,7 @@ function findBreakPoints(text: string): BreakPoint[] {
 function splitAtBreakPoints(text: string, breakPoints: BreakPoint[]): TextChunk[] {
   if (breakPoints.length === 0) {
     // Sem pontuação forte — retorna texto inteiro como um chunk
-    return [{ text: text.trim(), pauseAfterMs: 0, punctuation: '.', index: 0 }]
+    return [{ text: text.trim() + '.', pauseAfterMs: 0, punctuation: '.', index: 0 }]
   }
   
   const chunks: TextChunk[] = []
@@ -223,20 +223,22 @@ function splitAtBreakPoints(text: string, breakPoints: BreakPoint[]): TextChunk[
     const isLast = i === breakPoints.length - 1
     
     if (textBefore) {
-      // MANTER pontuação — o TTS precisa dela para produzir finalização natural.
-      // Sem pontuação, o TTS produz final "morto" e o postprocess corta a última sílaba.
-      // Para chunks intermediários: trocar pontuação forte por vírgula (pausa curta + prosódia conectada).
-      // Para último chunk: manter pontuação original (frase final soa completa).
+      // BUG FIX: textBefore NÃO inclui a pontuação (substring corta antes do ponto).
+      // Sem pontuação no texto, o TTS gera final "morto" → corte de áudio.
+      // SOLUÇÃO: Sempre anexar pontuação ao texto do chunk.
+      // Intermediários: vírgula (TTS faz pausa curta + frontend adiciona silêncio).
+      // Último: pontuação original (frase final soa completa).
       let cleanText = textBefore.trim()
-      if (!isLast && /[.!?]$/.test(cleanText)) {
-        // Chunk intermediário com ponto forte → trocar por vírgula
-        // Isso evita que o TTS faça pausa longa + frontend adicione outra pausa = duplo
-        cleanText = cleanText.slice(0, -1) + ','
+      if (!isLast) {
+        // Chunks intermediários: anexar vírgula para o TTS finalizar naturalmente
+        cleanText = cleanText + ','
+      } else {
+        // Último chunk: anexar pontuação original (., !, ?, ...)
+        cleanText = cleanText + bp.punctuation
       }
-      // Manter ; : :? como estão (são pausas médias que o TTS respeita)
 
       chunks.push({
-        text: cleanText || textBefore,
+        text: cleanText,
         pauseAfterMs: isLast ? 0 : (PAUSE_DURATION[bp.punctuation] || 400),
         punctuation: bp.punctuation,
         index: chunks.length,
@@ -250,7 +252,7 @@ function splitAtBreakPoints(text: string, breakPoints: BreakPoint[]): TextChunk[
   const remaining = text.substring(lastIndex).trim()
   if (remaining) {
     chunks.push({
-      text: remaining,
+      text: remaining + '.',
       pauseAfterMs: 0,
       punctuation: '.',
       index: chunks.length,
@@ -289,6 +291,10 @@ function mergeShortChunks(chunks: TextChunk[]): TextChunk[] {
         punctuation: next.punctuation,
         index: result.length,
       })
+      // Garantir que o chunk mesclado tem pontuação final
+      if (!/[,.!?;:...]$/.test(result[result.length - 1].text)) {
+        result[result.length - 1].text += ','
+      }
       i += 2
     } else {
       result.push({ ...current, index: result.length })
@@ -368,10 +374,15 @@ function splitLongChunks(chunks: TextChunk[]): TextChunk[] {
       const subText = subChunks[s].join(' ').trim()
       if (!subText) continue
 
+      // BUG FIX: anexar pontuação ao sub-chunk para TTS finalizar frase.
+      // Sem isso, o TTS corta o áudio no final do sub-chunk.
       const isLast = s === subChunks.length - 1
+      const subTextPunct = isLast
+        ? (subText + (chunk.punctuation || '.'))
+        : (subText + ',')
       result.push({
-        text: subText,
-        pauseAfterMs: isLast ? chunk.pauseAfterMs : 250, // pausa entre sub-chunks
+        text: subTextPunct,
+        pauseAfterMs: isLast ? chunk.pauseAfterMs : 250,
         punctuation: isLast ? chunk.punctuation : ',',
         index: result.length,
       })
@@ -400,8 +411,13 @@ function chunkByNewlines(text: string): TextChunk[] {
     const punctuation = punctMatch ? punctMatch[1] : '.'
     const cleanText = punctMatch ? trimmed.slice(0, -1).trim() : trimmed
 
+    // BUG FIX: re-anexar pontuação ao texto para TTS finalizar frase.
+    // cleanText remove a pontuação mas o TTS precisa dela.
+    const finalText = (i < lines.length - 1)
+      ? ((cleanText || trimmed) + (punctuation || ','))
+      : ((cleanText || trimmed) + (punctuation || '.'))
     return {
-      text: cleanText || trimmed,
+      text: finalText,
       pauseAfterMs: i < lines.length - 1
         ? (PAUSE_DURATION[punctuation] || 400)
         : 0,

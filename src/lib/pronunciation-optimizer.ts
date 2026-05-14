@@ -1664,6 +1664,22 @@ function preprocessX(text: string): string {
     result = result.replace(new RegExp(`\\b${escaped}\\b`, 'g'), pronunciation)
   }
 
+  // Proteger emails e URLs da substituição de X → S
+  // Extrair e substituir por placeholders antes de processar X
+  const protectedParts: string[] = []
+  result = result.replace(/(\S+@[^\s.,;:!?)]+(?:\.[^\s.,;:!?)]+)*)/g, (match) => {
+    protectedParts.push(match)
+    return `__PROTECTED_${protectedParts.length - 1}__`
+  })
+  result = result.replace(/(https?:\/\/[^\s.,;:!?)]+(?:\.[^\s.,;:!?)]+)*)/gi, (match) => {
+    protectedParts.push(match)
+    return `__PROTECTED_${protectedParts.length - 1}__`
+  })
+  result = result.replace(/(www\.[^\s.,;:!?)]+(?:\.[^\s.,;:!?)]+)*)/gi, (match) => {
+    protectedParts.push(match)
+    return `__PROTECTED_${protectedParts.length - 1}__`
+  })
+
   // 2. X restantes: regra geral contextual
   // X antes de consoante = S (ex: "extensão" → já coberto pelo dicionário, mas fallback)
   // X no final de sílaba antes de consoante
@@ -1676,6 +1692,11 @@ function preprocessX(text: string): string {
   result = result.replace(/([aeiouáàãâéèêíïóôõúü])x([aeiouáàãâéèêíïóôõúü])/gi, (match, v1, v2) => {
     return `${v1}ks${v2}`
   })
+
+  // Restaurar emails e URLs protegidos
+  for (let i = 0; i < protectedParts.length; i++) {
+    result = result.replace(`__PROTECTED_${i}__`, protectedParts[i])
+  }
 
   return result
 }

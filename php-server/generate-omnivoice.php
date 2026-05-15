@@ -8,7 +8,7 @@
 // - Adicionada cleanText() para remover caracteres de controle invisiveis
 // - memory_limit 256M -> 512M (base64 de audio longo precisa mais memoria)
 // - SSE timeout 300s -> 600s (textos longos nao estouram)
-// - po (postprocess) true -> false (evita cortes no final do audio)
+// - po (postprocess) mantido true (limpa artefatos/estalos do audio gerado)
 // - CURLOPT_ENCODING => '' adicionado no fetch da tunnel URL
 // - Timeout submit job 60s -> 90s
 // - Timeout download audio 120s -> 180s
@@ -453,7 +453,7 @@ if ($mode === 'clone') {
         (float)$speed,                     // sp (speed)
         null,                              // du (duration, null = auto)
         true,                              // pp (preprocess)
-        false                              // po (postprocess) - false evita cortes no final do audio
+        true                               // po (postprocess) - limpa estalos/artefatos do audio
     ];
 
 } else {
@@ -478,7 +478,7 @@ if ($mode === 'clone') {
         (float)$speed,                     // sp (speed)
         null,                              // du (duration)
         true,                              // pp (preprocess)
-        false,                             // po (postprocess) - false evita cortes no final do audio
+        true,                              // po (postprocess) - limpa estalos/artefatos
         $gender,                           // gender
         $age,                              // age
         $pitch,                            // pitch

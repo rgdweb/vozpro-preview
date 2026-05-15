@@ -490,6 +490,67 @@ if ($mode === 'clone') {
 
 debugLog('Modo', 'info', "endpoint: $endpoint | gender: $gender | pitch: $pitch");
 
+// ===================== QUEUE MONITOR =====================
+$monitorFile = sys_get_temp_dir() . '/vp_queue_monitor.json';
+$genId = uniqid('ov_');
+$genStartTime = time();
+
+function monitorStart($file, $id, $model, $mode, $text) {
+    $data = ['active' => [], 'history' => [], 'total_today' => 0];
+    if (file_exists($file)) {
+        $data = json_decode(file_get_contents($file), true) ?: $data;
+    }
+    // Contar total de hoje
+    $today = date('Y-m-d');
+    if (!isset($data['today_date']) || $data['today_date'] !== $today) {
+        $data['total_today'] = 0;
+        $data['today_date'] = $today;
+        $data['history'] = [];
+    }
+    $data['total_today']++;
+    // Limpar ativos expirados (>10min)
+    $now = time();
+    $data['active'] = array_values(array_filter($data['active'], function($g) use ($now) {
+        return ($now - $g['started_at']) < 600;
+    }));
+    // Adicionar geracao ativa
+    $data['active'][] = [
+        'id' => $id,
+        'model' => $model,
+        'mode' => $mode,
+        'text' => $text,
+        'started_at' => time(),
+        'ip' => $_SERVER['REMOTE_ADDR'] ?? '?',
+    ];
+    file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT), LOCK_EX);
+}
+
+function monitorEnd($file, $id, $success) {
+    if (!file_exists($file)) return;
+    $data = json_decode(file_get_contents($file), true) ?: ['active' => [], 'history' => []];
+    $now = time();
+    // Mover de active para history
+    $finished = null;
+    $data['active'] = array_values(array_filter($data['active'], function($g) use ($id, $now, &$finished) {
+        if ($g['id'] === $id) {
+            $finished = $g;
+            $finished['ended_at'] = $now;
+            $finished['success'] = $success;
+            return false;
+        }
+        return true;
+    }));
+    if ($finished) {
+        $data['history'][] = $finished;
+        if (count($data['history']) > 100) $data['history'] = array_slice($data['history'], -100);
+    }
+    file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT), LOCK_EX);
+}
+
+// Registrar inicio
+monitorStart($monitorFile, $genId, 'omnivoice', $mode, $texto);
+debugLog('Monitor', 'info', "Gen ID: $genId | Ativas: " . count(json_decode(file_get_contents($monitorFile), true)['active'] ?? []));
+
 // ===================== FLUXO COM RETRY =====================
 
 $audioUrl = null;
@@ -574,6 +635,7 @@ if (!$audioUrl) {
     } elseif ($lastError === 'timeout') {
         $userMsg = 'OmniVoice demorou demais. Tente um texto mais curto.';
     }
+    monitorEnd($monitorFile, $genId, false);
     returnError($userMsg, 504);
 }
 
@@ -609,6 +671,9 @@ $mimeType = ($ext === 'mp3') ? 'audio/mpeg' : 'audio/wav';
 $dataUri = 'data:' . $mimeType . ';base64,' . $audioBase64;
 
 if ($tempAudioFile && file_exists($tempAudioFile)) unlink($tempAudioFile);
+
+// Registrar sucesso no monitor
+monitorEnd($monitorFile, $genId, true);
 
 debugLog('FINAL', 'ok', 'OmniVoice via PHP DIRECT - zero Vercel');
 

@@ -446,6 +446,57 @@ function runGeneration($gradioData, $refAudioFile, $refAudioName, $hfUrl) {
 
 // ===================== FLUXO PRINCIPAL COM RETRY =====================
 
+// ===================== QUEUE MONITOR =====================
+$monitorFile = sys_get_temp_dir() . '/vp_queue_monitor.json';
+$genId = uniqid('f5_');
+
+function monitorStartGen($file, $id, $model, $text) {
+    $data = ['active' => [], 'history' => [], 'total_today' => 0];
+    if (file_exists($file)) {
+        $data = json_decode(file_get_contents($file), true) ?: $data;
+    }
+    $today = date('Y-m-d');
+    if (!isset($data['today_date']) || $data['today_date'] !== $today) {
+        $data['total_today'] = 0;
+        $data['today_date'] = $today;
+        $data['history'] = [];
+    }
+    $data['total_today']++;
+    $now = time();
+    $data['active'] = array_values(array_filter($data['active'], function($g) use ($now) {
+        return ($now - $g['started_at']) < 600;
+    }));
+    $data['active'][] = [
+        'id' => $id, 'model' => $model, 'mode' => 'f5-tts',
+        'text' => $text, 'started_at' => time(),
+        'ip' => $_SERVER['REMOTE_ADDR'] ?? '?',
+    ];
+    file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT), LOCK_EX);
+}
+
+function monitorEndGen($file, $id, $success) {
+    if (!file_exists($file)) return;
+    $data = json_decode(file_get_contents($file), true) ?: ['active' => [], 'history' => []];
+    $now = time();
+    $finished = null;
+    $data['active'] = array_values(array_filter($data['active'], function($g) use ($id, $now, &$finished) {
+        if ($g['id'] === $id) {
+            $finished = $g;
+            $finished['ended_at'] = $now;
+            $finished['success'] = $success;
+            return false;
+        }
+        return true;
+    }));
+    if ($finished) {
+        $data['history'][] = $finished;
+        if (count($data['history']) > 100) $data['history'] = array_slice($data['history'], -100);
+    }
+    file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT), LOCK_EX);
+}
+
+monitorStartGen($monitorFile, $genId, 'f5-tts', $texto);
+
 $audioUrl = null;
 $tempRefFile = null;
 
@@ -533,6 +584,7 @@ if (!$audioUrl) {
     } elseif ($lastError === 'CUDA OOM') {
         $userMsg = 'GPU sem memoria. O audio de referencia e muito longo - use um audio de ate 10 segundos.';
     }
+    monitorEndGen($monitorFile, $genId, false);
     returnError($userMsg, 504);
 }
 
@@ -556,6 +608,7 @@ fclose($fp);
 
 if (!$dlOk || $dlCode != 200 || filesize($tempAudioFile) == 0) {
     if (file_exists($tempAudioFile)) unlink($tempAudioFile);
+    monitorEndGen($monitorFile, $genId, false);
     returnError("Falha ao baixar audio gerado (HTTP $dlCode)");
 }
 
@@ -573,6 +626,8 @@ $dataUri = 'data:' . $mimeType . ';base64,' . $audioBase64;
 debugLog('Base64 encode', 'ok', round(strlen($audioBase64) / 1024) . 'KB base64');
 
 if ($tempAudioFile && file_exists($tempAudioFile)) unlink($tempAudioFile);
+
+monitorEndGen($monitorFile, $genId, true);
 
 // ===================== RETORNAR =====================
 debugLog('FINAL', 'ok', 'audio pronto via PHP DIRECT (SSE + trim)');

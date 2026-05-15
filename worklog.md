@@ -1,20 +1,22 @@
 ---
 Task ID: 1
 Agent: Main Agent
-Task: Diagnosticar e corrigir bugs do OmniVoice TTS no servidor Hostgator
+Task: Investigar e corrigir bugs persistentes do OmniVoice (corte de audio, pontuacao, pronuncia)
 
 Work Log:
-- Acessou cPanel via browser agent (login marci955 / Rgdweb@2637)
-- Leu 6 arquivos do servidor: error_log, config.php, generate-omnivoice.php, .user.ini, .htaccess, check.php
-- Baixou versoes do GitHub para comparacao
-- Identificou 6 bugs criticos
-- Criou arquivos corrigidos para upload
+- Investigacao completa do codigo: PHP server, Next.js API routes, frontend
+- Encontrado que generate-omnivoice.php (producao) NAO truncava audio de referencia
+- Outros arquivos truncavam: generate.php (10s), Next.js routes (12s)
+- Sem trim, audio de ref longo causa CUDA OOM na RTX 3060 12GB -> audio cortado
+- Adicionado trimAudioToMaxSeconds() usando trim_audio.py existente (max 12s)
+- Adicionado normalizePronunciation() com dicionario fonetico PT-BR (150+ palavras)
+- Adicionado splitTextIntoChunks() para textos longos (max 500 chars)
+- Pipeline de normalizacao: stripSSML -> cleanText -> normalizePronunciation
+- Commit ff8e864 pushed para GitHub
+- Arquivo atualizado no Hostgator via cPanel (925 linhas)
 
 Stage Summary:
-- BUG 1: config.php sem logUpload() → Fatal Error em upload.php e delete.php
-- BUG 2: generate-omnivoice.php sem stripSSML() → garbling de audio
-- BUG 3: memory_limit 128M → audio corta no final
-- BUG 4: SSE timeout 300s → travamentos em textos longos
-- BUG 5: check.php referencia generate.php (inexistente)
-- BUG 6: iniciar.bat com timeout fixo 15s → precisa abrir 3x
-- Arquivos corrigidos salvos em /home/z/my-project/download/omnivoice-fixes/
+- CORRECAO CRITICA: Audio de referencia agora e truncado para 12s antes de enviar ao TTS
+- 150+ palavras PT-BR adicionadas ao dicionario fonetico (acessar, processar, etc.)
+- Textos longos agora sao divididos em chunks para evitar corte de audio
+- Arquivos atualizados: GitHub (ff8e864) + Hostgator cPanel

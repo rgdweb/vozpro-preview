@@ -16,7 +16,7 @@ import {
   AudioWaveform, LogOut, Plus, Trash2, Edit, Upload, Music, Mic,
   Loader2, RefreshCw, Volume2, FileAudio, CheckCircle2, Settings2,
   FolderOpen, ChevronLeft, FolderPlus, Folder, Play, Pause, Users, UserPlus, Shield,
-  UploadCloud, X, Download, VolumeX
+  UploadCloud, X, Download
 } from 'lucide-react'
 import { toast } from 'sonner'
 import AudioPlayer from '@/components/audio-player'
@@ -138,116 +138,6 @@ async function processTrackFile(file: File): Promise<{ blob: Blob; name: string;
 
 const VOICE_AUTO_TRIM_SECONDS = 10 // target de duracao apos auto-trim
 const SILENCE_THRESHOLD = 0.015 // RMS para detectar silencio
-const SILENCE_DETECT_WINDOW = 80 // ms - janela para analisar silencio
-const MIN_SILENCE_TO_CUT = 300 // ms - silencio minimo para marcar como cortavel
-const MICRO_GAP_MS = 30 // ms - gap entre palavras apos remover silencio (nao emenda direto)
-
-/**
- * Detecta todas as regioes de silencio no audio.
- * Retorna array de { start, end } em segundos dos trechos de silencio.
- */
-function detectSilenceRegions(audioBuffer: AudioBuffer): Array<{ start: number; end: number }> {
-  const data = audioBuffer.getChannelData(0)
-  const sr = audioBuffer.sampleRate
-  const winSamples = Math.floor(sr * SILENCE_DETECT_WINDOW / 1000)
-  const numWins = Math.ceil(data.length / winSamples)
-  
-  // Calcular RMS por janela
-  const rmsArr: number[] = []
-  for (let i = 0; i < numWins; i++) {
-    const s = i * winSamples
-    const e = Math.min(s + winSamples, data.length)
-    let sum = 0
-    for (let j = s; j < e; j++) sum += data[j] * data[j]
-    rmsArr.push(Math.sqrt(sum / (e - s)))
-  }
-  
-  // Encontrar regioes de silencio contínuo >= MIN_SILENCE_TO_CUT
-  const regions: Array<{ start: number; end: number }> = []
-  let silStart = -1
-  const minSilWins = Math.ceil(MIN_SILENCE_TO_CUT / SILENCE_DETECT_WINDOW)
-  
-  for (let i = 0; i < numWins; i++) {
-    if (rmsArr[i] <= SILENCE_THRESHOLD) {
-      if (silStart === -1) silStart = i
-    } else {
-      if (silStart !== -1) {
-        const len = i - silStart
-        if (len >= minSilWins) {
-          regions.push({
-            start: silStart * SILENCE_DETECT_WINDOW / 1000,
-            end: i * SILENCE_DETECT_WINDOW / 1000
-          })
-        }
-        silStart = -1
-      }
-    }
-  }
-  
-  return regions
-}
-
-/**
- * Remove os silencios detectados e junta o audio com micro-gaps entre palavras.
- * Retorna novo AudioBuffer compacto.
- */
-function removeSilenceRegions(audioBuffer: AudioBuffer, regions: Array<{ start: number; end: number }>): AudioBuffer {
-  if (regions.length === 0) return audioBuffer
-  
-  const sr = audioBuffer.sampleRate
-  const numCh = audioBuffer.numberOfChannels
-  const gapSamples = Math.floor(sr * MICRO_GAP_MS / 1000)
-  
-  // Coletar as regioes de VOZ (o que fica entre os silencios)
-  const voiceRegions: Array<{ sampleStart: number; sampleEnd: number }> = []
-  let lastEnd = 0
-  
-  for (const sil of regions) {
-    const silSampleStart = Math.floor(sil.start * sr)
-    const silSampleEnd = Math.min(Math.floor(sil.end * sr), audioBuffer.length)
-    if (silSampleStart > lastEnd) {
-      voiceRegions.push({ sampleStart: lastEnd, sampleEnd: silSampleStart })
-    }
-    lastEnd = silSampleEnd
-  }
-  // Ultimo trecho de voz depois do ultimo silencio
-  if (lastEnd < audioBuffer.length) {
-    voiceRegions.push({ sampleStart: lastEnd, sampleEnd: audioBuffer.length })
-  }
-  
-  if (voiceRegions.length === 0) return audioBuffer
-  
-  // Calcular tamanho total: voz + gaps entre regioes
-  let totalSamples = 0
-  for (const v of voiceRegions) totalSamples += (v.sampleEnd - v.sampleStart)
-  totalSamples += gapSamples * (voiceRegions.length - 1) // gaps entre blocos
-  
-  const newBuf = new AudioBuffer({ numberOfChannels: numCh, length: totalSamples, sampleRate: sr })
-  
-  for (let c = 0; c < numCh; c++) {
-    const src = audioBuffer.getChannelData(c)
-    const dst = newBuf.getChannelData(c)
-    let writePos = 0
-    
-    for (let i = 0; i < voiceRegions.length; i++) {
-      const v = voiceRegions[i]
-      for (let j = v.sampleStart; j < v.sampleEnd; j++) {
-        dst[writePos++] = src[j]
-      }
-      // Adicionar micro-gap (fade suave) entre blocos, exceto apos o ultimo
-      if (i < voiceRegions.length - 1 && gapSamples > 0) {
-        for (let g = 0; g < gapSamples; g++) {
-          dst[writePos++] = 0
-        }
-      }
-    }
-  }
-  
-  const timeSaved = audioBuffer.duration - newBuf.duration
-  console.log(`[removeSilence] ${regions.length} silencios removidos: ${audioBuffer.duration.toFixed(1)}s → ${newBuf.duration.toFixed(1)}s (${timeSaved.toFixed(1)}s economizado, ${voiceRegions.length} blocos de voz com ${MICRO_GAP_MS}ms gaps)`)
-  
-  return newBuf
-}
 
 function detectVoiceRange(audioBuffer: AudioBuffer): { start: number; end: number } {
   const data = audioBuffer.getChannelData(0)
@@ -315,7 +205,7 @@ function audioBufferToWav(buffer: AudioBuffer): Blob {
   return new Blob([ab], { type: 'audio/wav' })
 }
 
-function drawVoiceWaveform(canvas: HTMLCanvasElement, buffer: AudioBuffer, rs: number, re: number, silenceRegions?: Array<{ start: number; end: number }>) {
+function drawVoiceWaveform(canvas: HTMLCanvasElement, buffer: AudioBuffer, rs: number, re: number) {
   const ctx = canvas.getContext('2d'); if (!ctx) return
   const W = canvas.width, H = canvas.height, dur = buffer.duration, data = buffer.getChannelData(0), step = Math.max(1, Math.floor(data.length / W))
   ctx.clearRect(0, 0, W, H); ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, W, H)
@@ -330,23 +220,6 @@ function drawVoiceWaveform(canvas: HTMLCanvasElement, buffer: AudioBuffer, rs: n
   ctx.fillStyle = 'rgba(0,0,0,0.55)'
   if (x1 > 0) ctx.fillRect(0, 0, x1, H)
   if (x2 < W) ctx.fillRect(x2, 0, W - x2, H)
-  // Tracinhos vermelhos nos silencios detectados
-  if (silenceRegions && silenceRegions.length > 0) {
-    for (const sil of silenceRegions) {
-      const sx = Math.floor((sil.start / dur) * W)
-      const ex = Math.ceil((sil.end / dur) * W)
-      // Fundo semi-transparente vermelho
-      ctx.fillStyle = 'rgba(239, 68, 68, 0.25)'
-      ctx.fillRect(sx, 0, ex - sx, H)
-      // Linha tracejada vertical nas bordas
-      ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)'
-      ctx.lineWidth = 1
-      ctx.setLineDash([3, 3])
-      ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, H); ctx.stroke()
-      ctx.beginPath(); ctx.moveTo(ex, 0); ctx.lineTo(ex, H); ctx.stroke()
-      ctx.setLineDash([])
-    }
-  }
   // Range borders
   ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x1, 0); ctx.lineTo(x1, H); ctx.moveTo(x2, 0); ctx.lineTo(x2, H); ctx.stroke()
   // Time labels
@@ -723,8 +596,7 @@ export default function AdminDashboard() {
 
   // Pending files (not uploaded yet, waiting for save)
   const [pendingVoiceFile, setPendingVoiceFile] = useState<{ blob: Blob; name: string; info: string } | null>(null)
-  const [voiceTrimState, setVoiceTrimState] = useState<{ buffer: AudioBuffer; duration: number; rangeStart: number; rangeEnd: number; fileName: string; silenceRegions?: Array<{ start: number; end: number }> } | null>(null)
-  const [silenceCount, setSilenceCount] = useState(0)
+  const [voiceTrimState, setVoiceTrimState] = useState<{ buffer: AudioBuffer; duration: number; rangeStart: number; rangeEnd: number; fileName: string } | null>(null)
   const waveCanvasRef = useRef<HTMLCanvasElement>(null)
   const voicePreviewCtxRef = useRef<AudioContext | null>(null)
   const voicePreviewSrcRef = useRef<AudioBufferSourceNode | null>(null)
@@ -1073,10 +945,7 @@ export default function AdminDashboard() {
       const audioBuf = await actx.decodeAudioData(ab)
       await actx.close()
       const range = detectVoiceRange(audioBuf)
-      // Detectar silencios para mostrar tracinhos no waveform
-      const silRegions = detectSilenceRegions(audioBuf)
-      setSilenceCount(silRegions.length)
-      setVoiceTrimState({ buffer: audioBuf, duration: audioBuf.duration, rangeStart: range.start, rangeEnd: range.end, fileName: file.name, silenceRegions: silRegions })
+      setVoiceTrimState({ buffer: audioBuf, duration: audioBuf.duration, rangeStart: range.start, rangeEnd: range.end, fileName: file.name })
       setPendingVoiceFile(null) // reset applied trim
       toast.success(`Áudio: ${audioBuf.duration.toFixed(1)}s — voz detectada: ${(range.end - range.start).toFixed(1)}s`)
     } catch (err) {
@@ -1092,7 +961,7 @@ export default function AdminDashboard() {
       const rect = canvas.getBoundingClientRect()
       canvas.width = rect.width * 2
       canvas.height = rect.height * 2
-      drawVoiceWaveform(canvas, voiceTrimState.buffer, voiceTrimState.rangeStart, voiceTrimState.rangeEnd, voiceTrimState.silenceRegions)
+      drawVoiceWaveform(canvas, voiceTrimState.buffer, voiceTrimState.rangeStart, voiceTrimState.rangeEnd)
     }
   }, [voiceTrimState])
 
@@ -1266,16 +1135,12 @@ export default function AdminDashboard() {
 
       // Detectar automaticamente o range de voz
       const range = detectVoiceRange(audioBuf)
-      // Detectar silencios para tracinhos no waveform
-      const silRegions = detectSilenceRegions(audioBuf)
-      setSilenceCount(silRegions.length)
       setVoiceTrimState({
         buffer: audioBuf,
         duration: audioBuf.duration,
         rangeStart: range.start,
         rangeEnd: range.end,
         fileName: variation.refAudioName || 'audio_existente.wav',
-        silenceRegions: silRegions,
       })
       toast.success(`Áudio carregado: ${audioBuf.duration.toFixed(1)}s — voz detectada: ${(range.end - range.start).toFixed(1)}s`)
     } catch (err) {
@@ -1299,68 +1164,6 @@ export default function AdminDashboard() {
     const range = detectVoiceRange(voiceTrimState.buffer)
     setVoiceTrimState(prev => prev ? { ...prev, rangeStart: range.start, rangeEnd: range.end } : null)
     setPendingVoiceFile(null)
-  }
-
-  // Remove silencios marcados — junta o audio com micro-gaps, atualiza waveform
-  const handleRemoveSilence = () => {
-    if (!voiceTrimState || !voiceTrimState.silenceRegions || voiceTrimState.silenceRegions.length === 0) {
-      toast.info('Nenhum silêncio detectado para remover')
-      return
-    }
-
-    try {
-      const { buffer, silenceRegions, fileName } = voiceTrimState
-
-      // Extrair faixa selecionada se o usuario ajustou os sliders
-      let workBuffer = buffer
-      if (voiceTrimState.rangeEnd - voiceTrimState.rangeStart < buffer.duration - 0.1) {
-        workBuffer = extractAudioRange(buffer, voiceTrimState.rangeStart, voiceTrimState.rangeEnd)
-      }
-
-      // Re-detectar silencios no buffer de trabalho (posicao relativa)
-      const workSilRegions = detectSilenceRegions(workBuffer)
-      if (workSilRegions.length === 0) {
-        toast.info('Nenhum silêncio significativo encontrado nesta seleção')
-        return
-      }
-
-      // Remover silencios
-      const cleaned = removeSilenceRegions(workBuffer, workSilRegions)
-
-      if (cleaned.duration < 0.1) {
-        toast.error('Áudio ficou muito curto. Operação cancelada.')
-        return
-      }
-
-      // Verificar amplitude
-      const checkData = cleaned.getChannelData(0)
-      let maxAmp = 0
-      for (let i = 0; i < checkData.length; i++) { if (Math.abs(checkData[i]) > maxAmp) maxAmp = Math.abs(checkData[i]) }
-      if (maxAmp < 0.001) {
-        toast.error('Resultado está em silêncio. Operação cancelada.')
-        return
-      }
-
-      const timeSaved = (workBuffer.duration - cleaned.duration).toFixed(1)
-
-      // Atualizar o trim state com o buffer limpo (sem tracinhos, pronto para editar)
-      setVoiceTrimState({
-        buffer: cleaned,
-        duration: cleaned.duration,
-        rangeStart: 0,
-        rangeEnd: cleaned.duration,
-        fileName: fileName,
-        silenceRegions: [], // sem silencios para marcar
-      })
-      setSilenceCount(0)
-      setPendingVoiceFile(null)
-      setAudioAlreadyUpdated(false)
-
-      toast.success(`Silêncios removidos: ${workBuffer.duration.toFixed(1)}s → ${cleaned.duration.toFixed(1)}s (${timeSaved}s) — pronto para ouvir/salvar`)
-    } catch (err) {
-      console.error('[RemoveSilence] Erro:', err)
-      toast.error('Erro ao remover silêncios')
-    }
   }
 
   const handleSaveVariation = async () => {
@@ -2963,13 +2766,6 @@ export default function AdminDashboard() {
                         <AudioWaveform className="w-3 h-3" />
                         Auto-trim voz
                       </Button>
-                      {silenceCount > 0 && (
-                        <Button size="sm" variant="outline" onClick={handleRemoveSilence}
-                          className="border-red-500 text-red-400 hover:bg-red-900/30 gap-1 text-xs">
-                          <VolumeX className="w-3 h-3" />
-                          Remover silêncio ({silenceCount})
-                        </Button>
-                      )}
                       <Button size="sm" variant="outline" onClick={handleResetVoiceTrim}
                         className="border-slate-600 text-slate-300 hover:bg-slate-700 gap-1 text-xs">
                         <RefreshCw className="w-3 h-3" />

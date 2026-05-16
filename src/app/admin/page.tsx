@@ -330,28 +330,50 @@ function drawVoiceWaveform(canvas: HTMLCanvasElement, buffer: AudioBuffer, rs: n
   ctx.fillStyle = 'rgba(0,0,0,0.55)'
   if (x1 > 0) ctx.fillRect(0, 0, x1, H)
   if (x2 < W) ctx.fillRect(x2, 0, W - x2, H)
-  // Tracinhos vermelhos nos silencios detectados
-  if (silenceRegions && silenceRegions.length > 0) {
-    for (const sil of silenceRegions) {
-      const sx = Math.floor((sil.start / dur) * W)
-      const ex = Math.ceil((sil.end / dur) * W)
-      // Fundo semi-transparente vermelho
-      ctx.fillStyle = 'rgba(239, 68, 68, 0.25)'
-      ctx.fillRect(sx, 0, ex - sx, H)
-      // Linha tracejada vertical nas bordas
-      ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)'
-      ctx.lineWidth = 1
-      ctx.setLineDash([3, 3])
-      ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, H); ctx.stroke()
-      ctx.beginPath(); ctx.moveTo(ex, 0); ctx.lineTo(ex, H); ctx.stroke()
-      ctx.setLineDash([])
-    }
-  }
   // Range borders
   ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x1, 0); ctx.lineTo(x1, H); ctx.moveTo(x2, 0); ctx.lineTo(x2, H); ctx.stroke()
   // Time labels
   ctx.fillStyle = '#e2e8f0'; ctx.font = '11px sans-serif'
   ctx.fillText(`${rs.toFixed(1)}s`, 4, 14); ctx.fillText(`${re.toFixed(1)}s`, W - 35, 14)
+
+  // === TRACINHOS VERMELHOS — DESENHADOS POR ULTIMO (por cima de tudo) ===
+  if (silenceRegions && silenceRegions.length > 0) {
+    const midY = H / 2
+    for (const sil of silenceRegions) {
+      const sx = Math.floor((sil.start / dur) * W)
+      const ex = Math.ceil((sil.end / dur) * W)
+      const isInside = sx < x2 && ex > x1
+
+      if (isInside) {
+        // DENTRO da selecao: bem visivel — fundo vermelho forte + linha horizontal
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.35)'
+        ctx.fillRect(sx, 0, ex - sx, H)
+        // Linha horizontal vermelha no meio (corta o waveform)
+        ctx.strokeStyle = '#ef4444'
+        ctx.lineWidth = 2
+        ctx.setLineDash([4, 4])
+        ctx.beginPath(); ctx.moveTo(sx, midY); ctx.lineTo(ex, midY); ctx.stroke()
+        ctx.setLineDash([])
+        // Bordas verticais tracejadas
+        ctx.strokeStyle = '#ef4444'
+        ctx.lineWidth = 2
+        ctx.setLineDash([4, 4])
+        ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, H); ctx.stroke()
+        ctx.beginPath(); ctx.moveTo(ex, 0); ctx.lineTo(ex, H); ctx.stroke()
+        ctx.setLineDash([])
+      } else {
+        // FORA da selecao: sutil — fundo semi-transparente + bordas finas
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.15)'
+        ctx.fillRect(sx, 0, ex - sx, H)
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)'
+        ctx.lineWidth = 1
+        ctx.setLineDash([3, 3])
+        ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, H); ctx.stroke()
+        ctx.beginPath(); ctx.moveTo(ex, 0); ctx.lineTo(ex, H); ctx.stroke()
+        ctx.setLineDash([])
+      }
+    }
+  }
 }
 
 interface VoiceVariation {
@@ -1094,10 +1116,12 @@ export default function AdminDashboard() {
       canvas.width = rect.width * 2
       canvas.height = rect.height * 2
       // Contar silencios que intersectam com a selecao (para o botao)
-      const filteredSilences = (voiceTrimState.silenceRegions || []).filter(
+      const intersecting = (voiceTrimState.silenceRegions || []).filter(
         sil => sil.start < voiceTrimState.rangeEnd && sil.end > voiceTrimState.rangeStart
       )
-      setSilenceCount(filteredSilences.length)
+      // Se tem silencio dentro da selecao, mostrar esse numero; senao mostrar total
+      const total = (voiceTrimState.silenceRegions || []).length
+      setSilenceCount(intersecting.length > 0 ? intersecting.length : total)
       // Desenhar TODOS os tracinhos no audio inteiro
       drawVoiceWaveform(canvas, voiceTrimState.buffer, voiceTrimState.rangeStart, voiceTrimState.rangeEnd, voiceTrimState.silenceRegions)
     }

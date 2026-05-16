@@ -139,9 +139,9 @@ async function processTrackFile(file: File): Promise<{ blob: Blob; name: string;
 const VOICE_AUTO_TRIM_SECONDS = 10 // target de duracao apos auto-trim
 const SILENCE_THRESHOLD = 0.015 // RMS absoluto para detectVoiceRange (auto-trim)
 const SILENCE_DETECT_WINDOW = 40 // ms - janela fina para detectar silencios com precisao
-const MIN_SILENCE_TO_CUT = 200 // ms - silencio minimo para marcar (mais sensivel)
+const MIN_SILENCE_TO_CUT = 120 // ms - silencio minimo para marcar (mais sensivel)
 const MICRO_GAP_MS = 30 // ms - gap entre palavras apos remover silencio (nao emenda direto)
-const SILENCE_RATIO = 0.06 // silencio = RMS < 6% do pico do audio (relativo, adaptavel)
+const SILENCE_RATIO = 0.04 // silencio = RMS < 4% do pico do audio (mais sensivel)
 
 /**
  * Detecta todas as regioes de silencio no audio usando threshold RELATIVO.
@@ -188,11 +188,9 @@ function detectSilenceRegions(audioBuffer: AudioBuffer): Array<{ start: number; 
       if (silStart !== -1) {
         const len = i - silStart
         if (len >= minSilWins) {
-          // Adicionar margem de 20ms em cada lado (nao cortar dentro da palavra)
-          const marginMs = 20
           regions.push({
-            start: Math.max(0, (silStart * SILENCE_DETECT_WINDOW / 1000) - marginMs / 1000),
-            end: Math.min(audioBuffer.duration, (i * SILENCE_DETECT_WINDOW / 1000) + marginMs / 1000)
+            start: silStart * SILENCE_DETECT_WINDOW / 1000,
+            end: i * SILENCE_DETECT_WINDOW / 1000
           })
         }
         silStart = -1

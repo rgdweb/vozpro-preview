@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://github.com/Tencent-Hunyuan/OmniWeaving",
+    "name": "GitHub - Tencent-Hunyuan/OmniWeaving",
+    "snippet": "Abstract. We propose OmniWeaving, an omni-level video generation model featuring powerful multimodal composition and reasoning-informed capabilities.",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/StableDiffusion/comments/1sb7nxm/tencent_releases_omniweaving_a_video_generation",
+    "name": "Tencent releases omniweaving, a video generation model  - Reddit",
+    "snippet": "Hunyuan Video 1.5 already has ComfyUI support, so hopefully support for this model gets added too.",
+    "host_name": "www.reddit.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/Tencent-Hunyuan",
+    "name": "Tencent-Hunyuan · GitHub",
+    "snippet": "Tencent-Hunyuan has 63 repositories available. Follow their code on GitHub ... HunyuanVideo: A Systematic Framework For Large Video Generation Model. Python ...",
+    "host_name": "github.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://huggingface.co/tencent/HY-OmniWeaving",
+    "name": "tencent/HY-OmniWeaving - Hugging Face",
+    "snippet": "We propose OmniWeaving, an omni-level video generation model featuring powerful multimodal composition and reasoning-informed capabilities.",
+    "host_name": "huggingface.co",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=VMSMQo3h6qs",
+    "name": "Hunyuan OmniWeaving | Manual Installation Tutorial - YouTube",
+    "snippet": "... Hunyuan OmniWeaving, Tencent's first-of-its-kind all-in-one video editing and generation model. If you want to install OmniWeaving step by ...",
+    "host_name": "www.youtube.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

@@ -566,11 +566,11 @@ $refAudioUrl = $input['refAudioUrl'] ?? '';
 $refAudioPath = $input['refAudioPath'] ?? '';
 $refText = $input['refText'] ?? '';
 $instruct = $input['instruct'] ?? '';
-// FORCAR INSTRUCT EM PORTUGUES quando vazio
+// DETECCAO DE IDIOMA (usado para prefixo PT-BR no texto)
 $isPortuguese = in_array(strtolower($idioma), ['portuguese', 'portugues', 'pt', 'pt-br', 'pt_br']);
-if ($isPortuguese && empty(trim($instruct ?? ''))) {
-    $instruct = 'Fale em portugues do Brasil';
-}
+// NOTA: NAO adicionamos instruct automatico! O GPT-SoVITS so aceita termos especificos:
+// male, female, high pitch, low pitch, portuguese accent, whisper, teenager, child, elderly, etc.
+// Texto livre no instruct causa ValueError: "Unsupported instruct items found"
 $refAudioName = $input['refAudioName'] ?? 'ref_audio.wav';
 $speed = $input['speed'] ?? 1.0;
 // Clamp velocidade: modelo OmniVoice/GPT-SoVITS fica distorcido fora desta faixa

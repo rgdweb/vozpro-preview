@@ -236,7 +236,49 @@ function downloadRefAudio($url, $name) {
     }
 
     debugLog('Download ref audio', 'ok', round(filesize($tempFile) / 1024) . 'KB');
+
+    // ===== TRIMAR AUDIO PARA EVITAR CUDA OOM (max 10s) =====
+    $trimmedFile = trimRefAudioToMaxSeconds($tempFile, 10);
+    if ($trimmedFile && $trimmedFile !== $tempFile) {
+        if (file_exists($tempFile)) unlink($tempFile);
+        $tempFile = $trimmedFile;
+        debugLog('Trim ref audio', 'ok', round(filesize($tempFile) / 1024) . 'KB (max 10s)');
+    } elseif ($trimmedFile === false) {
+        debugLog('Trim ref audio', 'warn', 'Falha no trim, usando original');
+    }
+
     return $tempFile;
+}
+
+// ===================== TRIM AUDIO REF (max seconds) =====================
+define('MAX_REF_AUDIO_SECONDS', 10);
+
+function trimRefAudioToMaxSeconds($filePath, $maxSeconds = 10) {
+    $trimScript = __DIR__ . '/trim_audio.py';
+
+    if (!file_exists($trimScript)) {
+        debugLog('Trim ref audio', 'warn', 'trim_audio.py nao encontrado');
+        return false;
+    }
+
+    $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+    $trimmedFile = tempnam(sys_get_temp_dir(), 'vp_ov_trim_') . '.' . $ext;
+
+    $cmd = 'python3 ' . escapeshellarg($trimScript) . ' '
+         . escapeshellarg($filePath) . ' '
+         . escapeshellarg($trimmedFile) . ' '
+         . escapeshellarg((string)$maxSeconds);
+
+    $output = shell_exec($cmd . ' 2>&1');
+    $output = trim($output ?? '');
+
+    if ($output === 'OK' && file_exists($trimmedFile) && filesize($trimmedFile) > 0) {
+        return $trimmedFile;
+    }
+
+    if (file_exists($trimmedFile)) unlink($trimmedFile);
+    debugLog('Trim ref audio', 'warn', 'Falha: ' . $output);
+    return false;
 }
 
 function uploadToGradio($filePath, $fileName, $baseUrl) {
@@ -641,7 +683,13 @@ if (!$audioUrl) {
 
 // ===================== BAIXAR AUDIO E RETORNAR =====================
 debugLog('Download audio', 'info', 'baixando audio gerado...');
-$tempAudioFile = tempnam(sys_get_temp_dir(), 'vp_ov_gen_') . '.wav';
+
+// Detectar extensao real do audio gerado
+$ext = strtolower(pathinfo($audioUrl, PATHINFO_EXTENSION));
+if (empty($ext) || !in_array($ext, ['wav', 'mp3', 'ogg', 'flac'])) {
+    $ext = 'wav';
+}
+$tempAudioFile = tempnam(sys_get_temp_dir(), 'vp_ov_gen_') . '.' . $ext;
 
 $ch = curl_init($audioUrl);
 $fp = fopen($tempAudioFile, 'w');
@@ -662,11 +710,11 @@ if (!$dlOk || $dlCode != 200 || filesize($tempAudioFile) == 0) {
     returnError("Falha ao baixar audio gerado (HTTP $dlCode)");
 }
 
-debugLog('Download audio', 'ok', round(filesize($tempAudioFile) / 1024) . 'KB');
+debugLog('Download audio', 'ok', round(filesize($tempAudioFile) / 1024) . 'KB' . ($ext !== 'wav' ? " ($ext)" : ''));
 
 // Base64
 $audioBase64 = base64_encode(file_get_contents($tempAudioFile));
-$ext = strtolower(pathinfo($audioUrl, PATHINFO_EXTENSION));
+
 $mimeType = ($ext === 'mp3') ? 'audio/mpeg' : 'audio/wav';
 $dataUri = 'data:' . $mimeType . ';base64,' . $audioBase64;
 

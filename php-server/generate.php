@@ -102,9 +102,21 @@ function returnError($msg, $code = 500) {
 
 // ===================== STRIP SSML (defesa) =====================
 function stripSSML($text) {
+    if (!is_string($text)) return '';
     if (!preg_match('/<[a-z][^>]*>/i', $text)) return $text;
     $r = preg_replace('/<[^>]+>/', '', $text);
+    $r = html_entity_decode($r, ENT_QUOTES | ENT_XML1, 'UTF-8');
     return trim(preg_replace('/\s+/', ' ', $r));
+}
+
+// ===================== LIMPAR TEXTO (defesa extra) =====================
+// Remove caracteres de controle invisiveis que podem causar garbling
+function cleanText($text) {
+    if (!is_string($text)) return '';
+    $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text);
+    $text = str_replace(["\r\n", "\r"], "\n", $text);
+    $text = preg_replace('/\n{3,}/', "\n\n", $text);
+    return trim($text);
 }
 
 // ===================== LER INPUT JSON =====================
@@ -125,8 +137,9 @@ $refAudioName = $input['refAudioName'] ?? 'ref_audio.wav';
 $speed = $input['speed'] ?? 1.0;
 $numStep = $input['numStep'] ?? 32;
 
-// DEFESA DUPLA: strip SSML antes de enviar ao TTS
+// DEFESA DUPLA: strip SSML + clean texto antes de enviar ao TTS
 $texto = stripSSML($texto);
+$texto = cleanText($texto);
 $guidanceScale = $input['guidanceScale'] ?? 2.0;
 
 debugLog('Input recebido', 'info', "texto: " . mb_substr($texto, 0, 50) . " | idioma: $idioma | steps: $numStep");
@@ -590,7 +603,13 @@ if (!$audioUrl) {
 
 // ===================== BAIXAR AUDIO GERADO =====================
 debugLog('Download audio gerado', 'info', 'baixando...');
-$tempAudioFile = tempnam(sys_get_temp_dir(), 'vp_gen_') . '.wav';
+
+// Detectar extensao real do audio gerado (Gradio pode retornar WAV ou MP3)
+$ext = strtolower(pathinfo($audioUrl, PATHINFO_EXTENSION));
+if (empty($ext) || !in_array($ext, ['wav', 'mp3', 'ogg', 'flac'])) {
+    $ext = 'wav'; // default seguro
+}
+$tempAudioFile = tempnam(sys_get_temp_dir(), 'vp_gen_') . '.' . $ext;
 
 $ch = curl_init($audioUrl);
 $fp = fopen($tempAudioFile, 'w');
@@ -613,13 +632,12 @@ if (!$dlOk || $dlCode != 200 || filesize($tempAudioFile) == 0) {
 }
 
 $audioSize = filesize($tempAudioFile);
-debugLog('Download audio gerado', 'ok', round($audioSize / 1024) . 'KB');
+debugLog('Download audio gerado', 'ok', round($audioSize / 1024) . 'KB' . ($ext !== 'wav' ? " ($ext)" : ''));
 
 // ===================== CONVERTER PARA BASE64 =====================
 debugLog('Base64 encode', 'info', 'convertendo...');
 $audioBase64 = base64_encode(file_get_contents($tempAudioFile));
 
-$ext = strtolower(pathinfo($audioUrl, PATHINFO_EXTENSION));
 $mimeType = ($ext === 'mp3') ? 'audio/mpeg' : 'audio/wav';
 
 $dataUri = 'data:' . $mimeType . ';base64,' . $audioBase64;

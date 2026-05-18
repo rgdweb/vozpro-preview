@@ -2,15 +2,25 @@
 // generate-direct.php - Geracao de voz TTS via VozPro (chamada DIRETA do browser)
 // Bypassa completamente o Vercel para evitar timeout de 60s
 // Usa HMAC token para autenticacao (mesmo padrao do upload-direct.php)
-// v3: SSE Streaming persistente (conexao aberta ate resultado)
+// v4: SSE Streaming persistente + CORRECOES
+// - CURLOPT_ENCODING => '' em TODOS os curl (bloqueia gzip que corrompe audio)
+// - Token 30min (igual generate.php/omnivoice)
+// - SSE timeout 600s (textos longos)
+// - CORS header_remove
+// - cleanText() (remove caracteres de controle invisiveis)
+// - SSE headers completos (Cache-Control, Connection, X-Accel-Buffering, Accept-Encoding)
+// - Extensao detectada do audio gerado (nao mais forca .wav)
 
 set_time_limit(0);
 ini_set('max_input_time', 0);
-ini_set('memory_limit', '256M');
+ini_set('memory_limit', '512M');
 
 require_once __DIR__ . '/config.php';
 
 // CORS (necessario para chamada direta do browser)
+header_remove('Access-Control-Allow-Origin');
+header_remove('Access-Control-Allow-Methods');
+header_remove('Access-Control-Allow-Headers');
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
@@ -47,8 +57,8 @@ if (count($parts) !== 2) {
 $timestamp = (int)$parts[0];
 $receivedHmac = $parts[1];
 
-// Token expira em 15 minutos (geracao pode demorar)
-if (time() - $timestamp > 900) {
+// Token expira em 30 minutos (geracao de texto longo pode demorar)
+if (time() - $timestamp > 1800) {
     http_response_code(401);
     echo json_encode(['erro' => 'Token expirado, tente novamente']);
     exit;
@@ -101,6 +111,25 @@ function returnError($msg, $code = 500) {
     exit;
 }
 
+// ===================== STRIP SSML (defesa) =====================
+function stripSSML($text) {
+    if (!is_string($text)) return '';
+    if (!preg_match('/<[a-z][^>]*>/i', $text)) return $text;
+    $r = preg_replace('/<[^>]+>/', '', $text);
+    $r = html_entity_decode($r, ENT_QUOTES | ENT_XML1, 'UTF-8');
+    return trim(preg_replace('/\s+/', ' ', $r));
+}
+
+// ===================== LIMPAR TEXTO (defesa extra) =====================
+// Remove caracteres de controle invisiveis que podem causar garbling
+function cleanText($text) {
+    if (!is_string($text)) return '';
+    $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text);
+    $text = str_replace(["\r\n", "\r"], "\n", $text);
+    $text = preg_replace('/\n{3,}/', "\n\n", $text);
+    return trim($text);
+}
+
 // ===================== LER INPUT JSON =====================
 $rawInput = file_get_contents('php://input');
 $input = json_decode($rawInput, true);
@@ -110,6 +139,10 @@ if (!$input) {
 }
 
 $texto = $input['text'] ?? '';
+
+// DEFESA: strip SSML + clean texto antes de enviar ao TTS
+$texto = stripSSML($texto);
+$texto = cleanText($texto);
 $idioma = $input['language'] ?? 'Auto';
 $refAudioUrl = $input['refAudioUrl'] ?? '';
 $refAudioPath = $input['refAudioPath'] ?? '';
@@ -147,6 +180,7 @@ function downloadRefAudio($url, $name) {
         CURLOPT_FILE => $fp,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_TIMEOUT => 60,
+        CURLOPT_ENCODING => '',  // BLOQUEIA compressao gzip/brotli (corrompe audio via tunnel)
         CURLOPT_SSL_VERIFYPEER => false,
     ]);
     $dlOk = curl_exec($ch);
@@ -176,6 +210,7 @@ function uploadToHF($filePath, $fileName, $hfUrl) {
         CURLOPT_POSTFIELDS => ['files' => $cfile],
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 120,
+        CURLOPT_ENCODING => '',  // BLOQUEIA compressao (corrompe upload de audio via tunnel)
         CURLOPT_SSL_VERIFYPEER => false,
     ]);
     $resp = curl_exec($ch);
@@ -205,7 +240,9 @@ function submitToGradio($gradioData, $hfUrl) {
         CURLOPT_POSTFIELDS => json_encode(['data' => $gradioData]),
         CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 60,
+        CURLOPT_TIMEOUT => 90,
+        CURLOPT_CONNECTTIMEOUT => 20,
+        CURLOPT_ENCODING => '',  // BLOQUEIA compressao no submit
         CURLOPT_SSL_VERIFYPEER => false,
     ]);
     $resp = curl_exec($ch);
@@ -236,7 +273,7 @@ function submitToGradio($gradioData, $hfUrl) {
  * Ao inves de fazer 180 requests HTTP separados (polling),
  * faz UMA conexao e le os eventos conforme chegam (heartbeats, complete, error).
  */
-function streamSSEForResult($eventId, $hfUrl, $timeoutSec = 180) {
+function streamSSEForResult($eventId, $hfUrl, $timeoutSec = 600) {
     debugLog('SSE Stream', 'info', "Abrindo conexao persistente para $eventId...");
 
     $audioUrl = null;
@@ -328,7 +365,16 @@ function streamSSEForResult($eventId, $hfUrl, $timeoutSec = 180) {
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => false, // NAO esperar tudo - stream!
         CURLOPT_TIMEOUT => $timeoutSec,
-        CURLOPT_HTTPHEADER => ['Accept: text/event-stream'],
+        CURLOPT_CONNECTTIMEOUT => 20,
+        CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+        CURLOPT_ENCODING => '',  // BLOQUEIA compressao no SSE stream
+        CURLOPT_HTTPHEADER => [
+            'Accept: text/event-stream',
+            'Cache-Control: no-cache',
+            'Connection: keep-alive',
+            'X-Accel-Buffering: no',
+            'Accept-Encoding: identity',  // Forca sem compressao
+        ],
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_WRITEFUNCTION => $writeFn,
     ]);
@@ -396,7 +442,7 @@ function runGeneration($gradioData, $refAudioFile, $refAudioName, $hfUrl) {
 
     // SSE Stream persistente
     debugLog('Geracao', 'info', "Aguardando resultado via SSE...");
-    $result = streamSSEForResult($eventId, $hfUrl, 180);
+    $result = streamSSEForResult($eventId, $hfUrl, 600);
 
     if ($result['status'] === 'complete') {
         return ['audioUrl' => $result['audioUrl'], 'error' => null];
@@ -502,14 +548,21 @@ if (!$audioUrl) {
 
 // ===================== BAIXAR AUDIO GERADO =====================
 debugLog('Download audio gerado', 'info', 'baixando...');
-$tempAudioFile = tempnam(sys_get_temp_dir(), 'vp_gen_') . '.wav';
+
+// Detectar extensao real do audio gerado (Gradio pode retornar WAV ou MP3)
+$ext = strtolower(pathinfo($audioUrl, PATHINFO_EXTENSION));
+if (empty($ext) || !in_array($ext, ['wav', 'mp3', 'ogg', 'flac'])) {
+    $ext = 'wav'; // default seguro
+}
+$tempAudioFile = tempnam(sys_get_temp_dir(), 'vp_gen_') . '.' . $ext;
 
 $ch = curl_init($audioUrl);
 $fp = fopen($tempAudioFile, 'w');
 curl_setopt_array($ch, [
     CURLOPT_FILE => $fp,
     CURLOPT_FOLLOWLOCATION => true,
-    CURLOPT_TIMEOUT => 120,
+    CURLOPT_TIMEOUT => 180,
+    CURLOPT_ENCODING => '',  // BLOQUEIA compressao (corrompe audio via tunnel!)
     CURLOPT_SSL_VERIFYPEER => false,
 ]);
 $dlOk = curl_exec($ch);
@@ -523,13 +576,12 @@ if (!$dlOk || $dlCode != 200 || filesize($tempAudioFile) == 0) {
 }
 
 $audioSize = filesize($tempAudioFile);
-debugLog('Download audio gerado', 'ok', round($audioSize / 1024) . 'KB');
+debugLog('Download audio gerado', 'ok', round($audioSize / 1024) . 'KB' . ($ext !== 'wav' ? " ($ext)" : ''));
 
 // ===================== CONVERTER PARA BASE64 =====================
 debugLog('Base64 encode', 'info', 'convertendo...');
 $audioBase64 = base64_encode(file_get_contents($tempAudioFile));
 
-$ext = strtolower(pathinfo($audioUrl, PATHINFO_EXTENSION));
 $mimeType = ($ext === 'mp3') ? 'audio/mpeg' : 'audio/wav';
 
 $dataUri = 'data:' . $mimeType . ';base64,' . $audioBase64;

@@ -25,8 +25,11 @@ define('UPLOAD_DIR', __DIR__ . '/audios/');
 // Tipos permitidos de upload
 define('ALLOWED_CATEGORIES', ['ref', 'track', 'generated']);
 
-// URL do HuggingFace Space OmniVoice (fallback)
-define('HF_SPACE_URL', 'https://hereby-shopper-aid-producer.trycloudflare.com');
+// URL do HuggingFace Space OmniVoice (fallback — DEVE ser atualizada pelo tunnel)
+// Esta URL muda toda vez que o cloudflared reinicia!
+// O sistema usa TUNNEL_URL do update_tunnel.php como primario.
+// Este valor so sera usado se TUNNEL_URL nao estiver definida.
+define('HF_SPACE_URL', ''); // vazio = usa get_tunnel.php dinamicamente
 
 // Habilitar logs
 define('ENABLE_LOGS', true);

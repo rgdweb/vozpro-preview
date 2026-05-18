@@ -40,3 +40,22 @@ Stage Summary:
 - Correção extra: crossfade frontend 50ms->0ms (evita artefato flanging entre chunks)
 - O sistema precisa do deploy dos arquivos para o HostGator cPanel para entrar em produção
 
+---
+Task ID: 2
+Agent: Super Z (main)
+Task: Corrigir pronúncia de palavras com X em português (exatamente = ekssatamente)
+
+Work Log:
+- Identificado problema: TTS pronuncia todo X como "KS" (ekssatamente)
+- Em português: ex- = Z, x-apos-consoante = KS, enx- = SH
+- Criada função fixPortuguesePronunciation() com ~60 palavras no dicionário
+- Adicionada nos 3 arquivos de geração: generate-direct.php, generate.php, generate-omnivoice.php
+- Pipeline: stripSSML → cleanText → fixPortuguesePronunciation
+- Chaves balanceadas validadas em todos os 3 arquivos
+- ZIP de deploy atualizado
+
+Stage Summary:
+- Palavras corrigidas: exatamente→ezatamente, exemplo→ezemplo, existir→ezistir, excesso→ecesso, explicar→esplicar, extensão→estensão, máximo→mássimo, complexo→complessso, etc.
+- Palavras NÃO tocadas (já corretas): anexo, próximo, texto, contexto, fixo, tóxico
+- ZIP atualizado: /home/z/my-project/download/omnivoice-quality-fixes.zip (45KB)
+

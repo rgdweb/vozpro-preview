@@ -153,6 +153,7 @@ interface VoiceVariation {
   instruct: string
   order: number
   active: boolean
+  hasAudio?: boolean // true se tem áudio de referência
 }
 
 interface Voice {
@@ -703,13 +704,21 @@ export default function VozProClient() {
         ])
         if (voicesRes.ok) {
           const voicesData = await voicesRes.json()
-          // Filter out variations without audio for the client
+          // Manter todas as vozes — mesmo sem variação ativa ou sem áudio
+          // Marcar variações com áudio vs sem áudio para exibir no UI
           const filteredVoices = voicesData.map((v: Voice) => ({
             ...v,
-            variations: v.variations.filter((varr: VoiceVariation) => varr.refAudioPath),
-          })).filter((v: Voice) => v.variations.length > 0)
+            variations: v.variations.map((varr: VoiceVariation) => ({
+              ...varr,
+              hasAudio: !!varr.refAudioPath,
+            })),
+          }))
           setVoices(filteredVoices)
-          if (filteredVoices.length > 0) {
+          // Auto-selecionar primeira voz COM áudio disponível
+          const firstWithAudio = filteredVoices.find((v: Voice) => v.variations.some((vr: VoiceVariation) => vr.hasAudio))
+          if (firstWithAudio) {
+            setSelectedVoiceId(firstWithAudio.id)
+          } else if (filteredVoices.length > 0) {
             setSelectedVoiceId(filteredVoices[0].id)
           }
         }
@@ -755,9 +764,22 @@ export default function VozProClient() {
     loadData()
   }, [authChecked])
 
-  // Auto-select first variation when voice changes
+  // Auto-select first variation WITH AUDIO when voice changes
   useEffect(() => {
     if (selectedVoice && selectedVoice.variations.length > 0) {
+      // Priorizar variação ativa com áudio
+      const activeWithAudio = selectedVoice.variations.find(v => v.active !== false && v.hasAudio)
+      if (activeWithAudio) {
+        setSelectedVariationId(activeWithAudio.id)
+        return
+      }
+      // Fallback: primeira com áudio
+      const withAudio = selectedVoice.variations.find(v => v.hasAudio)
+      if (withAudio) {
+        setSelectedVariationId(withAudio.id)
+        return
+      }
+      // Último recurso: primeira disponível
       setSelectedVariationId(selectedVoice.variations[0].id)
     } else {
       setSelectedVariationId('')
@@ -1860,18 +1882,22 @@ export default function VozProClient() {
                                   {voice.variations.map((v) => {
                                     const varAudioUrl = v.refAudioServerUrl || v.refAudioPath || ''
                                     const isVarSelected = selectedVariationId === v.id
+                                    const isInactive = v.active === false || !v.hasAudio
                                     return (
                                       <button
                                         key={v.id}
                                         onClick={(e) => { e.stopPropagation(); setSelectedVariationId(v.id) }}
                                         className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all ${
-                                          isVarSelected
-                                            ? 'border-violet-500/60 bg-violet-500/15 text-violet-200'
-                                            : 'border-white/5 bg-white/3 text-slate-400 hover:border-white/15 hover:bg-white/5'
+                                          isInactive
+                                            ? 'border-slate-800 bg-slate-900/30 text-slate-600 opacity-50 cursor-default'
+                                            : isVarSelected
+                                              ? 'border-violet-500/60 bg-violet-500/15 text-violet-200'
+                                              : 'border-white/5 bg-white/3 text-slate-400 hover:border-white/15 hover:bg-white/5'
                                         }`}
+                                        title={isInactive ? 'Variação desativada / sem áudio' : v.label}
                                       >
                                         <VoicePreviewButton
-                                          audioUrl={varAudioUrl}
+                                          audioUrl={isInactive ? '' : varAudioUrl}
                                           voiceId={v.id}
                                           currentlyPlayingId={previewingVoiceId}
                                           onPlayStart={setPreviewingVoiceId}
@@ -1879,7 +1905,8 @@ export default function VozProClient() {
                                         />
                                         <span className="flex-shrink-0">{v.emoji || '🎙️'}</span>
                                         <span className="truncate">{v.label}</span>
-                                        {isVarSelected && <CheckCircle2 className="w-3.5 h-3.5 text-violet-400 ml-auto flex-shrink-0" />}
+                                        {isInactive && <span className="text-[10px] text-slate-600 ml-auto flex-shrink-0">off</span>}
+                                        {!isInactive && isVarSelected && <CheckCircle2 className="w-3.5 h-3.5 text-violet-400 ml-auto flex-shrink-0" />}
                                       </button>
                                     )
                                   })}

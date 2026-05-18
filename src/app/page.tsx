@@ -624,7 +624,7 @@ export default function VozProClient() {
   const [previewingTrackId, setPreviewingTrackId] = useState<string | null>(null)
   const [selectedTrackId, setSelectedTrackId] = useState<string>('')
   const [trackShowLimit, setTrackShowLimit] = useState(15)
-  const [language, setLanguage] = useState('Portuguese')
+  const [language, setLanguage] = useState('Auto')
 
   // Settings
   const [text, setText] = useState('')
@@ -930,7 +930,7 @@ export default function VozProClient() {
                 referenceAudioUrl: uploadedVoiceUrl || selectedVariation?.refAudioServerUrl || '',
                 referenceAudioName: uploadedVoiceFile?.name || selectedVariation?.refAudioName || 'ref_audio.wav',
                 refText: selectedVariation?.refText || '',
-                numStep: 20, // 20 = ótimo balanço velocidade/qualidade (era 32)
+                numStep: 32, // OmniVoice: 32 = qualidade padrao (igual ao local)
                 speed,
                 language,
                 gender: isAutoMode ? 'Auto' : (isDesignMode ? designParams.gender : 'Auto'),
@@ -1182,7 +1182,7 @@ export default function VozProClient() {
           referenceAudioUrl: voiceMode === 'clone' ? (uploadedVoiceUrl || selectedVariation?.refAudioServerUrl || '') : '',
           referenceAudioName: voiceMode === 'clone' ? (uploadedVoiceFile?.name || selectedVariation?.refAudioName || 'ref_audio.wav') : '',
           refText: selectedVariation?.refText || '',
-          numStep: 20, // VozPro: 20 = ótimo balanço velocidade/qualidade (era 32)
+          numStep: 32, // OmniVoice: 32 = qualidade padrao (igual ao local)
           speed,
           language: language, // usa o idioma selecionado pelo usuario (Portuguese, Auto, etc)
           // Voice Design params (usados pelo _design_fn endpoint)

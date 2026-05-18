@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://github.com/k2-fsa/OmniVoice",
+    "name": "GitHub - k2-fsa/OmniVoice: High-Quality Voice Cloning TTS for 600+",
+    "snippet": "OmniVoice is a state-of-the-art massively multilingual zero-shot text-to-speech (TTS) model supporting over 600 languages. Built on a novel diffusion ...",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://huggingface.co/spaces/k2-fsa/OmniVoice",
+    "name": "OmniVoice Demo - a Hugging Face Space by k2-fsa",
+    "snippet": "State-of-the-art text-to-speech model for 600+ languages, supporting: Voice Clone — Clone any voice from a reference audio; Voice Design — Create custom voices ...",
+    "host_name": "huggingface.co",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=M6pmUoWUd_k",
+    "name": "How to Generate Realistic Speech with k2-fsa OmniVoice TTS",
+    "snippet": "Learn how to use OmniVoice TTS for realistic text-to-speech with voice cloning capabilities. This diffusion-based AI model supports 600+ ...",
+    "host_name": "www.youtube.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://sourceforge.net/projects/omnivoice.mirror",
+    "name": "OmniVoice download | SourceForge.net",
+    "snippet": "Download OmniVoice for free. High-Quality Voice Cloning TTS for 600+ Languages. The OmniVoice project is a cutting-edge multilingual ...",
+    "host_name": "sourceforge.net",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.linkedin.com/posts/xanguera_github-k2-fsaomnivoice-high-quality-voice-activity-7449525800455983104-yS1k",
+    "name": "High-Quality Voice Cloning TTS for 600+ Languages | Xavier Anguera",
+    "snippet": "Great voice conversion and TTS engine called OmniVoice, released recently as open source by the K2-fsa team, including researchers from ...",
+    "host_name": "www.linkedin.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/StableDiffusion/comments/1sbemc5/comfyuiomnivoicetts",
+    "name": "ComfyUI-OmniVoice-TTS : r/StableDiffusion - Reddit",
+    "snippet": "https://github.com/k2-fsa/OmniVoice. HuggingFace: https://huggingface ... I think its the best free tts you can use, even with your own native ...",
+    "host_name": "www.reddit.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/LocalLLaMA/comments/1saeuv2/omnivoice_600_language_opensource_tts_with_voice",
+    "name": "Omnivoice - 600+ Language Open-Source TTS with Voice Cloning",
+    "snippet": "The whole setup is around 6 GB, with the model itself being about 2 GB, so it's relatively lightweight. You can generate a few clips for free on ...",
+    "host_name": "www.reddit.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://cloud.google.com/text-to-speech/pricing",
+    "name": "Review pricing for Text-to-Speech | Google Cloud",
+    "snippet": "Text-to-Speech is priced based on the number of characters sent to the service to be synthesized into audio each month.",
+    "host_name": "cloud.google.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://colab.research.google.com/github/TeamAIQ/Colab-notebooks/blob/main/notebooks/OmniVoice_TTS_By_AIQUEST.ipynb",
+    "name": "️ OmniVoice — 600+ Language Zero-Shot TTS - Colab",
+    "snippet": "Colab Free Tier (T4 GPU) — Created by AIQUEST. Voice Cloning · Voice Design · Auto Voice · 600+ Languages | Powered by k2-fsa/OmniVoice ...",
+    "host_name": "colab.research.google.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.facebook.com/0xSojalSec/posts/high-quality-voice-cloning-voice-design-for-600-languages-githubcomk2-fsaomnivoi/1484873256500406",
+    "name": "High-Quality Voice Cloning, Voice Design for 600+ Languages",
+    "snippet": "This innovative technology allows users to clone voices with remarkable precision, offering granular control over tone, emotion, accent, rhythm, ...",
+    "host_name": "www.facebook.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

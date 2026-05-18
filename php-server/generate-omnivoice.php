@@ -247,6 +247,8 @@ $refAudioUrl = $input['referenceAudioUrl'] ?? '';
 $refAudioName = $input['referenceAudioName'] ?? 'ref_audio.wav';
 $instruct = $input['instruct'] ?? '';
 $speed = $input['speed'] ?? 1.0;
+// Clamp velocidade: API OmniVoice min=0.5 max=2.0 (valores fora causam erro ou audio distorcido)
+$speed = max(0.5, min(2.0, (float)$speed));
 $numStep = $input['numStep'] ?? 32;
 
 // Voice Design params (usados no _design_fn)

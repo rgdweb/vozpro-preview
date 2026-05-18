@@ -239,3 +239,24 @@ Work Log:
 Stage Summary:
 - Todos os arquivos estão sincronizados: slider 0.8-1.3 no frontend + clamp 0.8-1.3 no backend
 - Git push concluído com sucesso
+
+---
+Task ID: 1
+Agent: Main
+Task: Investigar diferença de pronúncia entre VozPro e local OmniVoice
+
+Work Log:
+- Comparou parâmetros do PHP com o OmniVoice local
+- Encontrou 3 diferenças críticas:
+  1. language: VozPro enviava 'Portuguese', local usa 'Auto'
+  2. numStep: VozPro enviava 20, local usa 32
+  3. postprocess: Next.js route enviava false, local usa true
+- Corrigiu language default para 'Auto' em page.tsx
+- Corrigiu numStep de 20 para 32 em page.tsx
+- Corrigiu postprocess de false para true em route.ts
+- Push para GitHub (Vercel auto-deploy)
+
+Stage Summary:
+- Commit: 0da1a2d "fix: language Auto + numStep 32 + postprocess true"
+- Vercel vai fazer auto-deploy em ~1-2 minutos
+- PHP já deployado anteriormente com parâmetros corretos (denoise, preprocess, postprocess = true)

@@ -641,7 +641,7 @@ export default function VozProClient() {
   const [numStep, setNumStep] = useState(40)
   const [guidanceScale, setGuidanceScale] = useState(2.5)
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [pronunciationOptimization, setPronunciationOptimization] = useState(true) // Agente IA de pronúncia (ligado por padrão)
+  const [pronunciationOptimization, setPronunciationOptimization] = useState(false) // Agente IA de pronúncia (ligado por padrão)
   const [llmPreprocess, setLlmPreprocess] = useState(false) // LLM pré-processador (opcional)
 
   // Generation state

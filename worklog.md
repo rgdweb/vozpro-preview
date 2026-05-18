@@ -195,3 +195,47 @@ Stage Summary:
 - CORREÇÃO: Todos os 3 PHP foram atualizados com versões locais corretas
 - O "exatamente" falando "ekssatamente" era porque o dicionário de pronúncia simplesmente NÃO EXISTIA no servidor
 - Agora com os arquivos corretos, "exatamente" será substituído por "ezatamente" ANTES de enviar ao TTS
+---
+Task ID: 1
+Agent: Main Agent
+Task: Corrigir pronúncia de siglas (HTML, SQL, etc.) e palavra "teste" no TTS
+
+Work Log:
+- Analisado o dicionário de pronúncia existente nos 3 PHPs (generate-omnivoice.php, generate.php, generate-direct.php)
+- Adicionada seção $abbreviations com 100+ siglas organizadas por categoria:
+  - Documentos (CPF, CNPJ, RG, CNH, IPTU, IPVA...)
+  - Tecnologia (HTML, CSS, SQL, API, TTS, GPU, CPU, PDF, PHP, HTTP, JSON...)
+  - Redes (WiFi, LAN, WAN, VPN, IP, USB, HDMI, SSD...)
+  - Medicina (SUS, ANS, HIV...)
+  - Governo (IBGE, INSS, PF, PJ, MEI...)
+  - Educação (ENEM, PROUNI, FIES...)
+  - Financeiro (PIX, CDI, SELIC, IPCA, PIB...)
+  - Outros (CEO, CFO, CTO, FAQ, WhatsApp, YouTube...)
+- Adicionada seção $problemWords para palavras com timbre errado: "teste" → "téstie", "testes" → "tésties"
+- Siglas são case-insensitive (HTML, html, Html tudo funciona)
+- Removidas duplicatas acidentais no generate-omnivoice.php
+- ZIP criado e enviado ao servidor via cPanel (browser automation)
+- Arquivos extraídos em /public_html/omnivoice/ substituindo os antigos
+
+Stage Summary:
+- 3 arquivos PHP atualizados no servidor com dicionário de siglas completo
+- As siglas agora são pronunciadas letra por letra em português (ex: HTML = "agá-tê-eme-ele", SQL = "esse-cú-ele")
+- "Teste" agora pronuncia com timbre correto
+- Git commit: 99edd0f pushado para origin/main
+---
+Task ID: 2
+Agent: Main Agent
+Task: Git commit + push mudanças pendentes (slider velocidade + speed clamp)
+
+Work Log:
+- Verificado que src/app/page.tsx já tinha slider min=0.8 max=1.3 ✅
+- Verificado que Omnivoice/src/app/api/omnivoice-generate/route.ts ainda tinha clamp antigo (0.25-4.0) ❌
+- Corrigido clamp no submodule: Math.max(0.25, Math.min(4.0, ...)) → Math.max(0.8, Math.min(1.3, ...))
+- Commit no submodule: "fix: clamp velocidade 0.8-1.3 no API route"
+- Git pull --rebase → conflito resolvido (ambos já tinham 0.8-1.3)
+- Push do submodule + push do projeto principal
+- Commit final: 99edd0f em origin/main
+
+Stage Summary:
+- Todos os arquivos estão sincronizados: slider 0.8-1.3 no frontend + clamp 0.8-1.3 no backend
+- Git push concluído com sucesso

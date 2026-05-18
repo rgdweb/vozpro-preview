@@ -750,14 +750,23 @@ function streamSSEForResult($eventId, $hfUrl, $timeoutSec = 600) {
             // COMPLETE = audio gerado!
             if ($eventType === 'complete' && !empty($eventData)) {
                 debugLog('SSE Stream', 'ok', 'Evento COMPLETE recebido!');
+                debugLog('SSE Raw Data', 'info', mb_substr($eventData, 0, 500));
                 $resultData = json_decode($eventData, true);
+                debugLog('SSE Parsed', 'info', 'type=' . gettype($resultData) . (is_array($resultData) ? ' count=' . count($resultData) : '') . ' | keys=' . (is_array($resultData) ? implode(',', array_keys($resultData)) : 'N/A'));
                 if (is_array($resultData) && count($resultData) >= 2) {
                     $output = $resultData[0];
+                    debugLog('SSE Output[0]', 'info', 'type=' . gettype($output) . ' | ' . mb_substr(json_encode($output), 0, 300));
                     if (isset($output['url'])) {
                         $audioUrl = $output['url'];
                     } elseif (isset($output['path'])) {
                         $audioUrl = $hfUrl . '/gradio_api/file=' . $output['path'];
+                    } else {
+                        debugLog('SSE Output[0]', 'warn', 'Sem url nem path! Conteudo: ' . mb_substr(json_encode($output), 0, 500));
                     }
+                } elseif (is_array($resultData) && count($resultData) === 1) {
+                    debugLog('SSE Parsed', 'warn', 'Apenas 1 elemento: ' . mb_substr(json_encode($resultData[0]), 0, 300));
+                } else {
+                    debugLog('SSE Parsed', 'warn', 'Formato inesperado! rawData: ' . mb_substr($eventData, 0, 500));
                 }
                 if ($audioUrl) {
                     debugLog('SSE Stream', 'ok', 'Audio URL: ' . mb_substr($audioUrl, 0, 80));

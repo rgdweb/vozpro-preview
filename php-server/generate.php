@@ -541,16 +541,16 @@ if (!$input) {
 
 $texto = $input['text'] ?? '';
 $idioma = $input['language'] ?? 'Auto';
-// FORCAR PORTUGUES: autodetecção do GPT-SoVITS causa mistura de idiomas
-if (empty($idioma) || $idioma === 'Auto' || strtolower($idioma) === 'auto') {
-    $idioma = 'Portuguese';
-}
+// FORCAR PORTUGUES DESATIVADO PARA TESTE
+// if (empty($idioma) || $idioma === 'Auto' || strtolower($idioma) === 'auto') {
+//     $idioma = 'Portuguese';
+// }
 $refAudioUrl = $input['refAudioUrl'] ?? '';
 $refAudioPath = $input['refAudioPath'] ?? '';
 $refText = $input['refText'] ?? '';
 $instruct = $input['instruct'] ?? '';
-// DETECCAO DE IDIOMA (usado para prefixo PT-BR no texto)
-$isPortuguese = in_array(strtolower($idioma), ['portuguese', 'portugues', 'pt', 'pt-br', 'pt_br']);
+// DETECCAO DE IDIOMA DESATIVADA PARA TESTE
+// $isPortuguese = in_array(strtolower($idioma), ['portuguese', 'portugues', 'pt', 'pt-br', 'pt_br']);
 // NOTA: NAO adicionamos instruct automatico! O GPT-SoVITS so aceita termos especificos:
 // male, female, high pitch, low pitch, portuguese accent, whisper, teenager, child, elderly, etc.
 // Texto livre no instruct causa ValueError: "Unsupported instruct items found"
@@ -565,7 +565,7 @@ $numStep = $input['numStep'] ?? 32;
 // DEFESA: strip SSML + clean texto + corrigir pronuncia PT-BR + forcar contexto
 $texto = stripSSML($texto);
 $texto = cleanText($texto);
-$texto = fixPortuguesePronunciation($texto);
+// $texto = fixPortuguesePronunciation($texto); // DESATIVADO PARA TESTE - dicionario removido
 // [PT-BR] prefixo removido - o TTS lia literalmente "pe-te-brr" em voz alta
 // A forca de idioma agora e feita apenas pelo parametro language=Portuguese
 $guidanceScale = $input['guidanceScale'] ?? 2.0;

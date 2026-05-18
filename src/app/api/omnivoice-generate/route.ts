@@ -280,8 +280,8 @@ export async function POST(request: NextRequest) {
       cleanText = text.replace(/[^\w\s\u00C0-\u024F,;:!?]/g, '').trim().substring(0, 500)
     }
 
-    // PASSO 7: Clamp speed para range seguro do VozPro (0.25 a 4.0)
-    const safeSpeed = Math.max(0.25, Math.min(4.0, parseFloat(speed) || 1.0))
+    // PASSO 7: Clamp speed para range seguro (0.8 a 1.3) - fora disso o modelo distorce o audio
+    const safeSpeed = Math.max(0.8, Math.min(1.3, parseFloat(speed) || 1.0))
 
     debug.log('Input', 'ok', `text: "${cleanText.substring(0, 60)}..." (${cleanText.length} chars, speed: ${safeSpeed})`)
 

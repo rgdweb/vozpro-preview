@@ -907,7 +907,7 @@ export default function VozProClient() {
         // Estilo NaturalReaders: cada pontuação vira pausa real (silêncio)
         // O texto chega AQUI com pontuação. O chunker divide em frases.
         // O backend (route.ts) remove pontuação antes de enviar ao TTS.
-        const shouldChunk = textToSend.length > 1500 // Aumentado: so chunkar textos muito longos (>1500 chars = ~250 palavras). Textos normais geram de uma vez = zero trancos.
+        const shouldChunk = false // Chunking desativado — VozPro recebe texto inteiro (sem cortes)
 
         if (shouldChunk) {
           console.log('[VozPro] Usando chunking (NaturalReaders style)...')
@@ -2564,7 +2564,7 @@ export default function VozProClient() {
                       <label className="text-xs text-slate-400">Velocidade</label>
                       <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{speed.toFixed(2)}x</Badge>
                     </div>
-                    <Slider value={[speed]} onValueChange={([v]) => setSpeed(v)} min={0.8} max={1.3} step={0.05} />
+                    <Slider value={[speed]} onValueChange={([v]) => setSpeed(v)} min={0.5} max={1.5} step={0.05} />
                   </div>
                 </CardContent>
               </Card>

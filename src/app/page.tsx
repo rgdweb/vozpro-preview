@@ -613,6 +613,7 @@ export default function VozProClient() {
   const [tracks, setTracks] = useState<Track[]>([])
   const [voiceCategories, setVoiceCategories] = useState<CategoryInfo[]>([])
   const [trackCategories, setTrackCategories] = useState<CategoryInfo[]>([])
+  const [expandedVoiceId, setExpandedVoiceId] = useState<string | null>(null) // acordeão: variações embaixo da voz
   const [selectedVoiceCategory, setSelectedVoiceCategory] = useState<string | null>(null)
   const [selectedTrackCategory, setSelectedTrackCategory] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1820,52 +1821,74 @@ export default function VozProClient() {
                         <p className="text-slate-500 text-sm">Pasta vazia</p>
                       </div>
                     ) : (
-                      <>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                          {voices.filter(v => v.category === selectedVoiceCategory).map((voice) => (
-                            <button
-                              key={voice.id}
-                              onClick={() => setSelectedVoiceId(voice.id)}
-                              className={`p-3 rounded-xl border text-left transition-all ${
-                                selectedVoiceId === voice.id
-                                  ? 'border-violet-500 bg-violet-500/20 shadow-lg shadow-violet-500/10'
-                                  : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
-                              }`}
-                            >
-                              <div className="flex items-center gap-2 mb-1">
-                                <Mic className={`w-4 h-4 ${selectedVoiceId === voice.id ? 'text-violet-400' : 'text-slate-500'}`} />
-                                <span className={`font-medium text-sm flex-1 min-w-0 ${selectedVoiceId === voice.id ? 'text-violet-200' : 'text-slate-300'}`}>
-                                  {voice.name}
+                      <div className="space-y-1">
+                        {voices.filter(v => v.category === selectedVoiceCategory).map((voice) => {
+                          const isExpanded = expandedVoiceId === voice.id
+                          const isSelected = selectedVoiceId === voice.id
+                          return (
+                            <div key={voice.id} className="rounded-xl overflow-hidden transition-all">
+                              {/* Voice card — clique expande/colapsa e seleciona */}
+                              <button
+                                onClick={() => {
+                                  setSelectedVoiceId(voice.id)
+                                  setExpandedVoiceId(isExpanded ? null : voice.id)
+                                  if (!isExpanded && voice.variations.length > 0) {
+                                    setSelectedVariationId(voice.variations[0].id)
+                                  }
+                                }}
+                                className={`w-full p-3 rounded-xl border text-left transition-all flex items-center gap-2 ${
+                                  isSelected
+                                    ? 'border-violet-500 bg-violet-500/20 shadow-lg shadow-violet-500/10'
+                                    : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
+                                }`}
+                              >
+                                <Mic className={`w-4 h-4 flex-shrink-0 ${isSelected ? 'text-violet-400' : 'text-slate-500'}`} />
+                                <div className="flex-1 min-w-0">
+                                  <span className={`font-medium text-sm block truncate ${isSelected ? 'text-violet-200' : 'text-slate-300'}`}>
+                                    {voice.name}
+                                  </span>
+                                  {voice.description && <p className="text-xs text-slate-500 line-clamp-1">{voice.description}</p>}
+                                </div>
+                                <span className="text-xs text-slate-500 bg-white/5 px-1.5 py-0.5 rounded-md flex-shrink-0">
+                                  {voice.variations.length}
                                 </span>
-                              </div>
-                              <p className="text-xs text-slate-500 line-clamp-1">{voice.description}</p>
-                            </button>
-                          ))}
-                        </div>
-                        {selectedVoice && selectedVoice.variations.length > 0 && (
-                          <div>
-                            <p className="text-sm font-medium text-slate-300 mb-2">Estilo / Emoção</p>
-                            <div className="flex flex-wrap gap-2">
-                              {selectedVoice.variations.map((v) => {
-                                const varAudioUrl = v.refAudioServerUrl || v.refAudioPath || ''
-                                return (
-                                  <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
-                                    <VoicePreviewButton
-                                      audioUrl={varAudioUrl}
-                                      voiceId={v.id}
-                                      currentlyPlayingId={previewingVoiceId}
-                                      onPlayStart={setPreviewingVoiceId}
-                                      onPlayEnd={() => setPreviewingVoiceId(null)}
-                                    />
-                                    <span>{v.emoji || '🎙️'}</span>
-                                    <span>{v.label}</span>
-                                  </button>
-                                )
-                              })}
+                                <ChevronDown className={`w-3.5 h-3.5 text-slate-500 flex-shrink-0 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                              </button>
+                              {/* Variações — acordeão embaixo da voz */}
+                              {isExpanded && voice.variations.length > 0 && (
+                                <div className="px-2 pb-2 pt-1 ml-4 border-l-2 border-violet-500/30 space-y-1 animate-in slide-in-from-top-1 duration-150">
+                                  {voice.variations.map((v) => {
+                                    const varAudioUrl = v.refAudioServerUrl || v.refAudioPath || ''
+                                    const isVarSelected = selectedVariationId === v.id
+                                    return (
+                                      <button
+                                        key={v.id}
+                                        onClick={(e) => { e.stopPropagation(); setSelectedVariationId(v.id) }}
+                                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all ${
+                                          isVarSelected
+                                            ? 'border-violet-500/60 bg-violet-500/15 text-violet-200'
+                                            : 'border-white/5 bg-white/3 text-slate-400 hover:border-white/15 hover:bg-white/5'
+                                        }`}
+                                      >
+                                        <VoicePreviewButton
+                                          audioUrl={varAudioUrl}
+                                          voiceId={v.id}
+                                          currentlyPlayingId={previewingVoiceId}
+                                          onPlayStart={setPreviewingVoiceId}
+                                          onPlayEnd={() => setPreviewingVoiceId(null)}
+                                        />
+                                        <span className="flex-shrink-0">{v.emoji || '🎙️'}</span>
+                                        <span className="truncate">{v.label}</span>
+                                        {isVarSelected && <CheckCircle2 className="w-3.5 h-3.5 text-violet-400 ml-auto flex-shrink-0" />}
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        )}
-                      </>
+                          )
+                        })}
+                      </div>
                     )}
                   </>
                 ) : voiceCategories.length > 0 ? (

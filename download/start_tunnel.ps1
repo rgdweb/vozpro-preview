@@ -7,18 +7,7 @@ Write-Host "  VozPro - Tunnel LocalTunnel" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-Write-Host "[1/2] Verificando VozPro na porta $port..." -ForegroundColor Yellow
-try {
-    $null = Invoke-WebRequest -Uri "http://localhost:$port/" -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
-    Write-Host "[OK] VozPro respondendo!" -ForegroundColor Green
-} catch {
-    Write-Host "[ERRO] VozPro NAO esta rodando!" -ForegroundColor Red
-    Read-Host "Pressione Enter para sair"
-    exit 1
-}
-
-Write-Host ""
-Write-Host "[2/2] Abrindo tunnel localtunnel..." -ForegroundColor Yellow
+Write-Host "[1/2] Abrindo tunnel localtunnel..." -ForegroundColor Yellow
 Write-Host ""
 
 $outputFile = "$env:TEMP\lt_output.txt"
@@ -47,7 +36,6 @@ if ($url) {
     Write-Host "========================================" -ForegroundColor Green
     Write-Host ""
 
-    # Testar se o tunnel esta funcionando
     Write-Host "[INFO] Testando tunnel..." -ForegroundColor Yellow
     try {
         $null = Invoke-WebRequest -Uri "$url/" -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop

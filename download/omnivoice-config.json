@@ -1,0 +1,21 @@
+{
+  "code": 200,
+  "data": {
+    "description": "",
+    "external": {},
+    "html": "<html><head></head><body></body></html>",
+    "metadata": {},
+    "title": "",
+    "url": "https://deepwiki.com/k2-fsa/OmniVoice/1.3-generation-configuration-reference",
+    "usage": {
+      "tokens": 12
+    },
+    "warning": "Target URL returned error 103: Early Hints"
+  },
+  "meta": {
+    "usage": {
+      "tokens": 12
+    }
+  },
+  "status": 20000
+}

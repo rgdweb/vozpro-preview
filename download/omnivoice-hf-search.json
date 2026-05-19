@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://huggingface.co/k2-fsa/OmniVoice",
+    "name": "k2-fsa/OmniVoice - Hugging Face",
+    "snippet": "OmniVoice is a massively multilingual zero-shot text-to-speech (TTS) model supporting over 600 languages. Built on a novel diffusion language ...",
+    "host_name": "huggingface.co",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://huggingface.co/spaces/k2-fsa/OmniVoice",
+    "name": "OmniVoice Demo - a Hugging Face Space by k2-fsa",
+    "snippet": "State-of-the-art text-to-speech model for 600+ languages, supporting: Voice Clone — Clone any voice from a reference audio; Voice Design — Create custom voices ...",
+    "host_name": "huggingface.co",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/k2-fsa/OmniVoice",
+    "name": "GitHub - k2-fsa/OmniVoice: High-Quality Voice Cloning TTS for 600+",
+    "snippet": "OmniVoice is a state-of-the-art massively multilingual zero-shot text-to-speech (TTS) model supporting over 600 languages. Built on a novel diffusion ...",
+    "host_name": "github.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/LocalLLaMA/comments/1saeuv2/omnivoice_600_language_opensource_tts_with_voice",
+    "name": "Omnivoice - 600+ Language Open-Source TTS with Voice Cloning",
+    "snippet": "12x realtime generation speed on 5090, this is so much better than the original qwen tts, its not even close. Takes around 6.5GB of VRAM. You ...",
+    "host_name": "www.reddit.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=cOdV_XaAC3A",
+    "name": "OmniVoice AI Install Locally & Clone Any Voice in 600+ Languages!",
+    "snippet": "Step-by-Step OmniVoice Installation Guide | Local AI Voice Cloning In this video, I'll guide you step by step on how to install OmniVoice AI ...",
+    "host_name": "www.youtube.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://huggingface.co/models?pipeline_tag=text-to-speech",
+    "name": "Text-to-Speech Models - Hugging Face",
+    "snippet": "Text Generation · Any-to-Any · Image-Text-to-Text · Image-to-Text · Image-to ... kjanh/KhanhTTS-OmniVoice. Text-to-Speech • 0.6B • Updated 2 days ago • 3.06k ...",
+    "host_name": "huggingface.co",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "http://sparktts.app",
+    "name": "Spark TTS: Open Source AI Text-to-Speech Free Online",
+    "snippet": "Spark TTS offers affordable or even free speech generation via Spark TTS Hugging Face, perfect for creators, startups, and researchers on a budget.",
+    "host_name": "sparktts.app",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=Yk4PLI72sks",
+    "name": "The Best Free Text to Speech AI You've Never Heard Of  - YouTube",
+    "snippet": "... TTS models using HuggingFace leaderboards - Quick setup and installation of Kokoro TTS - How to generate speech in multiple languages ...",
+    "host_name": "www.youtube.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://sourceforge.net/projects/omnivoice.mirror",
+    "name": "OmniVoice download | SourceForge.net",
+    "snippet": "The OmniVoice project is a cutting-edge multilingual text-to-speech system designed to generate high-quality speech across more than 600 ...",
+    "host_name": "sourceforge.net",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://huggingface.co/lopho/OmniVoice",
+    "name": "lopho/OmniVoice - Hugging Face",
+    "snippet": "OmniVoice is a massively multilingual zero-shot text-to-speech (TTS) model supporting over 600 languages. Built on a novel diffusion language ...",
+    "host_name": "huggingface.co",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

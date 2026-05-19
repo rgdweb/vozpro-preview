@@ -239,3 +239,49 @@ Work Log:
 Stage Summary:
 - Todos os arquivos estão sincronizados: slider 0.8-1.3 no frontend + clamp 0.8-1.3 no backend
 - Git push concluído com sucesso
+
+---
+Task ID: 1
+Agent: Main
+Task: Investigar diferença de pronúncia entre VozPro e local OmniVoice
+
+Work Log:
+- Comparou parâmetros do PHP com o OmniVoice local
+- Encontrou 3 diferenças críticas:
+  1. language: VozPro enviava 'Portuguese', local usa 'Auto'
+  2. numStep: VozPro enviava 20, local usa 32
+  3. postprocess: Next.js route enviava false, local usa true
+- Corrigiu language default para 'Auto' em page.tsx
+- Corrigiu numStep de 20 para 32 em page.tsx
+- Corrigiu postprocess de false para true em route.ts
+- Push para GitHub (Vercel auto-deploy)
+
+Stage Summary:
+- Commit: 0da1a2d "fix: language Auto + numStep 32 + postprocess true"
+- Vercel vai fazer auto-deploy em ~1-2 minutos
+- PHP já deployado anteriormente com parâmetros corretos (denoise, preprocess, postprocess = true)
+---
+Task ID: 1
+Agent: Super Z (main)
+Task: Migrar VozPro para F5-TTS como motor único (remover OmniVoice)
+
+Work Log:
+- Analisou código completo do page.tsx (2921 linhas) e todas as rotas de API
+- Fez backup do page.tsx antes de editar (.backup-omnivoice-removal)
+- Removeu estados: ttsModel, omnivoicePhpUrl, omnivoiceAvailable
+- Removeu bloco inteiro de geração OmniVoice (~340 linhas de chunking, crossfade, PHP direto)
+- Removeu seletor de modelo TTS (UI card F5-TTS / VozPro Turbo)
+- Removeu health checks do OmniVoice no useEffect
+- Removeu ASR retry específico do OmniVoice
+- Habilitou Voice Design e Auto Voice para F5-TTS (removeu guard)
+- Deletou rotas: /api/omnivoice-generate/route.ts, /api/omnivoice-token/route.ts
+- Atualizou engine SSML para sempre usar f5tts
+- Build limpo: 0 erros
+- Deploy via git push (b96ec27..45e9b95)
+
+Stage Summary:
+- VozPro agora é 100% F5-TTS via tunnel (GPU local)
+- OmniVoice completamente removido do frontend e API
+- Zero referências a ttsModel, omnivoicePhpUrl, omnivoiceAvailable no page.tsx
+- Arquivo reduziu de 2921 para ~2492 linhas (-429 linhas removidas)
+- Build OK, deploy OK

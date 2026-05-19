@@ -15,7 +15,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   AudioWaveform, Sparkles, Loader2, Download, Play, Pause, Square,
   Volume2, Music, Mic, ChevronRight, Settings2, Globe, Bug, Copy, ChevronDown,
-  Upload, CheckCircle2, Zap, FolderOpen, ChevronLeft, Folder
+  Upload, CheckCircle2, FolderOpen, ChevronLeft, Folder
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Label } from '@/components/ui/label'
@@ -785,8 +785,10 @@ export default function VozProClient() {
         return
       }
     }
+    // Voice Design requer descrição da voz
     if (voiceMode === 'design' && !voiceDesignInstruct.trim()) {
-      // OK - sem descrição, VozPro vai usar todos os params como Auto
+      toast.error('Descreva a voz desejada para usar o Voice Design')
+      return
     }
     setIsGenerating(true)
     setAudioUrl(null)

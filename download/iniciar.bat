@@ -6,19 +6,21 @@ echo        VozPro - Servidor Local GPU
 echo ============================================
 echo.
 
-set CUDA_VISIBLE_DEVICES=0
-set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:32
+echo [1/2] Limpando processos antigos...
+taskkill /F /IM python.exe >nul 2>&1
+timeout /t 2 /nobreak >nul
 
-echo [1/2] Iniciando F5-TTS na porta 7860...
-start "F5-TTS" /B cmd /c "call C:\Users\Administrador\Miniconda3\Scripts\activate.bat && python -m f5_tts.infer_cli_gradio --port 7860 2>&1"
+echo [2/2] Ativando Conda e iniciando F5-TTS na porta 7860...
+start "F5-TTS" cmd /k "call C:\Users\Administrador\Miniconda3\Scripts\activate.bat && set CUDA_VISIBLE_DEVICES=0 && set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:32 && python -m f5_tts.infer_cli_gradio --port 7860"
 
 timeout /t 5 /nobreak >nul
 
 echo [2/2] Iniciando Tunnel...
-start "Tunnel" /B cmd /c "npx localtunnel --port 7860 2>&1"
+start "Tunnel" cmd /k "npx localtunnel --port 7860"
 
 echo.
 echo ============================================
 echo   Servidor iniciado! Aguarde o tunnel gerar a URL
 echo ============================================
-timeout /t 99999
+echo.
+pause

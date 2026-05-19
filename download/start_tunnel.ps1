@@ -3,45 +3,10 @@ $auth = "vozpro_tunnel_2024"
 $serverUpdate = "https://sorteiomax.com.br/omnivoice/update_tunnel.php"
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  VozPro - Tunnel Cloudflare" -ForegroundColor Cyan
+Write-Host "  VozPro - Tunnel LocalTunnel" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Verificar se cloudflared esta instalado
-$cloudflared = $null
-$pathsToCheck = @(
-    "cloudflared",
-    "$env:LOCALAPPDATA\cloudflared\cloudflared.exe",
-    "$env:ProgramFiles\cloudflared\cloudflared.exe",
-    "$env:ProgramFiles(x86)\cloudflared\cloudflared.exe",
-    "$env:USERPROFILE\cloudflared\cloudflared.exe"
-)
-
-foreach ($path in $pathsToCheck) {
-    try {
-        $result = Get-Command $path -ErrorAction Stop
-        $cloudflared = $result.Source
-        break
-    } catch {
-        continue
-    }
-}
-
-if (-not $cloudflared) {
-    Write-Host "[ERRO] cloudflared NAO encontrado!" -ForegroundColor Red
-    Write-Host ""
-    Write-Host "Instale com um dos comandos:" -ForegroundColor Yellow
-    Write-Host "  winget install Cloudflare.cloudflared" -ForegroundColor White
-    Write-Host "  OU" -ForegroundColor White
-    Write-Host "  https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" -ForegroundColor White
-    Write-Host ""
-    Read-Host "Pressione Enter para sair"
-    exit 1
-}
-
-Write-Host "[OK] cloudflared encontrado: $cloudflared" -ForegroundColor Green
-
-Write-Host ""
 Write-Host "[1/2] Verificando VozPro na porta $port..." -ForegroundColor Yellow
 try {
     $null = Invoke-WebRequest -Uri "http://localhost:$port/" -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
@@ -53,23 +18,23 @@ try {
 }
 
 Write-Host ""
-Write-Host "[2/2] Abrindo tunnel cloudflare..." -ForegroundColor Yellow
+Write-Host "[2/2] Abrindo tunnel localtunnel..." -ForegroundColor Yellow
 Write-Host ""
 
-$outputFile = "$env:TEMP\cf_output.txt"
+$outputFile = "$env:TEMP\lt_output.txt"
 Remove-Item $outputFile -Force -ErrorAction SilentlyContinue
 
 $job = Start-Job -ScriptBlock {
-    param($p, $cf)
-    & $cf tunnel --url "http://localhost:$p" 2>&1 | Out-File -FilePath $using:outputFile -Encoding ascii
-} -ArgumentList $port, $cloudflared
+    param($p)
+    & npx localtunnel --port $p 2>&1 | Out-File -FilePath $using:outputFile -Encoding ascii
+} -ArgumentList $port
 
 $url = $null
 for ($i = 0; $i -lt 120; $i++) {
     Start-Sleep -Milliseconds 500
     if (Test-Path $outputFile) {
         $content = Get-Content $outputFile -Raw -ErrorAction SilentlyContinue
-        if ($content -match "(https://[a-z0-9\-]+\.trycloudflare\.com)") {
+        if ($content -match "(https://[a-z0-9\-]+\.loca\.lt)") {
             $url = $Matches[1]
             break
         }

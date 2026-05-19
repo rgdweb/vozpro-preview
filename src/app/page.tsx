@@ -1372,7 +1372,7 @@ export default function VozProClient() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 lg:items-start">
           {/* Left Panel - Voice & Track Selection */}
           <div className="lg:col-span-3 space-y-5">
             {/* Voice Selection */}
@@ -2148,7 +2148,7 @@ export default function VozProClient() {
 
           {/* Right Panel - Output — desktop only, mobile has fixed bottom player */}
           <div className="hidden lg:block lg:col-span-2 space-y-5">
-            <Card className="sticky top-24 z-20 bg-white/[0.03] border-white/[0.08] backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.05)] relative overflow-hidden">
+            <Card className="sticky top-24 z-20 bg-white/[0.03] border-white/[0.08] backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.05)] relative">
               <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-violet-500/40 to-transparent" />
               <CardHeader className="pb-3">
                 <CardTitle className="text-white flex items-center gap-2 text-lg">

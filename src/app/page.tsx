@@ -656,8 +656,6 @@ export default function VozProClient() {
   const [debugOpen, setDebugOpen] = useState(false)
   const [usePhpGenerate, setUsePhpGenerate] = useState(false)
   const [useTunnelGenerate, setUseTunnelGenerate] = useState(true) // GPU local via tunnel (padrao) — F5-TTS
-  const [gpuStats, setGpuStats] = useState<{ name: string; memory_used_mb: number; memory_total_mb: number; memory_percent: number; gpu_utilization_percent: number; temperature_celsius: number; power_draw_watts: number; power_limit_watts: number } | null>(null)
-  const [gpuStatus, setGpuStatus] = useState<'loading' | 'ok' | 'offline' | 'monitor_offline'>('loading')
 
   // Voice mode: clone (ref_audio) | design (instruct only) | auto (random)
   const [voiceMode, setVoiceMode] = useState<'clone' | 'design' | 'auto'>('clone')
@@ -1154,23 +1152,6 @@ export default function VozProClient() {
       setGeneratingTime(0)
     }
   }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs, voiceMode, uploadedVoiceUrl])
-
-  // Fetch GPU stats polling
-  useEffect(() => {
-    let intervalId: ReturnType<typeof setInterval> | null = null
-    const fetchGpu = async () => {
-      try {
-        const res = await fetch('/api/gpu-stats')
-        const data = await res.json()
-        setGpuStatus(data.status)
-        if (data.gpu) setGpuStats(data.gpu)
-      } catch { setGpuStatus('offline') }
-    }
-    fetchGpu()
-    // Poll a cada 3s enquanto estiver gerando, a cada 15s caso contrario
-    intervalId = setInterval(fetchGpu, isGenerating ? 3000 : 15000)
-    return () => { if (intervalId) clearInterval(intervalId) }
-  }, [isGenerating])
 
   // Get the active audio URL
   const activeAudioUrl = mixedAudioUrl || audioUrl

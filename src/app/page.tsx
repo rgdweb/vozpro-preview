@@ -658,6 +658,8 @@ export default function VozProClient() {
   const [debugOpen, setDebugOpen] = useState(false)
   const [usePhpGenerate, setUsePhpGenerate] = useState(false)
   const [useTunnelGenerate, setUseTunnelGenerate] = useState(true) // GPU local via tunnel (padrao) — F5-TTS
+  const [gpuStats, setGpuStats] = useState<{ name: string; memory_used_mb: number; memory_total_mb: number; memory_percent: number; gpu_utilization_percent: number; temperature_celsius: number; power_draw_watts: number; power_limit_watts: number } | null>(null)
+  const [gpuStatus, setGpuStatus] = useState<'loading' | 'ok' | 'offline' | 'monitor_offline'>('loading')
 
   // Voice mode: clone (ref_audio) | design (instruct only) | auto (random)
   const [voiceMode, setVoiceMode] = useState<'clone' | 'design' | 'auto'>('clone')
@@ -1190,6 +1192,23 @@ export default function VozProClient() {
       setGeneratingTime(0)
     }
   }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs, voiceMode, uploadedVoiceUrl, pronunciationOptimization, llmPreprocess])
+
+  // Fetch GPU stats polling
+  useEffect(() => {
+    let intervalId: ReturnType<typeof setInterval> | null = null
+    const fetchGpu = async () => {
+      try {
+        const res = await fetch('/api/gpu-stats')
+        const data = await res.json()
+        setGpuStatus(data.status)
+        if (data.gpu) setGpuStats(data.gpu)
+      } catch { setGpuStatus('offline') }
+    }
+    fetchGpu()
+    // Poll a cada 3s enquanto estiver gerando, a cada 15s caso contrario
+    intervalId = setInterval(fetchGpu, isGenerating ? 3000 : 15000)
+    return () => { if (intervalId) clearInterval(intervalId) }
+  }, [isGenerating])
 
   // Get the active audio URL
   const activeAudioUrl = mixedAudioUrl || audioUrl
@@ -2349,6 +2368,63 @@ export default function VozProClient() {
                       </div>
                     )}
                   </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* GPU Monitor Card */}
+            <Card className="bg-white/5 border-white/10 backdrop-blur">
+              <CardContent className="pt-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${gpuStatus === 'ok' ? 'bg-green-400 animate-pulse' : gpuStatus === 'loading' ? 'bg-yellow-400 animate-pulse' : 'bg-red-400'}`} />
+                    <h3 className="text-sm font-medium text-slate-300">GPU Local</h3>
+                  </div>
+                  <span className="text-[10px] text-slate-600">
+                    {gpuStatus === 'ok' ? 'Online' : gpuStatus === 'loading' ? 'Conectando...' : gpuStatus === 'monitor_offline' ? 'Monitor offline' : 'Offline'}
+                  </span>
+                </div>
+
+                {gpuStatus === 'ok' && gpuStats ? (
+                  <div className="space-y-2">
+                    {/* VRAM Bar */}
+                    <div>
+                      <div className="flex justify-between text-[10px] mb-1">
+                        <span className="text-slate-400">VRAM</span>
+                        <span className={`${gpuStats.memory_percent > 90 ? 'text-red-400' : gpuStats.memory_percent > 75 ? 'text-yellow-400' : 'text-green-400'}`}>
+                          {gpuStats.memory_used_mb}/{gpuStats.memory_total_mb} MB ({gpuStats.memory_percent}%)
+                        </span>
+                      </div>
+                      <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${gpuStats.memory_percent > 90 ? 'bg-red-500' : gpuStats.memory_percent > 75 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                          style={{ width: `${Math.min(gpuStats.memory_percent, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                    {/* Stats Grid */}
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="bg-white/5 rounded-lg p-2">
+                        <div className="text-xs font-mono text-white">{gpuStats.gpu_utilization_percent}%</div>
+                        <div className="text-[9px] text-slate-500">GPU</div>
+                      </div>
+                      <div className="bg-white/5 rounded-lg p-2">
+                        <div className="text-xs font-mono text-white">{gpuStats.temperature_celsius}°C</div>
+                        <div className="text-[9px] text-slate-500">Temp</div>
+                      </div>
+                      <div className="bg-white/5 rounded-lg p-2">
+                        <div className="text-xs font-mono text-white">{gpuStats.power_draw_watts.toFixed(0)}W</div>
+                        <div className="text-[9px] text-slate-500">Power</div>
+                      </div>
+                    </div>
+                    <p className="text-[9px] text-slate-600 text-center">{gpuStats.name}</p>
+                  </div>
+                ) : gpuStatus === 'monitor_offline' ? (
+                  <p className="text-[10px] text-slate-500 text-center py-1">
+                    Execute <code className="text-slate-400 bg-white/5 px-1 rounded">python gpu_monitor.py</code> na sua máquina
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-slate-500 text-center py-1">Aguardando conexão...</p>
                 )}
               </CardContent>
             </Card>

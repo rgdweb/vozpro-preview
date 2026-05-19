@@ -11,7 +11,7 @@ taskkill /F /IM cloudflared.exe >nul 2>&1
 timeout /t 2 /nobreak >nul
 
 echo [2/3] Iniciando VozPro Demo (porta 7860)...
-start "VozPro GPU" cmd /k "call C:\Users\Administrador\Miniconda3\Scripts\activate.bat && set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True && omnivoice-demo --ip 0.0.0.0 --port 7860"
+start "VozPro GPU" cmd /k "call C:\Users\Administrador\Miniconda3\Scripts\activate.bat && set CUDA_VISIBLE_DEVICES=0 && set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False && omnivoice-demo --ip 0.0.0.0 --port 7860"
 
 echo      Aguardando servidor GPU ficar pronto...
 set WAITED=0

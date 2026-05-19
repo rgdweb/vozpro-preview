@@ -656,7 +656,15 @@ export default function VozProClient() {
   const [debugOpen, setDebugOpen] = useState(false)
   const [usePhpGenerate, setUsePhpGenerate] = useState(false)
   const [useTunnelGenerate, setUseTunnelGenerate] = useState(true) // GPU local via tunnel (padrao) — F5-TTS
+  const [gpuStats, setGpuStats] = useState<{ name: string; memory_used_mb: number; memory_total_mb: number; memory_percent: number; gpu_utilization_percent: number; temperature_celsius: number; power_draw_watts: number; power_limit_watts: number } | null>(null)
+  const [gpuStatus, setGpuStatus] = useState<'loading' | 'ok' | 'offline' | 'monitor_offline'>('loading')
 
+  // Voice mode: clone (ref_audio) | design (instruct only) | auto (random)
+  const [voiceMode, setVoiceMode] = useState<'clone' | 'design' | 'auto'>('clone')
+  const [voiceDesignInstruct, setVoiceDesignInstruct] = useState('')
+  const [enableFrontendUpload, setEnableFrontendUpload] = useState(false) // liberado via admin
+  const [uploadedVoiceFile, setUploadedVoiceFile] = useState<File | null>(null)
+  const [uploadedVoiceUrl, setUploadedVoiceUrl] = useState<string | null>(null)
 
   const resultAudioRef = useRef<HTMLAudioElement | null>(null)
 
@@ -764,9 +772,9 @@ export default function VozProClient() {
       return
     }
 
-    // Validar: precisa ter voz selecionada
-    if (!selectedVariationId) {
-      toast.error('Selecione uma voz para clonar')
+    // Validar baseado no modo de voz
+    if (voiceMode === 'clone' && !selectedVariationId && !uploadedVoiceUrl) {
+      toast.error('Selecione uma voz ou faça upload de um áudio de referência')
       return
     }
     // Verificar se a variação selecionada realmente existe na voz selecionada
@@ -776,6 +784,11 @@ export default function VozProClient() {
         toast.error('Selecione uma variação de voz válida')
         return
       }
+    }
+    // Voice Design requer descrição da voz
+    if (voiceMode === 'design' && !voiceDesignInstruct.trim()) {
+      toast.error('Descreva a voz desejada para usar o Voice Design')
+      return
     }
     setIsGenerating(true)
     setAudioUrl(null)
@@ -847,14 +860,31 @@ export default function VozProClient() {
 
       // ===== F5-TTS via Tunnel (GPU local) =====
       if (useTunnelGenerate) {
-        console.log('[F5-TTS] Gerando via tunnel (GPU local)...')
+        // ===== TUNNEL DIRETO: Vercel -> GPU local via cloudflared =====
+        console.log(`[F5-TTS] Gerando via tunnel (GPU local)... modo: ${voiceMode}`)
+
+        // Determinar instruct baseado no modo
+        let finalInstruct = instructStr
+        if (voiceMode === 'design') {
+          finalInstruct = voiceDesignInstruct
+        }
+
+        // Determinar audio de referencia
+        let refUrl = selectedVariation?.refAudioServerUrl || body.refAudioUrl
+        let refName = body.refAudioName || 'ref_audio.wav'
+
+        // Se tem upload de voz do frontend, usa ele
+        if (voiceMode === 'clone' && uploadedVoiceUrl) {
+          refUrl = uploadedVoiceUrl
+          refName = uploadedVoiceFile?.name || 'uploaded_voice.wav'
+        }
 
         const tunnelBody = {
           ...body,
-          referenceAudioUrl: selectedVariation?.refAudioServerUrl || '',
-          referenceAudioName: selectedVariation?.refAudioName || 'ref_audio.wav',
-          instruct: instructStr,
-          voiceMode: 'clone' as const,
+          referenceAudioUrl: voiceMode !== 'clone' ? undefined : refUrl,
+          referenceAudioName: voiceMode !== 'clone' ? undefined : refName,
+          instruct: finalInstruct,
+          voiceMode,
           useChunking: true,
         }
         res = await fetch('/api/tunnel-generate', {
@@ -1123,7 +1153,24 @@ export default function VozProClient() {
       setIsGenerating(false)
       setGeneratingTime(0)
     }
-  }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs])
+  }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs, voiceMode, uploadedVoiceUrl])
+
+  // Fetch GPU stats polling
+  useEffect(() => {
+    let intervalId: ReturnType<typeof setInterval> | null = null
+    const fetchGpu = async () => {
+      try {
+        const res = await fetch('/api/gpu-stats')
+        const data = await res.json()
+        setGpuStatus(data.status)
+        if (data.gpu) setGpuStats(data.gpu)
+      } catch { setGpuStatus('offline') }
+    }
+    fetchGpu()
+    // Poll a cada 3s enquanto estiver gerando, a cada 15s caso contrario
+    intervalId = setInterval(fetchGpu, isGenerating ? 3000 : 15000)
+    return () => { if (intervalId) clearInterval(intervalId) }
+  }, [isGenerating])
 
   // Get the active audio URL
   const activeAudioUrl = mixedAudioUrl || audioUrl

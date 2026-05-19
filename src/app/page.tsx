@@ -2144,6 +2144,39 @@ export default function VozProClient() {
                 )}
               </Button>
             </div>
+
+            {/* Como funciona — moved here so Result card can sticky without collision */}
+            <Card className="hidden lg:block bg-white/[0.03] border-white/[0.08] backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.05)] relative overflow-hidden">
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-violet-500/20 to-transparent" />
+              <CardContent className="pt-5">
+                <div className="space-y-3 text-sm text-slate-400">
+                  <h3 className="font-semibold text-slate-200 text-base">Como funciona</h3>
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-2">
+                      <Badge variant="outline" className="border-violet-500/30 text-violet-400 shrink-0 mt-0.5 bg-violet-500/5">1</Badge>
+                      <p>Escolha uma voz e o estilo/emissao desejado</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <Badge variant="outline" className="border-violet-500/30 text-violet-400 shrink-0 mt-0.5 bg-violet-500/5">2</Badge>
+                      <p>Digite o texto que deseja sintetizar</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <Badge variant="outline" className="border-violet-500/30 text-violet-400 shrink-0 mt-0.5 bg-violet-500/5">3</Badge>
+                      <p>Opcionalmente, adicione uma trilha musical de fundo</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <Badge variant="outline" className="border-violet-500/30 text-violet-400 shrink-0 mt-0.5 bg-violet-500/5">4</Badge>
+                      <p>Clique em &quot;Gerar Voz&quot; e aguarde o resultado</p>
+                    </div>
+                  </div>
+                  <Separator className="bg-white/[0.06]" />
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    A emocao da voz vem do audio de referencia usado na clonagem.
+                    Cada variacao de emocao usa um audio diferente, capturando o tom e a entonacao automaticamente.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
           </div>
 
           {/* Right Panel - Output — desktop only, mobile has fixed bottom player */}
@@ -2295,39 +2328,6 @@ export default function VozProClient() {
                     )}
                   </div>
                 )}
-              </CardContent>
-            </Card>
-
-            {/* Info card */}
-            <Card className="relative z-30 bg-white/[0.03] border-white/[0.08] backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.05)] overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-violet-500/20 to-transparent" />
-              <CardContent className="pt-5">
-                <div className="space-y-3 text-sm text-slate-400">
-                  <h3 className="font-semibold text-slate-200 text-base">Como funciona</h3>
-                  <div className="space-y-2">
-                    <div className="flex items-start gap-2">
-                      <Badge variant="outline" className="border-violet-500/30 text-violet-400 shrink-0 mt-0.5 bg-violet-500/5">1</Badge>
-                      <p>Escolha uma voz e o estilo/emissão desejado</p>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <Badge variant="outline" className="border-violet-500/30 text-violet-400 shrink-0 mt-0.5 bg-violet-500/5">2</Badge>
-                      <p>Digite o texto que deseja sintetizar</p>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <Badge variant="outline" className="border-violet-500/30 text-violet-400 shrink-0 mt-0.5 bg-violet-500/5">3</Badge>
-                      <p>Opcionalmente, adicione uma trilha musical de fundo</p>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <Badge variant="outline" className="border-violet-500/30 text-violet-400 shrink-0 mt-0.5 bg-violet-500/5">4</Badge>
-                      <p>Clique em &quot;Gerar Voz&quot; e aguarde o resultado</p>
-                    </div>
-                  </div>
-                  <Separator className="bg-white/[0.06]" />
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    A emoção da voz vem do áudio de referência usado na clonagem.
-                    Cada variação de emoção usa um áudio diferente, capturando o tom e a entonação automaticamente.
-                  </p>
-                </div>
               </CardContent>
             </Card>
 

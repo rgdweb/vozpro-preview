@@ -1,17 +1,21 @@
 @echo off
-title VozPro GPU
-color 0A
+title OmniVoice GPU Server
 echo ============================================
-echo        VozPro - Servidor Local GPU
+echo   OmniVoice TTS - Servidor GPU Local
 echo ============================================
 echo.
 
-echo [1/2] Limpando processos antigos...
+echo [0/4] Limpando processos antigos...
 taskkill /F /IM python.exe >nul 2>&1
+taskkill /F /IM cloudflared.exe >nul 2>&1
 timeout /t 2 /nobreak >nul
 
-echo [2/2] Ativando Conda e iniciando F5-TTS na porta 7860...
-start "F5-TTS" cmd /k "call C:\Users\Administrador\Miniconda3\Scripts\activate.bat && set CUDA_VISIBLE_DEVICES=0 && set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:32 && omnivoice-demo --ip 0.0.0.0 --port 7860"
+echo [1/4] Ativando Conda...
+call C:\Users\Administrador\Miniconda3\Scripts\activate.bat
+set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:32
+
+echo [2/4] Iniciando OmniVoice Demo (porta 7860)...
+start "OmniVoice GPU" cmd /k "call C:\Users\Administrador\Miniconda3\Scripts\activate.bat && set CUDA_VISIBLE_DEVICES=0 && set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:32 && omnivoice-demo --ip 0.0.0.0 --port 7860"
 
 echo      Aguardando servidor GPU ficar pronto...
 set WAITED=0
@@ -25,7 +29,7 @@ if %WAITED% GEQ 120 (
 
 powershell -Command "try { Invoke-WebRequest -Uri 'http://localhost:7860/' -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
-    echo      Servidor GPU pronto! (esperou %WAITED% segundos)
+    echo      Servidor GPU pronto! ^(esperou %WAITED% segundos^)
     goto start_tunnel
 )
 
@@ -36,7 +40,7 @@ goto health_check
 
 :start_tunnel
 echo.
-echo [2/2] Iniciando tunnel LocalTunnel...
+echo [3/4] Iniciando tunnel Cloudflare...
 start "Tunnel Auto" cmd /k "powershell -ExecutionPolicy Bypass -File start_tunnel.ps1"
 timeout /t 8 /nobreak >nul
 

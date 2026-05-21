@@ -269,7 +269,11 @@ class MEngine{
         for(let i=0;i<len;i++)re[i]=d[i]*(.5*(1-Math.cos(2*Math.PI*i/(nfft-1))));
         this._fft(re,im,nfft);const mag=new Float32Array(nfft/2);for(let i=0;i<nfft/2;i++)mag[i]=Math.sqrt(re[i]*re[i]+im[i]*im[i]);
         const fpb=sr/nfft;
-        for(const b of defs){const lo=Math.floor(b.lo/fpb),hi=Math.min(Math.ceil(b.hi/fpb),nfft/2-1);let en=0,c=0;for(let i=lo;i<=hi;i++){en+=mag[i]*mag[i];c++}b.db=20*Math.log10(Math.sqrt(en/(c+1))+1e-10);b.target=targets[b.name];b.diff=b.db-b.target;const df=b.diff;b.sug=df>6?{t:'bad',tx:`Reduzir ${df.toFixed(1)} dB`,d:'dn'}:df>3?{t:'warn',tx:'Reduzir levemente',d:'dn'}:df<-6?{t:'bad',tx:`Aumentar ${Math.abs(df).toFixed(1)} dB`,d:'up'}:df<-3?{t:'warn',tx:'Aumentar levemente',d:'up'}:{t:'ok',tx:'Dentro do padrão',d:'ok'}}
+        // Passo 1: calcular dB de cada banda
+        for(const b of defs){const lo=Math.floor(b.lo/fpb),hi=Math.min(Math.ceil(b.hi/fpb),nfft/2-1);let en=0,c=0;for(let i=lo;i<=hi;i++){en+=mag[i]*mag[i];c++}b.db=20*Math.log10(Math.sqrt(en/(c+1))+1e-10);b.target=targets[b.name];b.diff=b.db-b.target}
+        // Passo 2: balanceamento relativo (media das bandas)
+        const relAvg=defs.reduce((s,b)=>s+b.db,0)/defs.length;
+        for(const b of defs){const rv=b.db-relAvg;b.relDev=rv;if(Math.abs(rv)<2)b.sug={t:'ok',tx:'Balanceado',d:'ok'};else if(rv>5)b.sug={t:'bad',tx:'Reduzir '+rv.toFixed(1)+' dB',d:'dn'};else if(rv>2)b.sug={t:'warn',tx:'Reduzir levemente',d:'dn'};else if(rv<-5)b.sug={t:'bad',tx:'Aumentar '+Math.abs(rv).toFixed(1)+' dB',d:'up'};else if(rv<-2)b.sug={t:'warn',tx:'Aumentar levemente',d:'up'};else b.sug={t:'ok',tx:'Dentro do padrao',d:'ok'}}
         return defs;
     }
     _fft(re,im,n){for(let i=1,j=0;i<n;i++){let bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;if(i<j){[re[i],re[j]]=[re[j],re[i]];[im[i],im[j]]=[im[j],im[i]]}}for(let len=2;len<=n;len<<=1){const h=len>>1,ang=-2*Math.PI/len,wR=Math.cos(ang),wI=Math.sin(ang);for(let i=0;i<n;i+=len){let cR=1,cI=0;for(let j=0;j<h;j++){const tR=cR*re[i+j+h]-cI*im[i+j+h],tI=cR*im[i+j+h]+cI*re[i+j+h];re[i+j+h]=re[i+j]-tR;im[i+j+h]=im[i+j]-tI;re[i+j]+=tR;im[i+j]+=tI;const nR=cR*wR-cI*wI;cI=cR*wI+cI*wR;cR=nR}}}}
@@ -340,21 +344,22 @@ class MEngine{
             else if(b.name==='HiMid'||b.name==='Brilho')trebD+=dev;
         }
         // Corrige desbalance, escala com bf
+        // Se bf=0 (audio ja otimo), NENHUMA correcao de EQ
         // Negativo = reduz (banda tava alta), Positivo = aumenta (banda tava baixa)
-        c.bass=Math.max(-8,Math.min(8,-bassD*0.6*Math.max(0.3,bf)));
-        c.lowMid=Math.max(-8,Math.min(8,-lowMidD*0.6*Math.max(0.3,bf)));
-        c.mid=Math.max(-8,Math.min(8,-midD*0.6*Math.max(0.3,bf)));
-        c.treble=Math.max(-8,Math.min(8,-trebD*0.4*Math.max(0.3,bf)));
+        c.bass=Math.max(-8,Math.min(8,-bassD*0.6*bf));
+        c.lowMid=Math.max(-8,Math.min(8,-lowMidD*0.6*bf));
+        c.mid=Math.max(-8,Math.min(8,-midD*0.6*bf));
+        c.treble=Math.max(-8,Math.min(8,-trebD*0.4*bf));
 
-        // === COMPRESSAO: so se DR esta alto E peak esta seguro ===
-        if(a.dr>12&&a.pk<0.95){c.comp=Math.min(40,(a.dr-10)*5*Math.max(0.2,bf))}
-        else if(a.dr>14&&a.pk<0.95){c.comp=Math.min(50,(a.dr-10)*7*Math.max(0.2,bf))}
+        // === COMPRESSAO: so se DR esta alto E peak esta seguro E precisa de correcao ===
+        if(a.dr>12&&a.pk<0.95&&pct<75){c.comp=Math.min(40,(a.dr-10)*5*bf)}
+        else if(a.dr>14&&a.pk<0.95&&pct<75){c.comp=Math.min(50,(a.dr-10)*7*bf)}
 
         // === SATURACAO: so se peak esta seguro E precisa de correcao ===
         if(a.pk<0.9&&pct<65){c.drv=Math.min(10,4*bf)}
 
-        // === VOLUME BOOST EXTRA: so se peak seguro E nao estourou ===
-        if(a.pk<0.85&&a.lufs<-12){c.vol=Math.max(-12,Math.min(12,c.vol+2*bf))}
+        // === BLOQUEIO EXTRA: se audio ja esta masterizado (pct>=80), ZERA tudo que restou ===
+        if(pct>=80){c.bass=0;c.lowMid=0;c.mid=0;c.treble=0;c.comp=0;c.vol=0;c.drv=0}
 
         c._smartScore=pct;
         c._boostFactor=bf;
@@ -733,7 +738,8 @@ function _renderDiag(a,s){
 
     $('diagGrid').innerHTML=badge+`<div class="dcard fade"><div class="ic ${lufsOk?'ok':lufsWn?'wn':'bd'}">🔊</div><div class="inf"><div class="lb">Loudness</div><div class="vl">${a.lufs.toFixed(1)} LUFS</div></div><span class="st ${lufsOk?'ok':lufsWn?'wn':'bd'}">${lufsOk?'Otimo':lufsWn?'Ajustar':'Fora'}</span></div><div class="dcard fade"><div class="ic ${pkOk?'ok':pkWn?'wn':'bd'}">🎚️</div><div class="inf"><div class="lb">True Peak</div><div class="vl">${a.pkDb.toFixed(1)} dBTP</div></div><span class="st ${pkOk?'ok':pkWn?'wn':'bd'}">${pkOk?'Seguro':'Cuidado'}</span></div><div class="dcard fade"><div class="ic ${drOk?'ok':drWn?'wn':'bd'}">📊</div><div class="inf"><div class="lb">Dinamica</div><div class="vl">${a.dr.toFixed(1)} DR</div></div><span class="st ${drOk?'ok':drWn?'wn':'bd'}">${drOk?'OK':'Ajustar'}</span></div><div class="dcard fade"><div class="ic ${cfOk?'ok':cfWn?'wn':'bd'}">⚡</div><div class="inf"><div class="lb">Crest Factor</div><div class="vl">${a.crestFactor.toFixed(1)} dB</div></div><span class="st ${cfOk?'ok':cfWn?'wn':'bd'}">${cfOk?'OK':'Ajustar'}</span></div>`;
     $('specGrid').innerHTML=a.bands.map(b=>{const p=Math.max(5,Math.min(100,((b.db+60)/60)*100)),cl=b.sug.t==='ok'?'var(--ok)':b.sug.t==='warn'?'var(--warn)':'var(--bad)',ic=b.sug.d==='up'?'🔺':b.sug.d==='dn'?'🔻':'✅';return`<div class="bcard fade"><div class="bh"><span class="bn">${b.icon} ${b.name}</span><span class="bv" style="color:${cl}">${b.db.toFixed(1)} dB</span></div><div class="bar"><div style="width:${p}%;background:${cl}"></div></div><div class="bs" style="color:${cl}">${ic} ${b.sug.tx}</div></div>`}).join('');
-    $('sugList').innerHTML=s.map(s=>`<div class="sugitem"><span class="ar ${s.d==='up'?'up':s.d==='dn'?'dn':'ok'}">${s.d==='up'?'▲':s.d==='dn'?'▼':'●'}</span><span>${s.t}</span></div>`).join('');
+    const iaMsgs=[];if(pct>=85){iaMsgs.push({d:'ok',t:'Audio ja otimo para streaming! Nenhuma correcao necessaria.'});iaMsgs.push({d:'ok',t:'LUFS, True Peak e dinamica dentro dos padroes. Pronto para publicar.'})}else if(pct>=65){iaMsgs.push({d:'ok',t:'Audio em bom estado. Correcoes leves aplicadas.'});for(const si of s)iaMsgs.push(si)}else{iaMsgs.push({d:'up',t:'Audio precisa de masterizacao. IA aplicou correcoes.'});for(const si of s)iaMsgs.push(si)}
+    $('sugList').innerHTML=iaMsgs.map(s=>`<div class="sugitem"><span class="ar ${s.d==='up'?'up':s.d==='dn'?'dn':'ok'}">${s.d==='up'?'▲':s.d==='dn'?'▼':'●'}</span><span>${s.t}</span></div>`).join('');
 }
 
 $('btnDiag').onclick=()=>_show('stepCtrl');$('btnDiag2').onclick=()=>_show('stepDiag');

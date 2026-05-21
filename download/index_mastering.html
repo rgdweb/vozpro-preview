@@ -339,6 +339,7 @@ class MEngine{
 
         // bf = fator de intensidade da correcao
         const bf=Math.max(0,Math.min(0.7,(100-pct)/100*0.7));
+        let maxDev=0;
 
         // === LUFS: so ajusta se TEM HEADROOM (peak < 0.90) ===
         if(hasHeadroom){
@@ -352,7 +353,7 @@ class MEngine{
         // === EQ: so se precisa E tem headroom ===
         if(bf>0.05){
             const avg=a.bands.reduce((s,b)=>s+b.db,0)/a.bands.length;
-            let bassD=0,lowMidD=0,midD=0,trebD=0,maxDev=0;
+            let bassD=0,lowMidD=0,midD=0,trebD=0;
             for(const b of a.bands){
                 const dev=b.db-avg;
                 if(dev>maxDev)maxDev=dev;

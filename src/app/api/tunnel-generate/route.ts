@@ -383,8 +383,9 @@ async function generateSingleShot(
   // O evento SSE "complete" dispara quando a GERACAO termina, mas o Gradio
   // ainda pode estar salvando o arquivo WAV. Sem esse delay, o download pode
   // pegar um arquivo incompleto (cortando o final do audio em textos longos).
-  // Delay dinamico: texto longo precisa de mais tempo.
-  const delayMs = Math.min(5000, 2000 + Math.floor(text.length / 200) * 1000)
+  // Delay dinamico: texto longo precisa de mais tempo para o Gradio salvar o WAV no disco.
+  // OmniVoice com postprocess_output=true pode levar ate 7s para finalizar textos >300 chars.
+  const delayMs = Math.min(7000, 2500 + Math.floor(text.length / 150) * 1000)
   await new Promise(r => setTimeout(r, delayMs))
   debug.log('Download', 'info', `Aguardou ${delayMs}ms apos SSE complete (texto: ${text.length} chars)`)
 
@@ -394,13 +395,33 @@ async function generateSingleShot(
     debug.log('Download', 'error', 'Falha no download apos 3 tentativas')
     return null
   }
-  debug.log('Download', 'ok', `${(voiceBuffer.length / 1024).toFixed(1)}KB (WAV completo)`)
+  // Log de duração real do áudio baixado para diagnóstico
+  const dlSampleRate = voiceBuffer.readUInt32LE(24)
+  const dlChannels = voiceBuffer.readUInt16LE(22)
+  const dlBits = voiceBuffer.readUInt16LE(34)
+  const dlBytesPerSample = Math.floor(dlBits / 8)
+  const dlDataSize = voiceBuffer.readUInt32LE(40)
+  const dlDuration = (dlDataSize / dlChannels / dlBytesPerSample / dlSampleRate).toFixed(1)
+  debug.log('Download', 'ok', `${(voiceBuffer.length / 1024).toFixed(1)}KB (WAV completo, duracao: ${dlDuration}s, ${dlSampleRate}Hz, ${dlBits}bit, ${dlChannels}ch)`)
+  // Verificar se a duração parece curta para o tamanho do texto
+  const expectedMinDuration = text.length * 0.08 // ~80ms por caractere em português
+  if (parseFloat(dlDuration) < expectedMinDuration) {
+    debug.log('Download', 'warn', `Duracao suspeita: ${dlDuration}s para ${text.length} chars (esperado >=${expectedMinDuration.toFixed(1)}s). Possivel corte pelo postprocess.`)
+  }
 
-  // Adicionar 500ms de silêncio no final do WAV para proteger a última sílaba.
+  // Adicionar 750ms de silêncio no final do WAV para proteger a última sílaba.
   // O postprocess_output do OmniVoice pode cortar a última sílaba junto com o silêncio.
-  const paddedBuffer = appendWavSilence(voiceBuffer, 0.5)
+  // Textos longos (>300 chars) precisam de mais margem — 500ms não era suficiente.
+  const paddedBuffer = appendWavSilence(voiceBuffer, 0.75)
   if (paddedBuffer) {
-    debug.log('Silence Pad', 'ok', `+500ms silêncio (${(paddedBuffer.length / 1024).toFixed(1)}KB final)`)
+    // Calcular duração real do áudio para diagnóstico
+    const sampleRate = paddedBuffer.readUInt32LE(24)
+    const channels = paddedBuffer.readUInt16LE(22)
+    const bitsPerSample = paddedBuffer.readUInt16LE(34)
+    const bytesPerSample = Math.floor(bitsPerSample / 8)
+    const dataSize = paddedBuffer.readUInt32LE(40)
+    const durationSec = (dataSize / channels / bytesPerSample / sampleRate).toFixed(1)
+    debug.log('Silence Pad', 'ok', `+750ms silêncio (${(paddedBuffer.length / 1024).toFixed(1)}KB final, duracao: ${durationSec}s, sampleRate: ${sampleRate}Hz)`)
     return paddedBuffer
   }
 

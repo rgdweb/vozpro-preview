@@ -814,13 +814,21 @@ debugLog('Download audio', 'ok', round(filesize($tempAudioFile) / 1024) . 'KB' .
 
 // ===================== APPEND SILENCIO NO FINAL DO WAV =====================
 // O postprocess_output do OmniVoice pode cortar a ultima silaba junto com o silencio.
-// Adicionamos 500ms de silencio PCM (zeros) no final para proteger.
+// Adicionamos 750ms de silencio PCM (zeros) no final para proteger.
+// Textos longos (>300 chars) precisam de mais margem — 500ms nao era suficiente.
 if ($ext === 'wav' && file_exists($tempAudioFile)) {
-    $appendOk = appendWavSilenceOv($tempAudioFile, 0.5);
+    $appendOk = appendWavSilenceOv($tempAudioFile, 0.75);
     if ($appendOk) {
         clearstatcache();
         $newSize = filesize($tempAudioFile);
-        debugLog('Silence Pad', 'ok', '+500ms silencio adicionado (' . round($newSize / 1024) . 'KB final)');
+        // Calcular duracao real para diagnostico
+        $hdr = file_get_contents($tempAudioFile, false, null, 0, 44);
+        $sr = unpack('V', substr($hdr, 24, 4))[1];
+        $ch = unpack('v', substr($hdr, 22, 2))[1];
+        $bps = unpack('v', substr($hdr, 34, 2))[1];
+        $dsz = unpack('V', substr($hdr, 40, 4))[1];
+        $dur = round($dsz / $ch / ($bps / 8) / $sr, 1);
+        debugLog('Silence Pad', 'ok', "+750ms silencio adicionado (" . round($newSize / 1024) . "KB final, duracao: {$dur}s, {$sr}Hz)");
     }
 }
 

@@ -340,7 +340,10 @@ async function generateSingleShot(
   const voiceBuffer = Buffer.from(await voiceRes.arrayBuffer())
   debug.log('Download', 'ok', `${(voiceBuffer.length / 1024).toFixed(1)}KB`)
 
-  return applyFadeOut(voiceBuffer, 200)
+  // Fade-out DESATIVADO (22/05/2026): 200ms engolia a ultima silaba do texto.
+  // O OmniVoice ja gera audio com final natural, nao precisa de fade artificial.
+  // return applyFadeOut(voiceBuffer, 200)
+  return voiceBuffer
 }
 
 // ============================================================

@@ -43,7 +43,7 @@ const DEFAULT_CONFIG: ConcatenationConfig = {
   crossfadeMs: 0,        // 0 = sem crossfade (preserva vogais finais, evita flanging)
   trimSilenceMs: 80,     // só corta silêncio do INÍCIO (não do final)
   normalizeVolume: true,
-  fadeOutMs: 150,        // fade-out final suave (150ms)
+  fadeOutMs: 0,          // DESATIVADO (22/05/2026): engolia ultima silaba. OmniVoice ja gera final natural.
   targetRmsDb: -16,
 }
 

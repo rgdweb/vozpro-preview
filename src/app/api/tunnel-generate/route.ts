@@ -368,15 +368,15 @@ async function generateWithChunking(
   tunnelUrl: string,
   text: string,
   gradioBaseData: unknown[],
-  debug: ReturnType<typeof createDebug>
+  debug: ReturnType<typeof createDebug>,
+  maxChars = 150
 ): Promise<{ finalBuffer: Buffer; chunks: TextChunk[]; chunkDiagnostics?: Array<{ index: number; text: string; durationSec: number; textLength: number; ok: boolean }>; failedChunks?: number } | null> {
   // 1. Chunking por limite de caracteres (anti-postprocess)
-  // Usar 150 chars (não 250) para garantir que postprocess não corte.
-  // Postprocess corta ~29% em textos >280 chars, mas em chunks <150 chars é seguro.
-  const chunks = chunkByCharLimit(text, 150)
+  // maxChars é dinâmico: começa em 150, reduz se postprocess ainda cortar.
+  const chunks = chunkByCharLimit(text, maxChars)
   if (chunks.length === 0) return null
 
-  debug.log('Chunking', 'ok', `${chunks.length} chunks (max 250 chars cada)`)  
+  debug.log('Chunking', 'ok', `${chunks.length} chunks (max ${maxChars} chars cada)`)  
   debug.log('Chunking', 'info', formatChunkSummary(chunks).substring(0, 500))
 
   // 2. Gerar cada chunk (postprocess ON = denoise ativo, áudio limpo)
@@ -733,14 +733,48 @@ export async function POST(req: NextRequest) {
     // Postprocess mantido ON para preservar denoise (sem chiado).
     const shouldChunk = cleanText.length > 280 || useChunking
     if (shouldChunk && cleanText.length > 20) {
-      debug.log('Pipeline', 'info', `Modo CHUNKING ativo (texto: ${cleanText.length} chars > 280 threshold, chunks ~150 chars)`)      
-      const chunkResult = await generateWithChunking(tunnelUrl, cleanText, gradioBaseData, debug)
-      if (chunkResult) {
-        finalBuffer = chunkResult.finalBuffer
-        chunkInfo = chunkResult.chunks
-        chunkDiag = chunkResult.chunkDiagnostics || null
-        failedChunkCount = chunkResult.failedChunks || 0
-        // Diagnóstico para chunking
+      debug.log('Pipeline', 'info', `Modo CHUNKING ADAPTATIVO (texto: ${cleanText.length} chars, tamanhos: 150→100→80)`)      
+      // TENTATIVA ADAPTATIVA: Começa com 150 chars. Se ainda curto, reduz para 100, depois 80.
+      // Cada redução aumenta o número de chunks mas evita corte do postprocess.
+      const chunkSizes = [150, 100, 80]
+      let adaptiveResult: Awaited<ReturnType<typeof generateWithChunking>> = null
+      let usedChunkSize = 150
+
+      for (const size of chunkSizes) {
+        debug.log('Pipeline', 'info', `Tentando chunks de ${size} chars...`)
+        adaptiveResult = await generateWithChunking(tunnelUrl, cleanText, gradioBaseData, debug, size)
+
+        if (!adaptiveResult) continue
+
+        // Verificar se a duração está OK
+        const sr = adaptiveResult.finalBuffer.readUInt32LE(24)
+        const ch = adaptiveResult.finalBuffer.readUInt16LE(22)
+        const bps = adaptiveResult.finalBuffer.readUInt16LE(34)
+        const ds = adaptiveResult.finalBuffer.readUInt32LE(40)
+        const dur = parseFloat((ds / ch / Math.floor(bps / 8) / sr).toFixed(1))
+        const expDur = cleanText.length * 0.08
+        const ratio = dur / expDur
+
+        debug.log('Pipeline', 'info', `Chunks ${size}: duracao ${dur}s vs esperado ${expDur.toFixed(1)}s (ratio: ${(ratio * 100).toFixed(0)}%)`)
+
+        // Se ratio >= 85%, aceitar — pequena variação é normal
+        if (ratio >= 0.85) {
+          debug.log('Pipeline', 'ok', `Tamanho ${size} chars aprovado (ratio ${(ratio * 100).toFixed(0)}%)`)
+          usedChunkSize = size
+          break
+        }
+
+        // Se cortou > 15%, tentar tamanho menor
+        debug.log('Pipeline', 'warn', `Chunks de ${size} chars ainda cortados (${(ratio * 100).toFixed(0)}%). Reduzindo...`)
+        usedChunkSize = size
+      }
+
+      if (adaptiveResult) {
+        finalBuffer = adaptiveResult.finalBuffer
+        chunkInfo = adaptiveResult.chunks
+        chunkDiag = adaptiveResult.chunkDiagnostics || null
+        failedChunkCount = adaptiveResult.failedChunks || 0
+
         const sr = finalBuffer.readUInt32LE(24)
         const ch = finalBuffer.readUInt16LE(22)
         const bps = finalBuffer.readUInt16LE(34)
@@ -812,6 +846,7 @@ export async function POST(req: NextRequest) {
         succeededChunks: chunkInfo.length - failedChunkCount,
         failedChunks: failedChunkCount,
         postprocessDisabled: false,
+        usedChunkSize: usedChunkSize,
         chunks: chunkInfo.map(c => ({
           text: c.text.substring(0, 50),
           pauseAfterMs: c.pauseAfterMs,

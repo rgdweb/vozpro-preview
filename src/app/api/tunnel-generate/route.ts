@@ -376,7 +376,7 @@ export async function POST(req: NextRequest) {
       true,   // postprocess_output (NECESSARIO: remove estalinhos/artefatos do audio gerado)
     ]
 
-    debug.log('Parametros', 'info', `lang:${language} speed:${speed} steps:${numStep} cfg:${guidanceScale} chunking:${useChunking}`)
+    debug.log('Parametros', 'info', `lang:${language} speed:${speed} steps:${numStep} cfg:${guidanceScale}`)
 
     // =============================================================
     // 5. GERAR ÁUDIO (chunking ou single-shot)

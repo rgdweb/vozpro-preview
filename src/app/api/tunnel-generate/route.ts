@@ -351,6 +351,31 @@ function buildSimpleWavHeader(fmt: SimpleWavFormat, dataSize: number, pcm: Buffe
   return Buffer.concat([header, pcm])
 }
 
+/**
+ * Trim silêncio morto do INÍCIO do PCM.
+ * Encontra o primeiro sample acima do threshold e corta tudo antes.
+ * Não corta o final — preserva a palavra final do chunk anterior intacta.
+ */
+function trimPcmStart(pcm: Buffer, fmt: SimpleWavFormat): Buffer {
+  if (fmt.bitsPerSample !== 16) return pcm
+  const blockAlign = fmt.blockAlign
+  const threshold = 200 // samples abaixo = silêncio morto
+
+  let startByte = 0
+  for (let i = 0; i < pcm.length && i < pcm.length; i += blockAlign) {
+    const sample = Math.abs(pcm.readInt16LE(i))
+    if (sample > threshold) {
+      startByte = i
+      break
+    }
+  }
+
+  // Se não encontrou silêncio (começa direto com fala), retornar original
+  if (startByte === 0) return pcm
+
+  return pcm.subarray(startByte)
+}
+
 // ============================================================
 // PIPELINE COM CHUNKING (prosódia explícita)
 // ============================================================
@@ -394,13 +419,13 @@ async function generateWithChunking(
     debug.log('Chunking', 'warn', `${failedChunks}/${chunks.length} chunks falharam, continuando com ${audioChunks.length}`)
   }
 
-  // 3. Splice PCM CRU — zero processamento
-  // NENHUMA manipulação: sem trim, sem normalize, sem crossfade, sem fade, sem silêncio artificial.
-  // A pausa entre chunks já vem natural do TTS (punctuation no texto: , = pausa curta, . = pausa longa).
-  // Apenas extrai PCM de cada WAV e junta os bytes. Ponto.
-  debug.log('Concatenacao', 'info', `Splice PCM cru: ${audioChunks.length} chunks (zero processamento)...`)
+  // 3. Splice PCM com micro-trim no início dos chunks subsequentes
+  // O postprocess do OmniVoice corta o final de cada chunk muito em cima.
+  // Solução: trimar o silêncio morto do INÍCIO de cada chunk (exceto o primeiro).
+  // Isso avança o ponto de junção alguns milissegundos para dentro do próximo chunk,
+  // sem cortar o final do chunk anterior. O resultado: corte imperceptível.
+  debug.log('Concatenacao', 'info', `Splice PCM com micro-trim: ${audioChunks.length} chunks...`)
   
-  // Extrair PCM puro de cada chunk (sem header WAV)
   const pcmParts: Buffer[] = []
   let totalPcmBytes = 0
   const firstFormat = parseWavHeaderSimple(audioChunks[0].buffer)
@@ -410,9 +435,18 @@ async function generateWithChunking(
     if (buf.length < 44) continue
     const dataSize = buf.readUInt32LE(40)
     const actualDataEnd = Math.min(44 + dataSize, buf.length)
-    const pcm = buf.subarray(44, actualDataEnd)
-    pcmParts.push(pcm)
-    totalPcmBytes += pcm.length
+    let pcm = buf.subarray(44, actualDataEnd)
+    
+    // Chunks subsequentes: trimar silêncio morto do início (threshold 200 = silêncio real)
+    // Primeiro chunk: NÃO trimar (manter início natural)
+    if (i > 0) {
+      const trimmed = trimPcmStart(pcm, firstFormat)
+      pcmParts.push(trimmed)
+      totalPcmBytes += trimmed.length
+    } else {
+      pcmParts.push(pcm)
+      totalPcmBytes += pcm.length
+    }
   }
   
   // Montar WAV final: header + PCM concatenado
@@ -420,7 +454,7 @@ async function generateWithChunking(
   const finalBuffer = buildSimpleWavHeader(firstFormat, totalPcmBytes, finalPcm)
 
   debug.log('Concatenacao', 'ok',
-    `PCM cru: ${totalPcmBytes} bytes, ${audioChunks.length} chunks, ${(finalBuffer.length / 1024).toFixed(1)}KB`)
+    `PCM: ${totalPcmBytes} bytes, ${audioChunks.length} chunks, ${(finalBuffer.length / 1024).toFixed(1)}KB`)
 
   return { finalBuffer, chunks }
 }

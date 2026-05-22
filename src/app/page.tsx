@@ -648,6 +648,7 @@ export default function VozProClient() {
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [mixedAudioUrl, setMixedAudioUrl] = useState<string | null>(null)
   const [isMixed, setIsMixed] = useState(false)
+  const [audioDuration, setAudioDuration] = useState<number | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [mobilePlayerExpanded, setMobilePlayerExpanded] = useState(false)
   const [generatingTime, setGeneratingTime] = useState(0)
@@ -795,6 +796,7 @@ export default function VozProClient() {
     setAudioUrl(null)
     setMixedAudioUrl(null)
     setIsMixed(false)
+    setAudioDuration(null)
     setGeneratingTime(0)
     setPreviewingVoiceId(null)
 
@@ -886,7 +888,6 @@ export default function VozProClient() {
           referenceAudioName: voiceMode !== 'clone' ? undefined : refName,
           instruct: finalInstruct,
           voiceMode,
-          useChunking: true,
         }
         res = await fetch('/api/tunnel-generate', {
           method: 'POST',
@@ -1158,6 +1159,23 @@ export default function VozProClient() {
 
   // Get the active audio URL
   const activeAudioUrl = mixedAudioUrl || audioUrl
+
+  // Detectar duração do áudio quando carregar
+  useEffect(() => {
+    const el = resultAudioRef.current
+    if (!el) return
+    const onLoaded = () => {
+      if (el.duration && isFinite(el.duration)) {
+        setAudioDuration(el.duration)
+      }
+    }
+    el.addEventListener('loadedmetadata', onLoaded)
+    // Se já carregou antes do listener
+    if (el.duration && isFinite(el.duration)) {
+      setAudioDuration(el.duration)
+    }
+    return () => { el.removeEventListener('loadedmetadata', onLoaded) }
+  }, [activeAudioUrl])
 
   // Sync playback state with result audio element
   useEffect(() => {
@@ -2161,7 +2179,7 @@ export default function VozProClient() {
                       />
                     </div>
 
-                    {/* Status badges */}
+                    {/* Status badges + duração */}
                     <div className="flex flex-wrap gap-2">
                       {selectedVoice && (
                         <Badge variant="outline" className="border-violet-500/30 text-violet-300">
@@ -2177,6 +2195,15 @@ export default function VozProClient() {
                         <Badge variant="outline" className="border-emerald-500/30 text-emerald-300">
                           <Music className="w-3 h-3 mr-1" />
                           {selectedTrack.name}
+                        </Badge>
+                      )}
+                      {audioDuration !== null && (
+                        <Badge variant="outline" className="border-amber-500/30 text-amber-300">
+                          <AudioWaveform className="w-3 h-3 mr-1" />
+                          {audioDuration >= 60
+                            ? `${Math.floor(audioDuration / 60)}min ${Math.round(audioDuration % 60)}s`
+                            : `${Math.round(audioDuration * 10) / 10}s`
+                          }
                         </Badge>
                       )}
                     </div>
@@ -2557,13 +2584,21 @@ export default function VozProClient() {
               />
             </div>
 
-            {/* Status badges */}
+            {/* Status badges + duração */}
             <div className="flex flex-wrap gap-2">
               {selectedVoice && (
                 <Badge variant="outline" className="border-violet-500/30 text-violet-300 text-xs">{selectedVoice.name}</Badge>
               )}
               {selectedVariation && (
                 <Badge variant="outline" className="border-purple-500/30 text-purple-300 text-xs">{selectedVariation.emoji} {selectedVariation.label}</Badge>
+              )}
+              {audioDuration !== null && (
+                <Badge variant="outline" className="border-amber-500/30 text-amber-300 text-xs">
+                  {audioDuration >= 60
+                    ? `${Math.floor(audioDuration / 60)}min ${Math.round(audioDuration % 60)}s`
+                    : `${Math.round(audioDuration * 10) / 10}s`
+                  }
+                </Badge>
               )}
             </div>
 
@@ -2613,6 +2648,14 @@ export default function VozProClient() {
                 <p className="text-xs text-white font-medium truncate">
                   {selectedVoice?.name || 'Áudio gerado'}
                   {selectedVariation && <span className="text-slate-400"> — {selectedVariation.label}</span>}
+                  {audioDuration !== null && (
+                    <span className="text-amber-400 ml-2">
+                      {audioDuration >= 60
+                        ? `${Math.floor(audioDuration / 60)}:${String(Math.round(audioDuration % 60)).padStart(2, '0')}`
+                        : `${Math.round(audioDuration * 10) / 10}s`
+                      }
+                    </span>
+                  )}
                 </p>
                 <p className="text-[10px] text-slate-500">
                   {mobilePlayerExpanded ? 'Toque para fechar' : 'Toque para ouvir'}

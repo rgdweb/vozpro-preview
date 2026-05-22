@@ -548,13 +548,13 @@ export function chunkByCharLimit(text: string, maxChars = 250): TextChunk[] {
     const lastComma = commaSearch.lastIndexOf(', ')
     if (lastComma > minBreak) {
       breakPos = lastComma + 2 // incluir vírgula e espaço no primeiro chunk
-      breakPause = 200
+      breakPause = 50
       breakPunct = ','
     }
 
     // Prioridade 2: pontuação forte (. ! ?) + espaço
     if (breakPos === -1) {
-      for (const [punct, pause] of [['. ', 350], ['! ', 400], ['? ', 450]] as [string, number][]) {
+      for (const [punct, pause] of [['. ', 80], ['! ', 80], ['? ', 80]] as [string, number][]) {
         const pos = commaSearch.lastIndexOf(punct)
         if (pos > minBreak) {
           breakPos = pos + 2
@@ -577,7 +577,7 @@ export function chunkByCharLimit(text: string, maxChars = 250): TextChunk[] {
         const pos = commaSearch.lastIndexOf(conj)
         if (pos > minBreak) {
           breakPos = pos + conj.length
-          breakPause = 250
+          breakPause = 50
           breakPunct = ','
           break
         }
@@ -589,7 +589,7 @@ export function chunkByCharLimit(text: string, maxChars = 250): TextChunk[] {
       const lastSpace = commaSearch.lastIndexOf(' ')
       if (lastSpace > minBreak) {
         breakPos = lastSpace + 1
-        breakPause = 250
+        breakPause = 50
         breakPunct = ','
       }
     }
@@ -597,7 +597,7 @@ export function chunkByCharLimit(text: string, maxChars = 250): TextChunk[] {
     // Fallback: corte duro no maxChars
     if (breakPos === -1) {
       breakPos = maxChars
-      breakPause = 250
+      breakPause = 50
       breakPunct = ','
     }
 

@@ -2281,6 +2281,88 @@ export default function VozProClient() {
               </summary>
               <Card className="mt-2 bg-white/5 border-white/10 backdrop-blur">
                 <CardContent className="pt-5 space-y-3">
+                  {/* === DIAGNÓSTICO DO ÁUDIO === */}
+                  {(lastGenResponse as Record<string, unknown>)?.audioDiagnostics && (
+                    <div className="space-y-2">
+                      <span className="text-xs font-semibold text-slate-200">Diagnóstico do Áudio</span>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {(() => {
+                          const d = (lastGenResponse as Record<string, unknown>).audioDiagnostics as Record<string, unknown>
+                          const durationOk = d.durationOk as boolean
+                          const wavOk = d.wavHeaderValid as boolean
+                          const durSec = parseFloat(d.audioDurationSec as string)
+                          const minDur = parseFloat(d.expectedMinDuration as string)
+                          const ratio = minDur > 0 ? durSec / minDur : 0
+                          return (
+                            <>
+                              {/* Duração real vs esperada */}
+                              <div className={`col-span-2 sm:col-span-3 rounded-lg p-2.5 text-xs ${durationOk ? 'bg-green-500/10 border border-green-500/20' : 'bg-red-500/10 border border-red-500/20'}`}>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className={`font-semibold ${durationOk ? 'text-green-400' : 'text-red-400'}`}>
+                                    {durationOk ? '✓' : '⚠'} Duração: {d.audioDurationSec}s
+                                  </span>
+                                  <span className="text-slate-500">
+                                    (mínimo esperado: {d.expectedMinDuration}s para {d.textLength} chars)
+                                  </span>
+                                </div>
+                                {!durationOk && (
+                                  <div className="text-red-300/80 text-[11px]">
+                                    O áudio está {((1 - ratio) * 100).toFixed(0)}% mais curto que o esperado. 
+                                    Possível corte pelo postprocess_output do OmniVoice.
+                                  </div>
+                                )}
+                                {/* Barra visual de proporção */}
+                                <div className="mt-1.5 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                  <div 
+                                    className={`h-full rounded-full transition-all ${durationOk ? 'bg-green-500' : 'bg-red-500'}`}
+                                    style={{ width: `${Math.min(100, ratio * 100)}%` }}
+                                  />
+                                </div>
+                              </div>
+                              {/* Texto */}
+                              <div className="rounded-lg bg-slate-800/50 p-2 text-[11px]">
+                                <div className="text-slate-500">Texto</div>
+                                <div className="text-slate-200 font-mono">{d.textLength} chars</div>
+                              </div>
+                              {/* Tamanho arquivo */}
+                              <div className="rounded-lg bg-slate-800/50 p-2 text-[11px]">
+                                <div className="text-slate-500">Arquivo</div>
+                                <div className="text-slate-200 font-mono">{d.fileSizeKB} KB</div>
+                              </div>
+                              {/* Sample Rate */}
+                              <div className="rounded-lg bg-slate-800/50 p-2 text-[11px]">
+                                <div className="text-slate-500">Sample Rate</div>
+                                <div className="text-slate-200 font-mono">{d.sampleRate} Hz</div>
+                              </div>
+                              {/* Formato */}
+                              <div className="rounded-lg bg-slate-800/50 p-2 text-[11px]">
+                                <div className="text-slate-500">Formato</div>
+                                <div className="text-slate-200 font-mono">{d.bitsPerSample}bit / {d.channels}ch</div>
+                              </div>
+                              {/* Delay SSE */}
+                              <div className="rounded-lg bg-slate-800/50 p-2 text-[11px]">
+                                <div className="text-slate-500">Delay após SSE</div>
+                                <div className="text-slate-200 font-mono">{(d.delayAfterSse as number) / 1000}s</div>
+                              </div>
+                              {/* Silêncio adicionado */}
+                              <div className="rounded-lg bg-slate-800/50 p-2 text-[11px]">
+                                <div className="text-slate-500">Silêncio padding</div>
+                                <div className="text-slate-200 font-mono">{d.silencePadSec}s</div>
+                              </div>
+                              {/* WAV Header */}
+                              <div className={`rounded-lg p-2 text-[11px] ${wavOk ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+                                <div className="text-slate-500">WAV Header</div>
+                                <div className={`font-mono ${wavOk ? 'text-green-400' : 'text-red-400'}`}>
+                                  {wavOk ? '✓ Válido' : '✗ Truncado'}
+                                </div>
+                              </div>
+                            </>
+                          )
+                        })()}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Debug Steps Timeline */}
                   {(lastGenResponse as Record<string, unknown>)?.debug && 
                     typeof (lastGenResponse as Record<string, unknown>)?.debug === 'object' && 

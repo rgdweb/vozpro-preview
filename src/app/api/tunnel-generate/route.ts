@@ -354,12 +354,26 @@ async function generateWithChunking(
 // MODO SINGLE-SHOT (fallback sem chunking)
 // ============================================================
 
+interface AudioDiagnostics {
+  textLength: number
+  audioDurationSec: string
+  fileSizeKB: string
+  sampleRate: number
+  bitsPerSample: number
+  channels: number
+  delayAfterSse: number
+  silencePadSec: number
+  expectedMinDuration: string
+  durationOk: boolean
+  wavHeaderValid: boolean
+}
+
 async function generateSingleShot(
   tunnelUrl: string,
   text: string,
   gradioData: unknown[],
   debug: ReturnType<typeof createDebug>
-): Promise<Buffer | null> {
+): Promise<{ buffer: Buffer | null; diagnostics: AudioDiagnostics | null }> {
   debug.log('Geracao', 'info', 'Gerando audio (single-shot, sem chunking)...')
 
   // Submeter job com retry
@@ -373,11 +387,11 @@ async function generateSingleShot(
     if (eventId) break
   }
 
-  if (!eventId) return null
+  if (!eventId) return { buffer: null, diagnostics: null }
 
   // SSE Stream
   const result = await streamResult(tunnelUrl, eventId, debug, 180000)
-  if (!result.audioUrl) return null
+  if (!result.audioUrl) return { buffer: null, diagnostics: null }
 
   // Aguardar Gradio terminar de escrever o arquivo no disco.
   // O evento SSE "complete" dispara quando a GERACAO termina, mas o Gradio
@@ -393,7 +407,7 @@ async function generateSingleShot(
   const voiceBuffer = await downloadWithRetry(result.audioUrl, 3, 2000)
   if (!voiceBuffer) {
     debug.log('Download', 'error', 'Falha no download apos 3 tentativas')
-    return null
+    return { buffer: null, diagnostics: null }
   }
   // Log de duração real do áudio baixado para diagnóstico
   const dlSampleRate = voiceBuffer.readUInt32LE(24)
@@ -422,12 +436,38 @@ async function generateSingleShot(
     const dataSize = paddedBuffer.readUInt32LE(40)
     const durationSec = (dataSize / channels / bytesPerSample / sampleRate).toFixed(1)
     debug.log('Silence Pad', 'ok', `+750ms silêncio (${(paddedBuffer.length / 1024).toFixed(1)}KB final, duracao: ${durationSec}s, sampleRate: ${sampleRate}Hz)`)
-    return paddedBuffer
+    const diagnostics: AudioDiagnostics = {
+      textLength: text.length,
+      audioDurationSec: durationSec,
+      fileSizeKB: (paddedBuffer.length / 1024).toFixed(1),
+      sampleRate,
+      bitsPerSample,
+      channels,
+      delayAfterSse: delayMs,
+      silencePadSec: 0.75,
+      expectedMinDuration: expectedMinDuration.toFixed(1),
+      durationOk: parseFloat(durationSec) >= expectedMinDuration,
+      wavHeaderValid: isWavComplete(paddedBuffer),
+    }
+    return { buffer: paddedBuffer, diagnostics }
   }
 
   // SEM pós-processamento. Passa o áudio exatamente como o Gradio/OmniVoice gera.
   // Mesma coisa que ouvir direto no localhost:7860.
-  return voiceBuffer
+  const diagnostics: AudioDiagnostics = {
+    textLength: text.length,
+    audioDurationSec: dlDuration,
+    fileSizeKB: (voiceBuffer.length / 1024).toFixed(1),
+    sampleRate: dlSampleRate,
+    bitsPerSample: dlBits,
+    channels: dlChannels,
+    delayAfterSse: delayMs,
+    silencePadSec: 0,
+    expectedMinDuration: expectedMinDuration.toFixed(1),
+    durationOk: parseFloat(dlDuration) >= expectedMinDuration,
+    wavHeaderValid: isWavComplete(voiceBuffer),
+  }
+  return { buffer: voiceBuffer, diagnostics }
 }
 
 // ============================================================
@@ -584,6 +624,7 @@ export async function POST(req: NextRequest) {
     // =============================================================
     let finalBuffer: Buffer | null = null
     let chunkInfo: TextChunk[] | null = null
+    let audioDiagnostics: AudioDiagnostics | null = null
 
     if (false && useChunking && cleanText.length > 20) {
       // CHUNKING DESATIVADO (22/05/2026): causava artefatos ("ba", "to", "sao") nas juncoes.
@@ -597,12 +638,16 @@ export async function POST(req: NextRequest) {
       } else {
         // Fallback para single-shot se chunking falhar completamente
         debug.log('Pipeline', 'warn', 'Chunking falhou, tentando single-shot como fallback...')
-        finalBuffer = await generateSingleShot(tunnelUrl, cleanText, gradioBaseData, debug)
+        const ssResult = await generateSingleShot(tunnelUrl, cleanText, gradioBaseData, debug)
+        finalBuffer = ssResult.buffer
+        audioDiagnostics = ssResult.diagnostics
       }
     } else {
       // MODO SINGLE-SHOT — texto curto ou chunking desativado
       debug.log('Pipeline', 'info', `Modo SINGLE-SHOT (${!useChunking ? 'desativado' : 'texto curto'})`)
-      finalBuffer = await generateSingleShot(tunnelUrl, cleanText, gradioBaseData, debug)
+      const ssResult = await generateSingleShot(tunnelUrl, cleanText, gradioBaseData, debug)
+      finalBuffer = ssResult.buffer
+      audioDiagnostics = ssResult.diagnostics
     }
 
     // 6. Verificar resultado
@@ -632,6 +677,7 @@ export async function POST(req: NextRequest) {
       viaTunnel: true,
       mode: chunkInfo ? 'chunking' : 'single-shot',
       debug: debug.result(),
+      audioDiagnostics,
     }
 
     // Info do chunking

@@ -595,8 +595,10 @@ if (!$audioUrl) {
 debugLog('Download audio gerado', 'info', 'baixando...');
 
 // Aguardar Gradio terminar de escrever o arquivo no disco.
-sleep(2);
-debugLog('Download audio gerado', 'info', 'Aguardou 2s apos SSE complete');
+// Delay dinamico: texto longo precisa de mais tempo para o Gradio salvar o WAV.
+$delaySec = min(5, 2 + (int)floor(strlen($texto) / 200));
+sleep($delaySec);
+debugLog('Download audio gerado', 'info', "Aguardou {$delaySec}s apos SSE complete (texto: " . strlen($texto) . ' chars)');
 
 // Detectar extensao real do audio gerado (Gradio pode retornar WAV ou MP3)
 $ext = strtolower(pathinfo($audioUrl, PATHINFO_EXTENSION));
@@ -604,6 +606,32 @@ if (empty($ext) || !in_array($ext, ['wav', 'mp3', 'ogg', 'flac'])) {
     $ext = 'wav'; // default seguro
 }
 $tempAudioFile = tempnam(sys_get_temp_dir(), 'vp_gen_') . '.' . $ext;
+
+// Funcao: adiciona silencio (zeros PCM) no final de um arquivo WAV
+function appendWavSilence($filepath, $durationSec = 0.5) {
+    if (!file_exists($filepath) || filesize($filepath) < 44) return false;
+    $f = fopen($filepath, 'rb+');
+    if (!$f) return false;
+    $header = fread($f, 44);
+    if (strlen($header) < 44) { fclose($f); return false; }
+    if (substr($header, 0, 4) !== 'RIFF' || substr($header, 8, 4) !== 'WAVE') { fclose($f); return false; }
+    $sampleRate = unpack('V', substr($header, 24, 4))[1];
+    $bitsPerSample = unpack('v', substr($header, 34, 2))[1];
+    $channels = unpack('v', substr($header, 22, 2))[1];
+    $bytesPerSample = (int)($bitsPerSample / 8);
+    $silenceSamples = (int)($sampleRate * $durationSec);
+    $silenceBytes = $silenceSamples * $channels * $bytesPerSample;
+    fseek($f, 0, SEEK_END);
+    fwrite($f, str_repeat("\x00", $silenceBytes));
+    $newSize = filesize($filepath);
+    fseek($f, 4);
+    fwrite($f, pack('V', $newSize - 8));
+    $oldDataSize = unpack('V', substr($header, 40, 4))[1];
+    fseek($f, 40);
+    fwrite($f, pack('V', $oldDataSize + $silenceBytes));
+    fclose($f);
+    return true;
+}
 
 // Funcao: valida se o header WAV bate com o tamanho real do arquivo
 // Retorna true se OK, false se truncado
@@ -694,6 +722,16 @@ if (!$dlOk || $dlCode != 200 || filesize($tempAudioFile) == 0) {
 
 $audioSize = filesize($tempAudioFile);
 debugLog('Download audio gerado', 'ok', round($audioSize / 1024) . 'KB' . ($ext !== 'wav' ? " ($ext)" : '') . " (tentativa $attempt/$maxRetries)");
+
+// ===================== APPEND SILENCIO NO FINAL DO WAV =====================
+if ($ext === 'wav' && file_exists($tempAudioFile)) {
+    $appendOk = appendWavSilence($tempAudioFile, 0.5);
+    if ($appendOk) {
+        clearstatcache();
+        $newSize = filesize($tempAudioFile);
+        debugLog('Silence Pad', 'ok', '+500ms silencio adicionado (' . round($newSize / 1024) . 'KB final)');
+    }
+}
 
 // ===================== CONVERTER PARA BASE64 =====================
 debugLog('Base64 encode', 'info', 'convertendo...');

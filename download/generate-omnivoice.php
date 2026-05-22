@@ -683,8 +683,10 @@ debugLog('Download audio', 'info', 'baixando audio gerado...');
 // O evento SSE "complete" dispara quando a GERACAO termina, mas o Gradio
 // ainda pode estar salvando o arquivo WAV. Sem esse delay, o download pode
 // pegar um arquivo incompleto (cortando o final do audio em textos longos).
-sleep(2);
-debugLog('Download audio', 'info', 'Aguardou 2s apos SSE complete');
+// Delay maior para texto longo: o Gradio pode demorar ate 5s para salvar o WAV
+$delaySec = min(5, 2 + (int)floor(strlen($texto) / 200));
+sleep($delaySec);
+debugLog('Download audio', 'info', "Aguardou {$delaySec}s apos SSE complete (texto: " . strlen($texto) . ' chars)');
 
 // Detectar extensao real do audio gerado
 $ext = strtolower(pathinfo($audioUrl, PATHINFO_EXTENSION));
@@ -693,7 +695,48 @@ if (empty($ext) || !in_array($ext, ['wav', 'mp3', 'ogg', 'flac'])) {
 }
 $tempAudioFile = tempnam(sys_get_temp_dir(), 'vp_ov_gen_') . '.' . $ext;
 
-// Funcao: valida se o header WAV bate com o tamanho real do arquivo
+// Funcao: adiciona silencio (zeros PCM) no final de um arquivo WAV
+// Atualiza os headers RIFF e data chunk automaticamente
+function appendWavSilenceOv($filepath, $durationSec = 0.5) {
+    if (!file_exists($filepath) || filesize($filepath) < 44) return false;
+    
+    $f = fopen($filepath, 'rb+');
+    if (!$f) return false;
+    
+    $header = fread($f, 44);
+    if (strlen($header) < 44) { fclose($f); return false; }
+    
+    // Verificar se e WAV PCM valido
+    if (substr($header, 0, 4) !== 'RIFF' || substr($header, 8, 4) !== 'WAVE') { fclose($f); return false; }
+    
+    // Ler parametros do WAV
+    $sampleRate = unpack('V', substr($header, 24, 4))[1];
+    $bitsPerSample = unpack('v', substr($header, 34, 2))[1];
+    $channels = unpack('v', substr($header, 22, 2))[1];
+    $bytesPerSample = (int)($bitsPerSample / 8);
+    
+    // Calcular bytes de silencio
+    $silenceSamples = (int)($sampleRate * $durationSec);
+    $silenceBytes = $silenceSamples * $channels * $bytesPerSample;
+    
+    // Ir para o final do arquivo e escrever zeros
+    fseek($f, 0, SEEK_END);
+    fwrite($f, str_repeat("\x00", $silenceBytes));
+    
+    // Atualizar header: RIFF ChunkSize (offset 4) = filesize - 8
+    $newSize = filesize($filepath);
+    fseek($f, 4);
+    fwrite($f, pack('V', $newSize - 8));
+    
+    // Atualizar header: Subchunk2Size (offset 40) = data size anterior + silence bytes
+    $oldDataSize = unpack('V', substr($header, 40, 4))[1];
+    fseek($f, 40);
+    fwrite($f, pack('V', $oldDataSize + $silenceBytes));
+    
+    fclose($f);
+    return true;
+}
+
 function isWavCompleteOv($filepath) {
     if (!file_exists($filepath) || filesize($filepath) < 44) return false;
     $f = fopen($filepath, 'rb');
@@ -768,6 +811,18 @@ if (!$dlOk || $dlCode != 200 || filesize($tempAudioFile) == 0) {
 }
 
 debugLog('Download audio', 'ok', round(filesize($tempAudioFile) / 1024) . 'KB' . ($ext !== 'wav' ? " ($ext)" : '') . " (tentativa $attempt/$maxRetries)");
+
+// ===================== APPEND SILENCIO NO FINAL DO WAV =====================
+// O postprocess_output do OmniVoice pode cortar a ultima silaba junto com o silencio.
+// Adicionamos 500ms de silencio PCM (zeros) no final para proteger.
+if ($ext === 'wav' && file_exists($tempAudioFile)) {
+    $appendOk = appendWavSilenceOv($tempAudioFile, 0.5);
+    if ($appendOk) {
+        clearstatcache();
+        $newSize = filesize($tempAudioFile);
+        debugLog('Silence Pad', 'ok', '+500ms silencio adicionado (' . round($newSize / 1024) . 'KB final)');
+    }
+}
 
 // Base64
 $audioBase64 = base64_encode(file_get_contents($tempAudioFile));

@@ -259,6 +259,8 @@ async function generateChunk(
   // Substituir texto no data array
   const data = [...gradioBaseData]
   data[0] = chunkText  // índice 0 = texto
+  data[11] = false     // postprocess_output OFF para chunks — previne corte agressivo de palavras
+                         // denoise (índice 7) continua TRUE = antiruido ativo
 
   debug.log(`Chunk ${chunkIndex + 1}/${totalChunks}`, 'info', `"${chunkText.substring(0, 50)}..." (${chunkText.length} chars)`)
 
@@ -352,52 +354,20 @@ function buildSimpleWavHeader(fmt: SimpleWavFormat, dataSize: number, pcm: Buffe
 }
 
 // ============================================================
-// PIPELINE COM CHUNKING — DAW CUT (trim ao fim da fala)
+// PIPELINE COM CHUNKING — postprocess OFF, denoise ON
 // ============================================================
 
 /**
- * Scaneia PCM de trás pra frente e encontra o último sample de fala.
- * Retorna a posição (em bytes) onde a fala termina + cauda em ms.
- * Igual DAW: olha a onda, acha onde a voz acaba, corta ali.
+ * Gera áudio com chunking: divide texto em pedaços curtos,
+ * gera cada um com postprocess_output=false (sem corte agressivo),
+ * denoise=true (antiruido ativo), e splice puro de PCM.
+ *
+ * Por que isso funciona:
+ * - postprocess_output=true corta ~29% do áudio + última palavra de cada chunk
+ * - postprocess_output=false preserva o áudio completo
+ * - denoise=true (separado) remove o ruído de fundo
+ * - Splice puro de PCM = junção sem efeitos, sem cortes
  */
-function findSpeechEnd(pcm: Buffer, fmt: SimpleWavFormat, tailMs: number): Buffer {
-  const blockAlign = fmt.blockAlign
-  const tailBytes = Math.floor(fmt.sampleRate * tailMs / 1000) * blockAlign
-  const silenceThreshold = 150 // samples abaixo disso = silêncio
-
-  // Scannear de trás pra frente: procurar o último sample acima do threshold
-  let lastVoiceByte = pcm.length - blockAlign // padrão: manter tudo
-  let silenceRun = 0
-  const minSilenceRun = Math.floor(fmt.sampleRate * 0.008) * blockAlign // 8ms mínimo de silêncio confirmado
-
-  for (let i = pcm.length - blockAlign; i >= 0; i -= blockAlign) {
-    const sample = Math.abs(pcm.readInt16LE(i))
-    if (sample > silenceThreshold) {
-      // Encontrou voz — mas verificar se é realmente o fim (não um pico isolado)
-      // Continuar scaneando pra trás pra confirmar que tem silêncio depois
-      lastVoiceByte = i
-      silenceRun = 0
-      break
-    } else {
-      silenceRun += blockAlign
-      // Só considerar "fim de fala" se o silêncio é contínuo por minSilenceRun
-      if (silenceRun >= minSilenceRun) {
-        lastVoiceByte = i + silenceRun + tailBytes
-        break
-      }
-    }
-  }
-
-  // Se não encontrou silêncio suficiente (fala vai até o fim), manter com cauda
-  if (silenceRun < minSilenceRun) {
-    lastVoiceByte = pcm.length
-  }
-
-  // Limitar ao tamanho do PCM
-  lastVoiceByte = Math.min(lastVoiceByte, pcm.length)
-
-  return pcm.subarray(0, lastVoiceByte)
-}
 
 async function generateWithChunking(
   tunnelUrl: string,
@@ -437,10 +407,10 @@ async function generateWithChunking(
     debug.log('Chunking', 'warn', `${failedChunks}/${chunks.length} chunks falharam, continuando com ${audioChunks.length}`)
   }
 
-  // 3. DAW CUT: scannar cada chunk, achar onde a voz termina, cortar ali
-  // Igual DAW: olhar a onda, encontrar o silêncio após a última palavra,
-  // manter 20ms de cauda natural, cortar o resto. Sem efeito, sem fade, sem nada.
-  debug.log('Concatenacao', 'info', `DAW cut: ${audioChunks.length} chunks...`)
+  // 3. Raw PCM splice — sem processamento (postprocess desativado nos chunks)
+  // Como postprocess_output=false, o OmniVoice NÃO corta o final do áudio.
+  // Denoise=true mantém o antiruido. Splice puro de bytes.
+  debug.log('Concatenacao', 'info', `Raw splice: ${audioChunks.length} chunks (postprocess OFF, denoise ON)...`)
 
   const firstFormat = parseWavHeaderSimple(audioChunks[0].buffer)
   const pcmParts: Buffer[] = []
@@ -450,21 +420,9 @@ async function generateWithChunking(
     if (buf.length < 44) continue
     const dataSize = buf.readUInt32LE(40)
     const actualDataEnd = Math.min(44 + dataSize, buf.length)
-    let pcm = buf.subarray(44, actualDataEnd)
-
-    // Chunks intermediários: DAW cut (achar fim da fala + 20ms cauda)
-    // Último chunk: manter intacto (pode ter silêncio natural no final)
-    if (i < chunks.length - 1) {
-      const trimmed = findSpeechEnd(pcm, firstFormat, 0.020) // 20ms cauda
-      const removedMs = ((pcm.length - trimmed.length) / firstFormat.blockAlign / firstFormat.sampleRate * 1000).toFixed(0)
-      debug.log(`Chunk ${i + 1}`, 'info', `DAW cut: removeu ${removedMs}ms de silêncio pós-fala`)
-      pcmParts.push(trimmed)
-    } else {
-      pcmParts.push(pcm)
-    }
+    pcmParts.push(buf.subarray(44, actualDataEnd))
   }
 
-  // Splice puro: juntar os bytes sem nenhum processamento
   const finalPcm = Buffer.concat(pcmParts)
   const finalBuffer = buildSimpleWavHeader(firstFormat, finalPcm.length, finalPcm)
 

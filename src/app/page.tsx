@@ -205,6 +205,17 @@ const DEFAULT_DUCKING: DuckingConfig = {
   musicStartLeadMs: 3000,
 }
 
+/** Formata duração em segundos para exibição amigável */
+function formatDuration(seconds: number): string {
+  if (!seconds || !isFinite(seconds) || seconds <= 0) return ''
+  if (seconds >= 60) {
+    const min = Math.floor(seconds / 60)
+    const sec = Math.round(seconds % 60)
+    return `${min}:${String(sec).padStart(2, '0')}`
+  }
+  return `${Math.round(seconds * 10) / 10}s`
+}
+
 const LANGUAGES = [
   { value: 'Auto', label: 'Auto Detectar' },
   { value: 'Portuguese', label: 'Português' },
@@ -1860,6 +1871,9 @@ export default function VozProClient() {
                                   />
                                 </div>
                                 <p className="text-xs text-slate-500 line-clamp-1">{track.description}</p>
+                                {track.duration > 0 && (
+                                  <span className="text-[10px] text-amber-400/70 mt-0.5 block">{formatDuration(track.duration)}</span>
+                                )}
                               </button>
                             ))}
                           </div>
@@ -1923,6 +1937,9 @@ export default function VozProClient() {
                                   />
                                 </div>
                                 <p className="text-xs text-slate-500 line-clamp-1">{track.description}</p>
+                                {track.duration > 0 && (
+                                  <span className="text-[10px] text-amber-400/70 mt-0.5 block">{formatDuration(track.duration)}</span>
+                                )}
                               </button>
                             ))}
                           </div>
@@ -1996,6 +2013,9 @@ export default function VozProClient() {
                               />
                             </div>
                             <p className="text-xs text-slate-500 line-clamp-1">{track.description}</p>
+                            {track.duration > 0 && (
+                              <span className="text-[10px] text-amber-400/70 mt-0.5 block">{formatDuration(track.duration)}</span>
+                            )}
                           </button>
                         ))}
                       </div>

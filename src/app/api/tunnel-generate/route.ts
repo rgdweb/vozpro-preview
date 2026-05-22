@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { chunkText, chunkByCharLimit, formatChunkSummary, type TextChunk } from '@/lib/tts-chunker'
-import { concatenateAudioBuffers, applyFadeOut, type AudioChunk } from '@/lib/audio-concatenator'
+import { type AudioChunk } from '@/lib/audio-concatenator'
 import { validateGeneratedAudio, shouldRetry, formatValidationLog } from '@/lib/asr-validator'
 import { stripSSMLForTTS } from '@/lib/ssml-parser'
 import { trimAudioBuffer } from '@/lib/audio-trimmer'
@@ -312,6 +312,46 @@ async function generateChunk(
 }
 
 // ============================================================
+// WAV HELPERS (splice cru — sem dependência do audio-concatenator)
+// ============================================================
+
+interface SimpleWavFormat {
+  numChannels: number
+  sampleRate: number
+  byteRate: number
+  blockAlign: number
+  bitsPerSample: number
+}
+
+function parseWavHeaderSimple(buf: Buffer): SimpleWavFormat {
+  return {
+    numChannels: buf.readUInt16LE(22),
+    sampleRate: buf.readUInt32LE(24),
+    byteRate: buf.readUInt32LE(28),
+    blockAlign: buf.readUInt16LE(32),
+    bitsPerSample: buf.readUInt16LE(34),
+  }
+}
+
+function buildSimpleWavHeader(fmt: SimpleWavFormat, dataSize: number, pcm: Buffer): Buffer {
+  const header = Buffer.alloc(44)
+  header.write('RIFF', 0)
+  header.writeUInt32LE(36 + dataSize, 4)
+  header.write('WAVE', 8)
+  header.write('fmt ', 12)
+  header.writeUInt32LE(16, 16)          // PCM
+  header.writeUInt16LE(1, 20)           // PCM format
+  header.writeUInt16LE(fmt.numChannels, 22)
+  header.writeUInt32LE(fmt.sampleRate, 24)
+  header.writeUInt32LE(fmt.byteRate, 28)
+  header.writeUInt16LE(fmt.blockAlign, 32)
+  header.writeUInt16LE(fmt.bitsPerSample, 34)
+  header.write('data', 36)
+  header.writeUInt32LE(dataSize, 40)
+  return Buffer.concat([header, pcm])
+}
+
+// ============================================================
 // PIPELINE COM CHUNKING (prosódia explícita)
 // ============================================================
 
@@ -354,23 +394,33 @@ async function generateWithChunking(
     debug.log('Chunking', 'warn', `${failedChunks}/${chunks.length} chunks falharam, continuando com ${audioChunks.length}`)
   }
 
-  // 3. Concatenar com config LEVE (sem trim, sem normalize, sem crossfade)
-  // Por quê leve? O OmniVoice já normaliza bem, e trim/normalize causavam artefatos nas junções
-  debug.log('Concatenacao', 'info', `Juntando ${audioChunks.length} chunks (config leve: sem trim, sem normalize)...`)
-  const concatenated = concatenateAudioBuffers(audioChunks, {
-    crossfadeMs: 0,
-    trimSilenceMs: 0,       // SEM trim — OmniVoice já corta silêncio via postprocess
-    normalizeVolume: false,  // SEM normalize — OmniVoice já normaliza; evitar saltos de volume
-    fadeOutMs: 0,            // SEM fade-out — engolía última sílaba
-    targetRmsDb: -16,
-  })
-
-  // 4. Adicionar 500ms de silêncio no final do áudio concatenado
-  const padded = appendWavSilence(concatenated.buffer, 0.5)
-  const finalBuffer = padded || concatenated.buffer
+  // 3. Splice PCM CRU — zero processamento
+  // NENHUMA manipulação: sem trim, sem normalize, sem crossfade, sem fade, sem silêncio artificial.
+  // A pausa entre chunks já vem natural do TTS (punctuation no texto: , = pausa curta, . = pausa longa).
+  // Apenas extrai PCM de cada WAV e junta os bytes. Ponto.
+  debug.log('Concatenacao', 'info', `Splice PCM cru: ${audioChunks.length} chunks (zero processamento)...`)
+  
+  // Extrair PCM puro de cada chunk (sem header WAV)
+  const pcmParts: Buffer[] = []
+  let totalPcmBytes = 0
+  const firstFormat = parseWavHeaderSimple(audioChunks[0].buffer)
+  
+  for (let i = 0; i < audioChunks.length; i++) {
+    const buf = audioChunks[i].buffer
+    if (buf.length < 44) continue
+    const dataSize = buf.readUInt32LE(40)
+    const actualDataEnd = Math.min(44 + dataSize, buf.length)
+    const pcm = buf.subarray(44, actualDataEnd)
+    pcmParts.push(pcm)
+    totalPcmBytes += pcm.length
+  }
+  
+  // Montar WAV final: header + PCM concatenado
+  const finalPcm = Buffer.concat(pcmParts)
+  const finalBuffer = buildSimpleWavHeader(firstFormat, totalPcmBytes, finalPcm)
 
   debug.log('Concatenacao', 'ok',
-    `${concatenated.totalDurationMs}ms fala + ${(audioChunks.length - 1) * 300}ms pausas + 500ms pad = total ~${(finalBuffer.length / 96000 / 1.5).toFixed(1)}s (${concatenated.chunkCount} chunks, ${(finalBuffer.length / 1024).toFixed(1)}KB)`)
+    `PCM cru: ${totalPcmBytes} bytes, ${audioChunks.length} chunks, ${(finalBuffer.length / 1024).toFixed(1)}KB`)
 
   return { finalBuffer, chunks }
 }

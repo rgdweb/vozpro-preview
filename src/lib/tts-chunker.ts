@@ -630,23 +630,23 @@ export function chunkByCharLimit(text: string, maxChars = 250): TextChunk[] {
     
     if (bestSentencePos > minBreak) {
       bestPos = bestSentencePos
-      bestPause = 400 // pausa de frase
+      bestPause = 0 // pausa vem do TTS naturalmente (ponto final no texto = respiração)
       bestPunct = bestSentencePunct
     }
     
-    // === 2. Vírgula → pausa de CLÁUSULA (250ms) ===
-    // Só se não encontrou pontuação forte
+    // === 2. Vírgula → pausa de CLÁUSULA ===
+    // Só se não encontrou pontuação forte. Pausa = 0 (vem do TTS)
     if (bestPos === -1) {
       const commaPos = window.lastIndexOf(', ')
       if (commaPos > minBreak) {
         bestPos = commaPos + 2
-        bestPause = 250 // pausa de vírgula
+        bestPause = 0 // pausa vem do TTS naturalmente (vírgula no texto)
         bestPunct = ','
       }
     }
 
-    // === 3. Conjunções → pausa de PALAVRA (250ms) ===
-    // Só se não encontrou vírgula
+    // === 3. Conjunções → pausa de PALAVRA ===
+    // Só se não encontrou vírgula. Pausa = 0 (vem do TTS)
     if (bestPos === -1) {
       const conjunctions = [
         ' porem ', ' contudo ', ' entretanto ', ' todavia ', ' portanto ',  // longas primeiro (mais naturais)
@@ -659,19 +659,20 @@ export function chunkByCharLimit(text: string, maxChars = 250): TextChunk[] {
         const pos = window.lastIndexOf(conj)
         if (pos > minBreak) {
           bestPos = pos + conj.length
-          bestPause = 250
+          bestPause = 0 // vem do TTS
           bestPunct = ','
           break // primeira (mais longa) encontrada
         }
       }
     }
 
-    // === 4. Espaço → quebra de EMERGÊNCIA (250ms) ===
+    // === 4. Espaço → quebra de EMERGÊNCIA ===
+    // Pausa = 0 (vem do TTS)
     if (bestPos === -1) {
       const spacePos = window.lastIndexOf(' ')
       if (spacePos > minBreak) {
         bestPos = spacePos + 1
-        bestPause = 250
+        bestPause = 0 // vem do TTS
         bestPunct = ','
       }
     }
@@ -679,7 +680,7 @@ export function chunkByCharLimit(text: string, maxChars = 250): TextChunk[] {
     // === 5. Fallback: corte duro ===
     if (bestPos === -1) {
       bestPos = maxChars
-      bestPause = 250
+      bestPause = 0 // vem do TTS
       bestPunct = ','
     }
 

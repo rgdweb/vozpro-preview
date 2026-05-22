@@ -1,55 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { chunkText, chunkByCharLimit, formatChunkSummary, type TextChunk } from '@/lib/tts-chunker'
-import { type AudioChunk } from '@/lib/audio-concatenator'
-import { validateGeneratedAudio, shouldRetry, formatValidationLog } from '@/lib/asr-validator'
+import { validateGeneratedAudio, formatValidationLog } from '@/lib/asr-validator'
 import { stripSSMLForTTS } from '@/lib/ssml-parser'
-import { trimAudioBuffer } from '@/lib/audio-trimmer'
-
-// ============================================================
-// UTIL: Validar e baixar WAV com retry
-// ============================================================
-
-/**
- * Verifica se o buffer WAV está completo (header data size == bytes reais).
- * O Cloudflare Tunnel pode truncar downloads grandes de áudio do Gradio.
- */
-function isWavComplete(buf: Buffer): boolean {
-  if (buf.length < 44) return false
-  const declaredDataSize = buf.readUInt32LE(40)
-  const actualDataSize = buf.length - 44
-  return actualDataSize >= declaredDataSize
-}
-
-/**
- * Baixa audio com retry + validação WAV.
- * Se o download foi truncado (header diz que o arquivo é maior), espera e tenta de novo.
- */
-async function downloadWithRetry(
-  url: string,
-  maxRetries = 3,
-  delayMs = 2000
-): Promise<Buffer | null> {
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      const res = await fetch(url)
-      if (!res.ok) return null
-      const buf = Buffer.from(await res.arrayBuffer())
-
-      if (isWavComplete(buf)) return buf
-
-      // Arquivo truncado — esperar e retry
-      const declared = buf.readUInt32LE(40)
-      const actual = buf.length - 44
-      console.warn(`[Download] WAV truncado: header diz ${declared} bytes, recebeu ${actual} bytes (faltam ${declared - actual}). Tentativa ${attempt + 1}/${maxRetries}`)
-      if (attempt < maxRetries - 1) await new Promise(r => setTimeout(r, delayMs * (attempt + 1)))
-    } catch (err) {
-      console.warn(`[Download] Erro na tentativa ${attempt + 1}:`, err)
-      if (attempt < maxRetries - 1) await new Promise(r => setTimeout(r, delayMs))
-    }
-  }
-  return null
-}
-
 
 // POST /api/tunnel-generate - Geracao direta via tunnel cloudflared
 // Pipeline completo com prosódia:
@@ -70,6 +21,36 @@ function createDebug() {
   }
   function result() { return { totalDuration: Date.now() - start, steps } }
   return { log, result }
+}
+
+// ============================================================
+// WAV DOWNLOAD COM VALIDAÇÃO
+// ============================================================
+
+function isWavComplete(buf: Buffer): boolean {
+  if (buf.length < 44) return false
+  const declaredDataSize = buf.readUInt32LE(40)
+  const actualDataSize = buf.length - 44
+  return actualDataSize >= declaredDataSize
+}
+
+async function downloadWithRetry(
+  url: string,
+  maxRetries = 3,
+  delayMs = 2000
+): Promise<Buffer | null> {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(60000) })
+      if (!res.ok) return null
+      const buf = Buffer.from(await res.arrayBuffer())
+      if (isWavComplete(buf)) return buf
+      if (attempt < maxRetries - 1) await new Promise(r => setTimeout(r, delayMs))
+    } catch (err) {
+      if (attempt < maxRetries - 1) await new Promise(r => setTimeout(r, delayMs))
+    }
+  }
+  return null
 }
 
 // ============================================================
@@ -245,214 +226,18 @@ async function streamResult(
   }
 }
 
-/**
- * Gera um chunk de texto via Gradio (submit + stream + download)
- */
-async function generateChunk(
-  tunnelUrl: string,
-  chunkText: string,
-  gradioBaseData: unknown[],
-  debug: ReturnType<typeof createDebug>,
-  chunkIndex: number,
-  totalChunks: number
-): Promise<Buffer | null> {
-  // Substituir texto no data array
-  const data = [...gradioBaseData]
-  data[0] = chunkText  // índice 0 = texto
-  // NAO mexer nos outros params — manter postprocess_output=true (padrao do Gradio)
-  // para manter antiruido e qualidade igual ao localhost demo
-
-  debug.log(`Chunk ${chunkIndex + 1}/${totalChunks}`, 'info', `"${chunkText.substring(0, 50)}..." (${chunkText.length} chars)`)
-
-  // Submeter job
-  let eventId: string | null = null
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt > 0) {
-      debug.log(`Chunk ${chunkIndex + 1} retry`, 'warn', `Tentativa ${attempt + 1}/3`)
-      await new Promise(r => setTimeout(r, 2000))
-    }
-    eventId = await submitJob(tunnelUrl, data, debug)
-    if (eventId) break
-  }
-
-  if (!eventId) {
-    debug.log(`Chunk ${chunkIndex + 1}`, 'error', 'Falha ao submeter job')
-    return null
-  }
-
-  // SSE Stream
-  const result = await streamResult(tunnelUrl, eventId, debug, 180000)
-  if (!result.audioUrl) {
-    debug.log(`Chunk ${chunkIndex + 1}`, 'error', `Falha: ${result.error}`)
-    return null
-  }
-
-  // Aguardar Gradio salvar o arquivo no disco (igual single-shot)
-  // Delay curto para chunks pequenos (< 250 chars o Gradio salva rápido)
-  const chunkDelay = Math.min(3000, 1500 + Math.floor(chunkText.length / 200) * 500)
-  await new Promise(r => setTimeout(r, chunkDelay))
-
-  // Download com retry
-  const voiceBuffer = await downloadWithRetry(result.audioUrl, 3, 1500)
-  if (!voiceBuffer) {
-    debug.log(`Chunk ${chunkIndex + 1}`, 'error', 'Falha no download apos retry')
-    return null
-  }
-
-  // Calcular duração do chunk para diagnóstico
-  const sr = voiceBuffer.readUInt32LE(24)
-  const ch = voiceBuffer.readUInt16LE(22)
-  const bps = voiceBuffer.readUInt16LE(34)
-  const ds = voiceBuffer.readUInt32LE(40)
-  const dur = (ds / ch / Math.floor(bps / 8) / sr).toFixed(1)
-  debug.log(`Chunk ${chunkIndex + 1}/${totalChunks}`, 'ok', `${(voiceBuffer.length / 1024).toFixed(1)}KB, ${dur}s, delay ${chunkDelay}ms`)
-
-  // Retornar áudio bruto do chunk — SEM padding individual.
-  // O padding no final de cada chunk causa "baixada" perceptível na junção.
-  // O postprocess do OmniVoice já gera final limpo. Só padding no áudio final concatenado.
-  return voiceBuffer
-}
-
 // ============================================================
-// WAV HELPERS (splice cru — sem dependência do audio-concatenator)
+// GERACAO SINGLE-SHOT (texto inteiro, 1 chamada API)
 // ============================================================
-
-interface SimpleWavFormat {
-  numChannels: number
-  sampleRate: number
-  byteRate: number
-  blockAlign: number
-  bitsPerSample: number
-}
-
-function parseWavHeaderSimple(buf: Buffer): SimpleWavFormat {
-  return {
-    numChannels: buf.readUInt16LE(22),
-    sampleRate: buf.readUInt32LE(24),
-    byteRate: buf.readUInt32LE(28),
-    blockAlign: buf.readUInt16LE(32),
-    bitsPerSample: buf.readUInt16LE(34),
-  }
-}
-
-function buildSimpleWavHeader(fmt: SimpleWavFormat, dataSize: number, pcm: Buffer): Buffer {
-  const header = Buffer.alloc(44)
-  header.write('RIFF', 0)
-  header.writeUInt32LE(36 + dataSize, 4)
-  header.write('WAVE', 8)
-  header.write('fmt ', 12)
-  header.writeUInt32LE(16, 16)          // PCM
-  header.writeUInt16LE(1, 20)           // PCM format
-  header.writeUInt16LE(fmt.numChannels, 22)
-  header.writeUInt32LE(fmt.sampleRate, 24)
-  header.writeUInt32LE(fmt.byteRate, 28)
-  header.writeUInt16LE(fmt.blockAlign, 32)
-  header.writeUInt16LE(fmt.bitsPerSample, 34)
-  header.write('data', 36)
-  header.writeUInt32LE(dataSize, 40)
-  return Buffer.concat([header, pcm])
-}
-
-// ============================================================
-// PIPELINE COM CHUNKING — fallback only
-// ============================================================
-
-/**
- * Gera áudio com chunking (só como fallback se single-shot falhar).
- * Usa postprocess_output=true (padrão Gradio) = antiruido + qualidade.
- * Splice puro de PCM bytes — sem processamento.
- */
-
-async function generateWithChunking(
-  tunnelUrl: string,
-  text: string,
-  gradioBaseData: unknown[],
-  debug: ReturnType<typeof createDebug>
-): Promise<{ finalBuffer: Buffer; chunks: TextChunk[] } | null> {
-  // 1. Chunking por limite de caracteres (anti-postprocess)
-  const chunks = chunkByCharLimit(text, 250)
-  if (chunks.length === 0) return null
-
-  debug.log('Chunking', 'ok', `${chunks.length} chunks (max 250 chars cada)`)
-  debug.log('Chunking', 'info', formatChunkSummary(chunks).substring(0, 500))
-
-  // 2. Gerar cada chunk
-  const audioChunks: AudioChunk[] = []
-  let failedChunks = 0
-
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i]
-    const buffer = await generateChunk(tunnelUrl, chunk.text, gradioBaseData, debug, i, chunks.length)
-
-    if (buffer) {
-      audioChunks.push({ buffer, pauseAfterMs: chunk.pauseAfterMs })
-    } else {
-      failedChunks++
-      debug.log('Chunking', 'warn', `Chunk ${i + 1} falhou, pulando (${failedChunks} falhas)`)
-    }
-  }
-
-  if (audioChunks.length === 0) {
-    debug.log('Chunking', 'error', 'Todos os chunks falharam')
-    return null
-  }
-
-  if (failedChunks > 0) {
-    debug.log('Chunking', 'warn', `${failedChunks}/${chunks.length} chunks falharam, continuando com ${audioChunks.length}`)
-  }
-
-  // 3. Raw PCM splice — sem processamento (postprocess desativado nos chunks)
-  // Como postprocess_output=false, o OmniVoice NÃO corta o final do áudio.
-  // Denoise=true mantém o antiruido. Splice puro de bytes.
-  debug.log('Concatenacao', 'info', `Raw splice: ${audioChunks.length} chunks (postprocess OFF, denoise ON)...`)
-
-  const firstFormat = parseWavHeaderSimple(audioChunks[0].buffer)
-  const pcmParts: Buffer[] = []
-
-  for (let i = 0; i < audioChunks.length; i++) {
-    const buf = audioChunks[i].buffer
-    if (buf.length < 44) continue
-    const dataSize = buf.readUInt32LE(40)
-    const actualDataEnd = Math.min(44 + dataSize, buf.length)
-    pcmParts.push(buf.subarray(44, actualDataEnd))
-  }
-
-  const finalPcm = Buffer.concat(pcmParts)
-  const finalBuffer = buildSimpleWavHeader(firstFormat, finalPcm.length, finalPcm)
-
-  debug.log('Concatenacao', 'ok',
-    `PCM: ${finalPcm.length} bytes, ${pcmParts.length} chunks, ${(finalBuffer.length / 1024).toFixed(1)}KB`)
-
-  return { finalBuffer, chunks }
-}
-
-// ============================================================
-// MODO SINGLE-SHOT (fallback sem chunking)
-// ============================================================
-
-interface AudioDiagnostics {
-  textLength: number
-  audioDurationSec: string
-  fileSizeKB: string
-  sampleRate: number
-  bitsPerSample: number
-  channels: number
-  delayAfterSse: number
-  silencePadSec: number
-  expectedMinDuration: string
-  durationOk: boolean
-  wavHeaderValid: boolean
-}
 
 async function generateSingleShot(
   tunnelUrl: string,
   text: string,
   gradioData: unknown[],
   debug: ReturnType<typeof createDebug>
-): Promise<{ buffer: Buffer | null; diagnostics: AudioDiagnostics | null }> {
-  debug.log('Geracao', 'info', 'Gerando audio (single-shot, sem chunking)...')
+): Promise<Buffer | null> {
+  debug.log('Geracao', 'info', 'Gerando audio (single-shot)...')
 
-  // Submeter job com retry
   let eventId: string | null = null
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) {
@@ -463,141 +248,26 @@ async function generateSingleShot(
     if (eventId) break
   }
 
-  if (!eventId) return { buffer: null, diagnostics: null }
+  if (!eventId) return null
 
-  // SSE Stream
   const result = await streamResult(tunnelUrl, eventId, debug, 180000)
-  if (!result.audioUrl) return { buffer: null, diagnostics: null }
+  if (!result.audioUrl) return null
 
-  // Aguardar Gradio terminar de escrever o arquivo no disco.
-  // O evento SSE "complete" dispara quando a GERACAO termina, mas o Gradio
-  // ainda pode estar salvando o arquivo WAV. Sem esse delay, o download pode
-  // pegar um arquivo incompleto (cortando o final do audio em textos longos).
-  // Delay dinamico: texto longo via tunnel precisa de mais tempo.
-  const delayMs = Math.min(15000, 3000 + Math.floor(text.length / 100) * 500)
-  await new Promise(r => setTimeout(r, delayMs))
-  debug.log('Download', 'info', `Aguardou ${delayMs}ms apos SSE complete (texto: ${text.length} chars)`)
+  // Delay fixo 10s — dar tempo do Gradio salvar o WAV via tunnel
+  await new Promise(r => setTimeout(r, 10000))
+  debug.log('Download', 'info', 'Aguardou 10s apos SSE complete')
 
-  // Download com retry + validação WAV (tunnel pode truncar arquivos grandes)
-  let voiceBuffer = await downloadWithRetry(result.audioUrl, 3, 2000)
-  if (!voiceBuffer) {
-    debug.log('Download', 'error', 'Falha no download apos 3 tentativas')
-    return { buffer: null, diagnostics: null }
-  }
+  const voiceBuffer = await downloadWithRetry(result.audioUrl, 3, 3000)
+  if (!voiceBuffer) return null
 
-  // Verificar se o final do PCM tem zeros (arquivo incompleto — Gradio pré-aloca
-  // o WAV com header + zeros, depois preenche o PCM. Se baixarmos antes de
-  // preencher, o final fica com zeros = "fade out" no audio).
-  // Checar últimos 200ms: se >80% dos samples são zero, arquivo incompleto.
-  const dlSampleRate = voiceBuffer.readUInt32LE(24)
-  const dlChannels = voiceBuffer.readUInt16LE(22)
-  const dlBits = voiceBuffer.readUInt16LE(34)
-  const dlBytesPerSample = Math.floor(dlBits / 8)
-  const dlBlockAlign = dlBytesPerSample * dlChannels
-  const dlDataSize = voiceBuffer.readUInt32LE(40)
-  const tail200msBytes = Math.floor(dlSampleRate * 0.2) * dlBlockAlign
+  const sr = voiceBuffer.readUInt32LE(24)
+  const ch = voiceBuffer.readUInt16LE(22)
+  const bps = voiceBuffer.readUInt16LE(34)
+  const ds = voiceBuffer.readUInt32LE(40)
+  const dur = (ds / ch / Math.floor(bps / 8) / sr).toFixed(1)
+  debug.log('Download', 'ok', `${(voiceBuffer.length / 1024).toFixed(1)}KB, ${dur}s`)
 
-  if (dlDataSize > tail200msBytes) {
-    const pcmStart = 44
-    let zeroCount = 0
-    let totalCount = 0
-    for (let i = pcmStart + dlDataSize - tail200msBytes; i < pcmStart + dlDataSize; i += dlBlockAlign) {
-      const sample = Math.abs(voiceBuffer.readInt16LE(i))
-      totalCount++
-      if (sample === 0) zeroCount++
-    }
-    const zeroRatio = zeroCount / totalCount
-    debug.log('Download', 'info', `Tail check: ${zeroCount}/${totalCount} zeros (${(zeroRatio * 100).toFixed(0)}%) nos ultimos 200ms`)
-
-    if (zeroRatio > 0.8) {
-      debug.log('Download', 'warn', `Arquivo incompleto (${(zeroRatio * 100).toFixed(0)}% zeros no final). Aguardando +10s e baixando novamente...`)
-      await new Promise(r => setTimeout(r, 10000))
-      const retryBuffer = await downloadWithRetry(result.audioUrl, 3, 2000)
-      if (retryBuffer) {
-        // Verificar se o retry melhorou (menos zeros no final)
-        let retryZeroCount = 0
-        let retryTotalCount = 0
-        const retryDataSize = retryBuffer.readUInt32LE(40)
-        if (retryDataSize > tail200msBytes) {
-          for (let i = 44 + retryDataSize - tail200msBytes; i < 44 + retryDataSize; i += dlBlockAlign) {
-            const sample = Math.abs(retryBuffer.readInt16LE(i))
-            retryTotalCount++
-            if (sample === 0) retryZeroCount++
-          }
-          const retryZeroRatio = retryZeroCount / retryTotalCount
-          debug.log('Download', 'info', `Retry tail: ${retryZeroCount}/${retryTotalCount} zeros (${(retryZeroRatio * 100).toFixed(0)}%)`)
-          if (retryZeroRatio < zeroRatio) {
-            voiceBuffer = retryBuffer
-            debug.log('Download', 'ok', `Retry melhorou: ${(zeroRatio * 100).toFixed(0)}% → ${(retryZeroRatio * 100).toFixed(0)}% zeros`)
-          } else {
-            debug.log('Download', 'warn', `Retry nao melhorou — mantendo original`)
-          }
-        } else {
-          voiceBuffer = retryBuffer
-        }
-      }
-    }
-  }
-
-  // Log de duração real
-  const finalDataSize = voiceBuffer.readUInt32LE(40)
-  const dlDuration = (finalDataSize / dlChannels / dlBytesPerSample / dlSampleRate).toFixed(1)
-  const expectedMinDuration = (text.length * 0.08).toFixed(1)
-  debug.log('Download', 'ok', `Final: ${(voiceBuffer.length / 1024).toFixed(1)}KB, ${dlDuration}s (esperado >=${expectedMinDuration}s)`)
-
-  const diagnostics: AudioDiagnostics = {
-    textLength: text.length,
-    audioDurationSec: dlDuration,
-    fileSizeKB: (voiceBuffer.length / 1024).toFixed(1),
-    sampleRate: dlSampleRate,
-    bitsPerSample: dlBits,
-    channels: dlChannels,
-    delayAfterSse: delayMs,
-    silencePadSec: 0,
-    expectedMinDuration: expectedMinDuration,
-    durationOk: parseFloat(dlDuration) >= parseFloat(expectedMinDuration),
-    wavHeaderValid: isWavComplete(voiceBuffer),
-  }
-  return { buffer: voiceBuffer, diagnostics }
-}
-
-// ============================================================
-// APPEND WAV SILENCE - Adiciona silêncio PCM no final de um WAV
-// ============================================================
-
-function appendWavSilence(wavBuffer: Buffer, durationSec: number): Buffer | null {
-  if (wavBuffer.length < 44) return null
-
-  // Verificar assinatura RIFF/WAVE
-  const riff = wavBuffer.subarray(0, 4).toString('ascii')
-  const wave = wavBuffer.subarray(8, 12).toString('ascii')
-  if (riff !== 'RIFF' || wave !== 'WAVE') return null
-
-  // Ler parâmetros do WAV header
-  const sampleRate = wavBuffer.readUInt32LE(24)
-  const bitsPerSample = wavBuffer.readUInt16LE(34)
-  const channels = wavBuffer.readUInt16LE(22)
-  const bytesPerSample = Math.floor(bitsPerSample / 8)
-
-  // Calcular bytes de silêncio
-  const silenceSamples = Math.floor(sampleRate * durationSec)
-  const silenceBytes = silenceSamples * channels * bytesPerSample
-
-  // Criar novo buffer: WAV original + zeros + header atualizado
-  const newBuffer = Buffer.alloc(wavBuffer.length + silenceBytes)
-  wavBuffer.copy(newBuffer)
-
-  // Preencher silêncio (zeros) no final dos dados PCM
-  newBuffer.fill(0, wavBuffer.length)
-
-  // Atualizar RIFF ChunkSize (offset 4) = total - 8
-  newBuffer.writeUInt32LE(newBuffer.length - 8, 4)
-
-  // Atualizar Subchunk2Size (offset 40) = dados antigos + silêncio
-  const oldDataSize = wavBuffer.readUInt32LE(40)
-  newBuffer.writeUInt32LE(oldDataSize + silenceBytes, 40)
-
-  return newBuffer
+  return voiceBuffer
 }
 
 // ============================================================
@@ -621,8 +291,7 @@ export async function POST(req: NextRequest) {
       numStep = 32,
       guidanceScale = 2.0,
       skipASR = false,
-      useChunking = false,  // AUTO: chunking ativa automaticamente para texto >280 chars
-      voiceMode = 'clone', // 'clone' (ref_audio) | 'design' (instruct only) | 'auto' (nenhum)
+      voiceMode = 'clone',
     } = body
 
     if (!text || !text.trim()) {
@@ -704,7 +373,7 @@ export async function POST(req: NextRequest) {
       speed || 1,
       null,   // duration
       true,   // preprocess_prompt
-      true,   // postprocess_output (padrao do Gradio — funciona igual localhost:7860)
+      true,   // postprocess_output (NECESSARIO: remove estalinhos/artefatos do audio gerado)
     ]
 
     debug.log('Parametros', 'info', `lang:${language} speed:${speed} steps:${numStep} cfg:${guidanceScale} chunking:${useChunking}`)
@@ -713,53 +382,10 @@ export async function POST(req: NextRequest) {
     // 5. GERAR ÁUDIO (chunking ou single-shot)
     // =============================================================
     let finalBuffer: Buffer | null = null
-    let chunkInfo: TextChunk[] | null = null
-    let audioDiagnostics: AudioDiagnostics | null = null
 
-    // PIPELINE: SEMPRE tentar single-shot primeiro (igual localhost:7860)
-    // O demo local funciona perfeitamente com textos longos sem chunking.
-    // Chunking só como FALLBACK se single-shot falhar ou voltar audio claramente cortado.
-    // Motivo de velocidade: single-shot = 1 chamada API (~30s), chunking = N chamadas (~2min)
-    const useChunkingFallback = useChunking // só chunking manual se usuario pedir explicitamente
-    if (!useChunkingFallback && cleanText.length > 20) {
-      debug.log('Pipeline', 'info', `Modo SINGLE-SHOT (texto: ${cleanText.length} chars — igual localhost demo)`)
-      const ssResult = await generateSingleShot(tunnelUrl, cleanText, gradioBaseData, debug)
-      if (ssResult.buffer) {
-        finalBuffer = ssResult.buffer
-        audioDiagnostics = ssResult.diagnostics
-      } else {
-        // Single-shot falhou → fallback chunking
-        debug.log('Pipeline', 'warn', 'Single-shot falhou, tentando chunking como fallback...')
-        const chunkResult = await generateWithChunking(tunnelUrl, cleanText, gradioBaseData, debug)
-        if (chunkResult) {
-          finalBuffer = chunkResult.finalBuffer
-          chunkInfo = chunkResult.chunks
-          const sr = finalBuffer.readUInt32LE(24)
-          const ch = finalBuffer.readUInt16LE(22)
-          const bps = finalBuffer.readUInt16LE(34)
-          const ds = finalBuffer.readUInt32LE(40)
-          const dur = (ds / ch / Math.floor(bps / 8) / sr).toFixed(1)
-          const expDur = (cleanText.length * 0.08).toFixed(1)
-          audioDiagnostics = {
-            textLength: cleanText.length, audioDurationSec: dur,
-            fileSizeKB: (finalBuffer.length / 1024).toFixed(1),
-            sampleRate: sr, bitsPerSample: bps, channels: ch,
-            delayAfterSse: 0, silencePadSec: 0,
-            expectedMinDuration: expDur,
-            durationOk: parseFloat(dur) >= parseFloat(expDur),
-            wavHeaderValid: isWavComplete(finalBuffer),
-          }
-        }
-      }
-    } else if (useChunkingFallback) {
-      // Chunking manual (usuario pediu explicitamente)
-      debug.log('Pipeline', 'info', `Modo CHUNKING manual (texto: ${cleanText.length} chars)`)
-      const chunkResult = await generateWithChunking(tunnelUrl, cleanText, gradioBaseData, debug)
-      if (chunkResult) {
-        finalBuffer = chunkResult.finalBuffer
-        chunkInfo = chunkResult.chunks
-      }
-    }
+    // SINGLE-SHOT: manda texto inteiro, 1 chamada API (igual localhost demo)
+    debug.log('Pipeline', 'info', `Modo SINGLE-SHOT (${cleanText.length} chars)`)
+    finalBuffer = await generateSingleShot(tunnelUrl, cleanText, gradioBaseData, debug)
 
     // 6. Verificar resultado
     if (!finalBuffer) {
@@ -786,21 +412,8 @@ export async function POST(req: NextRequest) {
     const response: Record<string, unknown> = {
       audioUrl: voiceDataUri,
       viaTunnel: true,
-      mode: chunkInfo ? 'chunking' : 'single-shot',
+      mode: 'single-shot',
       debug: debug.result(),
-      audioDiagnostics,
-    }
-
-    // Info do chunking
-    if (chunkInfo) {
-      response.chunking = {
-        totalChunks: chunkInfo.length,
-        chunks: chunkInfo.map(c => ({
-          text: c.text.substring(0, 50),
-          pauseAfterMs: c.pauseAfterMs,
-          punctuation: c.punctuation,
-        })),
-      }
     }
 
     // Info do ASR
@@ -819,7 +432,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    debug.log('FINAL', 'ok', `Total: ${(debug.result().totalDuration / 1000).toFixed(1)}s | modo: ${chunkInfo ? 'chunking' : 'single-shot'}`)
+    debug.log('FINAL', 'ok', `Total: ${(debug.result().totalDuration / 1000).toFixed(1)}s | single-shot`)
 
     return NextResponse.json(response)
   } catch (error) {

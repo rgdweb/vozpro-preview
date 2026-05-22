@@ -261,21 +261,17 @@ async function generateChunk(
   debug: ReturnType<typeof createDebug>,
   chunkIndex: number,
   totalChunks: number,
-  disablePostprocess: boolean
 ): Promise<ChunkResult | null> {
   // Substituir texto no data array
   const data = [...gradioBaseData]
   data[0] = chunkText  // índice 0 = texto
 
-  // CRÍTICO: Desativar postprocess para chunks.
-  // O postprocess_output=true corta ~29% do áudio mesmo em chunks curtos.
-  // Sem postprocess, o TTS gera áudio completo com silêncio natural no final.
-  // Isso resolve o corte de palavras no fim de cada chunk.
-  if (disablePostprocess) {
-    data[11] = false  // postprocess_output = false
-  }
+  // NÃO desativar postprocess_output — ele controla o denoise/cleanup.
+  // Sem postprocess = áudio com chiado/ruído em todo o arquivo.
+  // O corte só acontece em textos longos (>280 chars). Para chunks curtos,
+  // postprocess=true mantém áudio limpo sem cortar.
 
-  debug.log(`Chunk ${chunkIndex + 1}/${totalChunks}`, 'info', `"${chunkText.substring(0, 50)}..." (${chunkText.length} chars, postprocess: ${disablePostprocess ? 'OFF' : 'ON'})`)
+  debug.log(`Chunk ${chunkIndex + 1}/${totalChunks}`, 'info', `"${chunkText.substring(0, 50)}..." (${chunkText.length} chars)`)
 
   // Submeter job
   let eventId: string | null = null
@@ -375,13 +371,15 @@ async function generateWithChunking(
   debug: ReturnType<typeof createDebug>
 ): Promise<{ finalBuffer: Buffer; chunks: TextChunk[]; chunkDiagnostics?: Array<{ index: number; text: string; durationSec: number; textLength: number; ok: boolean }>; failedChunks?: number } | null> {
   // 1. Chunking por limite de caracteres (anti-postprocess)
-  const chunks = chunkByCharLimit(text, 250)
+  // Usar 150 chars (não 250) para garantir que postprocess não corte.
+  // Postprocess corta ~29% em textos >280 chars, mas em chunks <150 chars é seguro.
+  const chunks = chunkByCharLimit(text, 150)
   if (chunks.length === 0) return null
 
   debug.log('Chunking', 'ok', `${chunks.length} chunks (max 250 chars cada)`)  
   debug.log('Chunking', 'info', formatChunkSummary(chunks).substring(0, 500))
 
-  // 2. Gerar cada chunk (postprocess desativado para evitar corte)
+  // 2. Gerar cada chunk (postprocess ON = denoise ativo, áudio limpo)
   const audioChunks: AudioChunk[] = []
   const chunkDiagnostics: Array<{ index: number; text: string; durationSec: number; textLength: number; ok: boolean }> = []
   let failedChunks = 0
@@ -389,7 +387,7 @@ async function generateWithChunking(
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i]
 
-    const result = await generateChunk(tunnelUrl, chunk.text, gradioBaseData, debug, i, chunks.length, true)
+    const result = await generateChunk(tunnelUrl, chunk.text, gradioBaseData, debug, i, chunks.length)
 
     if (result) {
       audioChunks.push({ buffer: result.buffer, pauseAfterMs: chunk.pauseAfterMs })
@@ -423,8 +421,7 @@ async function generateWithChunking(
   }
 
   // 3. Concatenação PCM pura (sem trim, sem processamento)
-  // Sem postprocess, cada chunk tem áudio completo + silêncio natural no final.
-  // O silêncio natural entre chunks funciona como pausa — sem artefatos.
+  // Com postprocess ON em chunks curtos, áudio sai limpo + silêncio natural no final.
   debug.log('Concatenacao', 'info', `Splice PCM puro: ${audioChunks.length} chunks (${failedChunks} falhas)...`)
   
   const pcmParts: Buffer[] = []
@@ -732,10 +729,11 @@ export async function POST(req: NextRequest) {
 
     // AUTO-CHUNKING para textos longos (>280 chars)
     // Motivação: OmniVoice com postprocess_output=true corta ~29% do áudio para textos >280 chars.
-    // Solução: dividir em chunks de ~200 chars com postprocess=false e concatenar.
+    // Solução: dividir em chunks de ~150 chars (onde postprocess não corta) e concatenar.
+    // Postprocess mantido ON para preservar denoise (sem chiado).
     const shouldChunk = cleanText.length > 280 || useChunking
     if (shouldChunk && cleanText.length > 20) {
-      debug.log('Pipeline', 'info', `Modo CHUNKING ativo (texto: ${cleanText.length} chars > 280 threshold, postprocess: OFF)`)      
+      debug.log('Pipeline', 'info', `Modo CHUNKING ativo (texto: ${cleanText.length} chars > 280 threshold, chunks ~150 chars)`)      
       const chunkResult = await generateWithChunking(tunnelUrl, cleanText, gradioBaseData, debug)
       if (chunkResult) {
         finalBuffer = chunkResult.finalBuffer
@@ -813,7 +811,7 @@ export async function POST(req: NextRequest) {
         totalChunks: chunkInfo.length,
         succeededChunks: chunkInfo.length - failedChunkCount,
         failedChunks: failedChunkCount,
-        postprocessDisabled: true,
+        postprocessDisabled: false,
         chunks: chunkInfo.map(c => ({
           text: c.text.substring(0, 50),
           pauseAfterMs: c.pauseAfterMs,
@@ -839,7 +837,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    debug.log('FINAL', 'ok', `Total: ${(debug.result().totalDuration / 1000).toFixed(1)}s | modo: ${chunkInfo ? `chunking (${chunkInfo.length} chunks, ${failedChunkCount} falhas, postprocess: OFF)` : 'single-shot'}`)
+    debug.log('FINAL', 'ok', `Total: ${(debug.result().totalDuration / 1000).toFixed(1)}s | modo: ${chunkInfo ? `chunking (${chunkInfo.length} chunks, ${failedChunkCount} falhas, postprocess ON)` : 'single-shot'}`)
 
     return NextResponse.json(response)
   } catch (error) {

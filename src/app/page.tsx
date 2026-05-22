@@ -2315,11 +2315,11 @@ export default function VozProClient() {
                                 <span className="font-semibold text-blue-400">
                                   {totalC} chunks — modo: {mode}
                                 </span>
-                                {ppOff && <span className="text-[10px] bg-green-500/20 text-green-300 px-1.5 py-0.5 rounded">postprocess: OFF</span>}
+                                {ppOff && <span className="text-[10px] bg-green-500/20 text-green-300 px-1.5 py-0.5 rounded">postprocess ON (denoise)</span>}
                                 {failed > 0 && <span className="text-[10px] bg-red-500/20 text-red-300 px-1.5 py-0.5 rounded">{failed} falha(s)</span>}
                               </div>
                               <div className="text-blue-300/80 text-[11px] mb-1.5">
-                                Texto dividido em {totalC} partes (max 250 chars). Postprocess desativado para evitar corte.
+                                Texto dividido em {totalC} partes (~150 chars). Postprocess mantido para denoise.
                                 {succeeded !== undefined && ` ${succeeded}/${totalC} chunks gerados com sucesso.`}
                               </div>
                               <div className="space-y-1">

@@ -352,7 +352,7 @@ function buildSimpleWavHeader(fmt: SimpleWavFormat, dataSize: number, pcm: Buffe
 }
 
 // ============================================================
-// PIPELINE COM CHUNKING (prosódia explícita)
+// PIPELINE COM CHUNKING — OVERLAP BUFFER
 // ============================================================
 
 async function generateWithChunking(
@@ -365,22 +365,41 @@ async function generateWithChunking(
   const chunks = chunkByCharLimit(text, 250)
   if (chunks.length === 0) return null
 
-  debug.log('Chunking', 'ok', `${chunks.length} chunks (max 250 chars cada)`)  
+  debug.log('Chunking', 'ok', `${chunks.length} chunks (max 250 chars cada)`)
   debug.log('Chunking', 'info', formatChunkSummary(chunks).substring(0, 500))
 
-  // 2. Gerar cada chunk
+  // 2. Gerar cada chunk COM BUFFER DE OVERLAP
+  // Cada chunk (exceto último) recebe as primeiras 5 palavras do próximo chunk.
+  // O postprocess come o buffer ao invés da última palavra real.
+  // Depois cortamos o buffer do áudio.
+  const OVERLAP_WORDS = 5
   const audioChunks: AudioChunk[] = []
+  const overlapMsList: number[] = []
   let failedChunks = 0
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i]
+    let textToSend = chunk.text
 
-    const buffer = await generateChunk(tunnelUrl, chunk.text, gradioBaseData, debug, i, chunks.length)
+    if (i < chunks.length - 1) {
+      const nextWords = chunks[i + 1].text
+        .split(/\s+/).filter(w => w.length > 0)
+        .slice(0, OVERLAP_WORDS)
+        .join(' ')
+      textToSend = chunk.text + ' ' + nextWords
+      overlapMsList.push(nextWords.length * 80)
+      debug.log(`Chunk ${i + 1}`, 'info', `+buffer: "${nextWords.substring(0, 40)}" (${nextWords.length} chars)`)
+    } else {
+      overlapMsList.push(0)
+    }
+
+    const buffer = await generateChunk(tunnelUrl, textToSend, gradioBaseData, debug, i, chunks.length)
 
     if (buffer) {
       audioChunks.push({ buffer, pauseAfterMs: chunk.pauseAfterMs })
     } else {
       failedChunks++
+      overlapMsList[i] = 0
       debug.log('Chunking', 'warn', `Chunk ${i + 1} falhou, pulando (${failedChunks} falhas)`)
     }
   }
@@ -394,33 +413,80 @@ async function generateWithChunking(
     debug.log('Chunking', 'warn', `${failedChunks}/${chunks.length} chunks falharam, continuando com ${audioChunks.length}`)
   }
 
-  // 3. Splice PCM CRU — zero processamento
-  // NENHUMA manipulação: sem trim, sem normalize, sem crossfade, sem fade, sem silêncio artificial.
-  // A pausa entre chunks já vem natural do TTS (punctuation no texto: , = pausa curta, . = pausa longa).
-  // Apenas extrai PCM de cada WAV e junta os bytes. Ponto.
-  debug.log('Concatenacao', 'info', `Splice PCM cru: ${audioChunks.length} chunks (zero processamento)...`)
-  
-  // Extrair PCM puro de cada chunk (sem header WAV)
-  const pcmParts: Buffer[] = []
-  let totalPcmBytes = 0
+  // 3. Concatenação: trim buffer + crossfade 3ms nas junções
+  debug.log('Concatenacao', 'info', `Overlap splice: ${audioChunks.length} chunks...`)
+
   const firstFormat = parseWavHeaderSimple(audioChunks[0].buffer)
-  
+  const blockAlign = firstFormat.blockAlign
+  const crossfadeSamples = Math.floor(firstFormat.sampleRate * 0.003) // 3ms
+  const crossfadeBytes = crossfadeSamples * blockAlign
+  const bytesPerMs = firstFormat.sampleRate * firstFormat.numChannels * Math.floor(firstFormat.bitsPerSample / 8) / 1000
+
+  // Extrair PCM e trimar buffer do final
+  const pcmList: Buffer[] = []
   for (let i = 0; i < audioChunks.length; i++) {
     const buf = audioChunks[i].buffer
     if (buf.length < 44) continue
     const dataSize = buf.readUInt32LE(40)
     const actualDataEnd = Math.min(44 + dataSize, buf.length)
-    const pcm = buf.subarray(44, actualDataEnd)
-    pcmParts.push(pcm)
-    totalPcmBytes += pcm.length
+    let pcm = buf.subarray(44, actualDataEnd)
+
+    const trimMs = overlapMsList[i] || 0
+    if (trimMs > 0 && i < chunks.length - 1) {
+      // Estimativa do buffer em bytes, menos 200ms de margem de segurança
+      const trimBytes = Math.floor(trimMs * bytesPerMs) - Math.floor(200 * bytesPerMs)
+      const safeTrim = Math.max(0, trimBytes)
+      if (safeTrim > 0 && safeTrim < pcm.length * 0.5) {
+        pcm = pcm.subarray(0, pcm.length - safeTrim)
+        debug.log(`Chunk ${i + 1}`, 'info', `trim: ${trimMs - 200}ms (${safeTrim} bytes)`)
+      }
+    }
+
+    pcmList.push(pcm)
   }
-  
-  // Montar WAV final: header + PCM concatenado
-  const finalPcm = Buffer.concat(pcmParts)
-  const finalBuffer = buildSimpleWavHeader(firstFormat, totalPcmBytes, finalPcm)
+
+  if (pcmList.length === 1) {
+    const finalBuffer = buildSimpleWavHeader(firstFormat, pcmList[0].length, pcmList[0])
+    return { finalBuffer, chunks }
+  }
+
+  // Crossfade 3ms nas junções
+  let finalPcm: Buffer = pcmList[0]
+  for (let i = 1; i < pcmList.length; i++) {
+    const prev = finalPcm
+    const next = pcmList[i]
+
+    if (prev.length < crossfadeBytes * 3 || next.length < crossfadeBytes * 3) {
+      finalPcm = Buffer.concat([prev, next])
+      continue
+    }
+
+    const prevTail = prev.subarray(prev.length - crossfadeBytes)
+    const nextHead = next.subarray(0, crossfadeBytes)
+
+    const xfade = Buffer.alloc(crossfadeBytes)
+    for (let s = 0; s < crossfadeSamples; s++) {
+      const t = s / crossfadeSamples
+      for (let ch = 0; ch < firstFormat.numChannels; ch++) {
+        const off = (s * firstFormat.numChannels + ch) * 2
+        xfade.writeInt16LE(
+          Math.round(prevTail.readInt16LE(off) * (1 - t) + nextHead.readInt16LE(off) * t),
+          off
+        )
+      }
+    }
+
+    finalPcm = Buffer.concat([
+      prev.subarray(0, prev.length - crossfadeBytes),
+      xfade,
+      next.subarray(crossfadeBytes),
+    ])
+  }
+
+  const finalBuffer = buildSimpleWavHeader(firstFormat, finalPcm.length, finalPcm)
 
   debug.log('Concatenacao', 'ok',
-    `PCM cru: ${totalPcmBytes} bytes, ${audioChunks.length} chunks, ${(finalBuffer.length / 1024).toFixed(1)}KB`)
+    `PCM: ${finalPcm.length} bytes, ${pcmList.length} chunks, crossfade 3ms, ${(finalBuffer.length / 1024).toFixed(1)}KB`)
 
   return { finalBuffer, chunks }
 }

@@ -29,14 +29,27 @@ if torch.cuda.is_available():
         _original_generate = OmniVoice.generate
 
         def _patched_generate(self, *args, **kwargs):
+            # LIMPAR CACHE ANTES de gerar (libera VRAM dos modelos intermediarios)
+            if torch.cuda.is_available():
+                alloc_before = torch.cuda.memory_allocated(0) / (1024**3)
+                reserv_before = torch.cuda.memory_reserved(0) / (1024**3)
+                print(f"[GPU] Antes geracao: {alloc_before:.2f}GB alloc / {reserv_before:.2f}GB reservado")
+                torch.cuda.empty_cache()
+            
             result = _original_generate(self, *args, **kwargs)
+            
+            # LIMPAR CACHE APOS gerar (libera VRAM do resultado)
             if torch.cuda.is_available():
                 alloc = torch.cuda.memory_allocated(0) / (1024**3)
                 reserv = torch.cuda.memory_reserved(0) / (1024**3)
                 print(f"[GPU] Apos geracao: {alloc:.2f}GB alloc / {reserv:.2f}GB reservado")
                 torch.cuda.empty_cache()
+                # Forcar coleta de lixo do Python (libera tensores nao referenciados)
+                import gc
+                gc.collect()
+                torch.cuda.empty_cache()
                 reserv2 = torch.cuda.memory_reserved(0) / (1024**3)
-                print(f"[GPU] Apos empty_cache: {reserv2:.2f}GB reservado")
+                print(f"[GPU] Apos cleanup: {reserv2:.2f}GB reservado")
             return result
 
         OmniVoice.generate = _patched_generate

@@ -12,14 +12,18 @@ export async function GET() {
 
     const user = await db.user.findUnique({
       where: { id: session.userId },
-      select: { freeDownloads: true },
+      select: { freeDownloads: true, paymentExempt: true },
     })
 
     if (!user) {
       return NextResponse.json({ error: 'Usuário não encontrado' }, { status: 404 })
     }
 
-    return NextResponse.json({ freeDownloads: user.freeDownloads })
+    // Usuário isento de pagamento = downloads infinitos
+    return NextResponse.json({ 
+      freeDownloads: user.paymentExempt ? 99999 : user.freeDownloads,
+      paymentExempt: user.paymentExempt 
+    })
   } catch (error) {
     console.error('[Free Download] Check error:', error)
     return NextResponse.json({ freeDownloads: 0 }, { status: 500 })
@@ -36,11 +40,20 @@ export async function POST() {
 
     const user = await db.user.findUnique({
       where: { id: session.userId },
-      select: { freeDownloads: true },
+      select: { freeDownloads: true, paymentExempt: true },
     })
 
     if (!user) {
       return NextResponse.json({ error: 'Usuário não encontrado' }, { status: 404 })
+    }
+
+    // Usuário isento de pagamento = sempre sucesso, sem decrementar
+    if (user.paymentExempt) {
+      return NextResponse.json({ 
+        hasFree: true, 
+        remaining: user.freeDownloads, 
+        paymentExempt: true 
+      })
     }
 
     if (user.freeDownloads <= 0) {

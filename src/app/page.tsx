@@ -738,6 +738,7 @@ export default function VozProClient() {
   // Payment dialog state
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false)
   const [freeDownloads, setFreeDownloads] = useState(0)
+  const [paymentExempt, setPaymentExempt] = useState(false)
 
   // Queue state
   const [queueId, setQueueId] = useState<string | null>(null)
@@ -780,6 +781,7 @@ export default function VozProClient() {
         // Carregar downloads grátis do usuário (não bloqueante)
         fetch('/api/free-download').then(res => res.json()).then(data => {
           if (typeof data.freeDownloads === 'number') setFreeDownloads(data.freeDownloads)
+          if (data.paymentExempt) setPaymentExempt(true)
         }).catch(() => {})
         if (voicesRes.ok) {
           const voicesData = await voicesRes.json()
@@ -1510,7 +1512,11 @@ export default function VozProClient() {
           const data = await res.json()
           if (data.hasFree) {
             setFreeDownloads(data.remaining)
-            toast.success(`Download grátis! Restam ${data.remaining}`, { duration: 3000 })
+            if (data.paymentExempt) {
+              toast.success('Download liberado!', { duration: 2000 })
+            } else {
+              toast.success(`Download grátis! Restam ${data.remaining}`, { duration: 3000 })
+            }
             handlePaymentApproved('mp3')
             return
           }
@@ -2465,9 +2471,11 @@ export default function VozProClient() {
                       >
                         <Download className="w-4 h-4" />
                         {paywallEnabled
-                          ? (freeDownloads > 0
-                            ? `Baixar (${freeDownloads} grátis)`
-                            : `Baixar R$${paymentAmount}`)
+                          ? (paymentExempt
+                            ? 'Baixar (grátis)'
+                            : (freeDownloads > 0
+                              ? `Baixar (${freeDownloads} grátis)`
+                              : `Baixar R$${paymentAmount}`))
                           : 'Baixar'}
                       </Button>
                     </div>

@@ -19,6 +19,7 @@ model User {
   active        Boolean  @default(true)
   googleId      String   @unique @default("") // Google OAuth sub
   freeDownloads Int      @default(5) // downloads gratuitos restantes
+  paymentExempt Boolean  @default(false) // true = isento de pagamento (download livre)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   sessions      Session[]

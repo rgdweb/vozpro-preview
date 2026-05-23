@@ -59,7 +59,7 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
     }
 
-    const { id, name, email, role, active, password } = await req.json()
+    const { id, name, email, role, active, paymentExempt, password } = await req.json()
 
     if (!id) {
       return NextResponse.json({ error: 'ID é obrigatório' }, { status: 400 })
@@ -70,6 +70,7 @@ export async function PUT(req: NextRequest) {
     if (email !== undefined) updateData.email = email
     if (role !== undefined) updateData.role = role
     if (active !== undefined) updateData.active = active
+    if (paymentExempt !== undefined) updateData.paymentExempt = paymentExempt
     if (password) updateData.password = password
 
     if (Object.keys(updateData).length === 0) {

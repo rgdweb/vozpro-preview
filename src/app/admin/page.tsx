@@ -518,7 +518,7 @@ function VarDuration({ url }: { url: string }) {
 // COMPONENTE: Seção de Gestão de Usuários
 // ============================================================
 function UsersSection({ users, loaded, onRefresh }: {
-  users: Array<{ id: string; name: string; email: string; role: string; active: boolean; createdAt: string }>
+  users: Array<{ id: string; name: string; email: string; role: string; active: boolean; paymentExempt: boolean; createdAt: string }>
   loaded: boolean
   onRefresh: () => void
 }) {
@@ -627,6 +627,22 @@ function UsersSection({ users, loaded, onRefresh }: {
     }
   }
 
+  const handleTogglePayment = async (id: string, currentExempt: boolean) => {
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, paymentExempt: !currentExempt }),
+      })
+      if (res.ok) {
+        toast.success(currentExempt ? 'Pagamento ativado para este usuário' : 'Usuário isento de pagamento (grátis)')
+        onRefresh()
+      }
+    } catch {
+      toast.error('Erro de conexão')
+    }
+  }
+
   const startEdit = (user: typeof users[0]) => {
     setEditingUser(user.id)
     setEditName(user.name)
@@ -703,8 +719,16 @@ function UsersSection({ users, loaded, onRefresh }: {
                           Inativo
                         </Badge>
                       )}
+                      {user.paymentExempt && (
+                        <Badge variant="outline" className="border-emerald-500/50 text-emerald-400 text-xs">
+                          Grátis
+                        </Badge>
+                      )}
                     </div>
                     <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => handleTogglePayment(user.id, user.paymentExempt)} className={`h-8 px-2 text-xs ${user.paymentExempt ? 'text-emerald-400 hover:text-emerald-300 bg-emerald-900/20' : 'text-slate-500 hover:text-slate-300'}`} title={user.paymentExempt ? 'Cobrar pagamento' : 'Isentar de pagamento'}>
+                        R$
+                      </Button>
                       <Button variant="ghost" size="sm" onClick={() => handleToggleActive(user.id, user.active)} className="text-slate-400 hover:text-white h-8 w-8 p-0" title={user.active ? 'Desativar' : 'Ativar'}>
                         {user.active ? '✓' : '○'}
                       </Button>
@@ -903,7 +927,7 @@ export default function AdminDashboard() {
   const [adminSettings, setAdminSettings] = useState<Record<string, string>>({})
 
   // Users state
-  const [users, setUsers] = useState<Array<{ id: string; name: string; email: string; role: string; active: boolean; createdAt: string }>>([])
+  const [users, setUsers] = useState<Array<{ id: string; name: string; email: string; role: string; active: boolean; paymentExempt: boolean; createdAt: string }>>([])
   const [usersLoaded, setUsersLoaded] = useState(false)
 
   // Check auth — SOMENTE admin pode acessar

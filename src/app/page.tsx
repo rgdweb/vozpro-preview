@@ -690,6 +690,7 @@ export default function VozProClient() {
   const [language, setLanguage] = useState('Auto')
   const [watermarkAudioPath, setWatermarkAudioPath] = useState('')
   const [watermarkVolume, setWatermarkVolume] = useState(0.08)
+  const [paywallEnabled, setPaywallEnabled] = useState(false)
 
   // Settings
   const [text, setText] = useState('')
@@ -800,6 +801,7 @@ export default function VozProClient() {
           setEnableFrontendUpload(!!settingsData.enableVoiceUpload)
           setWatermarkAudioPath(settingsData.watermarkAudioPath || '')
           setWatermarkVolume(settingsData.watermarkVolume ? parseFloat(settingsData.watermarkVolume) : 0.08)
+          setPaywallEnabled(!!settingsData.paywallEnabled && settingsData.paywallEnabled !== 'false')
         }
         if (trackCatRes.ok) setTrackCategories(await trackCatRes.json())
         if (voiceCatRes.ok) setVoiceCategories(await voiceCatRes.json())
@@ -1383,13 +1385,6 @@ export default function VozProClient() {
     }
   }, [])
 
-  // Abre o dialog de pagamento (paywall)
-  const handleDownloadClick = useCallback(() => {
-    const url = audioUrl // sempre usa o audio limpo (sem watermark)
-    if (!url) return
-    setPaymentDialogOpen(true)
-  }, [audioUrl])
-
   // Download real após pagamento aprovado
   const handlePaymentApproved = useCallback(async (format: 'mp3' | 'wav') => {
     const url = audioUrl // áudio limpo
@@ -1417,14 +1412,12 @@ export default function VozProClient() {
       }
 
       if (format === 'wav') {
-        // Download como WAV
         const a = document.createElement('a')
         a.href = url
         a.download = `vozpro_${Date.now()}.wav`
         a.click()
         toast.success('WAV baixado com sucesso!')
       } else {
-        // Encode to MP3 using lamejs
         if (!(window as unknown as { lamejs?: object }).lamejs) {
           await new Promise<void>((resolve, reject) => {
             if (document.querySelector('script[src*="lame"]')) { resolve(); return }
@@ -1474,7 +1467,6 @@ export default function VozProClient() {
       }
     } catch (err) {
       console.error('Download error:', err)
-      // Fallback: download as original
       const a = document.createElement('a')
       a.href = url
       a.download = `vozpro_${Date.now()}.wav`
@@ -1482,6 +1474,17 @@ export default function VozProClient() {
       toast.error('Erro ao converter, baixando WAV original.')
     }
   }, [audioUrl])
+
+  // Abre o dialog de pagamento (paywall) ou baixa direto se desativado
+  const handleDownloadClick = useCallback(() => {
+    const url = audioUrl
+    if (!url) return
+    if (paywallEnabled) {
+      setPaymentDialogOpen(true)
+    } else {
+      handlePaymentApproved('mp3')
+    }
+  }, [audioUrl, paywallEnabled, handlePaymentApproved])
 
   if (loading) {
     return (
@@ -2320,7 +2323,7 @@ export default function VozProClient() {
             <div className="hidden lg:block">
               <Button
                 onClick={handleGenerate}
-                disabled={isGenerating || !text.trim() || (!selectedVariationId && !uploadedVoiceUrl)}
+                disabled={isGenerating || !text.trim() || (voiceMode === 'clone' && !selectedVariationId && !uploadedVoiceUrl)}
                 className="w-full h-14 text-lg font-bold bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white shadow-xl shadow-violet-500/25 disabled:opacity-50"
                 title={
                   !selectedVariationId && !uploadedVoiceUrl && voiceMode === 'clone'
@@ -2425,7 +2428,7 @@ export default function VozProClient() {
                         className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white gap-1.5"
                       >
                         <Download className="w-4 h-4" />
-                        Baixar R$1
+                        {paywallEnabled ? 'Baixar R$1' : 'Baixar'}
                       </Button>
                     </div>
 
@@ -2897,7 +2900,7 @@ export default function VozProClient() {
           {/* Generate Button — always in the fixed bar on mobile */}
           <Button
             onClick={handleGenerate}
-            disabled={isGenerating || !text.trim() || (!selectedVariationId && !uploadedVoiceUrl)}
+            disabled={isGenerating || !text.trim() || (voiceMode === 'clone' && !selectedVariationId && !uploadedVoiceUrl)}
             className="w-full h-12 text-base font-bold bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white shadow-xl shadow-violet-500/25 disabled:opacity-50"
             title={
               !selectedVariationId && !uploadedVoiceUrl && voiceMode === 'clone'

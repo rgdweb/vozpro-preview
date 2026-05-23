@@ -17,7 +17,7 @@ import {
   AudioWaveform, LogOut, Plus, Trash2, Edit, Upload, Music, Mic,
   Loader2, RefreshCw, Volume2, FileAudio, CheckCircle2, Settings2,
   FolderOpen, ChevronLeft, FolderPlus, Folder, Play, Pause, Users, UserPlus, Shield,
-  UploadCloud, X, Download, VolumeX, CreditCard, Chrome
+  UploadCloud, X, Download, VolumeX, CreditCard, Chrome, DollarSign
 } from 'lucide-react'
 import { toast } from 'sonner'
 import AudioPlayer from '@/components/audio-player'
@@ -3617,6 +3617,37 @@ export default function AdminDashboard() {
                       <span>Muito alto</span>
                     </div>
                   </div>
+                </div>
+
+                {/* Paywall Toggle */}
+                <div className="p-4 rounded-lg bg-slate-900/50 border border-slate-700 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <DollarSign className="w-4 h-4 text-emerald-400" />
+                      <Label className="text-sm font-medium text-white">Paywall (Cobrar por Download)</Label>
+                    </div>
+                    <Switch
+                      checked={adminSettings.paywallEnabled === 'true'}
+                      onCheckedChange={async (checked) => {
+                        try {
+                          await fetch('/api/admin/settings', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ key: 'paywallEnabled', value: checked ? 'true' : 'false' }),
+                          })
+                          setAdminSettings(prev => ({ ...prev, paywallEnabled: checked ? 'true' : 'false' }))
+                          toast.success(checked ? 'Paywall ativado — clientes pagarão R$1 por download' : 'Paywall desativado — download livre')
+                        } catch {
+                          toast.error('Erro ao salvar')
+                        }
+                      }}
+                    />
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    {adminSettings.paywallEnabled === 'true'
+                      ? 'Ativado: clientes precisam pagar R$1 via MercadoPago para baixar áudio limpo.'
+                      : 'Desativado: clientes baixam áudio limpo gratuitamente.'}
+                  </p>
                 </div>
 
                 {/* MercadoPago Config */}

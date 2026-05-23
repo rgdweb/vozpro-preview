@@ -6,11 +6,11 @@ export async function GET() {
   try {
     const settings = await db.systemSetting.findMany({
       where: {
-        key: { in: ['enableVoiceUpload', 'watermarkAudioPath', 'watermarkVolume', 'googleClientId'] },
+        key: { in: ['enableVoiceUpload', 'watermarkAudioPath', 'watermarkVolume', 'googleClientId', 'paywallEnabled'] },
       },
     })
 
-    const config: Record<string, string | boolean> = { enableVoiceUpload: false, googleClientId: '' }
+    const config: Record<string, string | boolean> = { enableVoiceUpload: false, googleClientId: '', paywallEnabled: false }
     for (const s of settings) {
       if (s.key === 'enableVoiceUpload') {
         config[s.key] = s.value === 'true'

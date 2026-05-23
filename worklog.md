@@ -235,3 +235,35 @@ Stage Summary:
 - Código local 100% sincronizado com origin/main
 - Build passou com zero erros
 - Tudo funcional: Google login, paywall, watermark, payment APIs, queue
+---
+
+Task ID: 1
+Agent: Main Agent
+Task: Fix queue system + implement TEMP audio cleanup
+
+Work Log:
+- Analyzed full audio storage architecture: generated audio is already in-memory (base64), cleared on refresh
+- Identified 2 critical queue bugs:
+  1. queue/complete only promoted next on success=true → queue froze on failures
+  2. No timeout for stuck processing items (user closes browser → permanent block)
+- Fixed queue/complete to ALWAYS promote next item
+- Added unstickProcessing() to detect items processing >10min and mark as failed
+- Added cleanupOldItems() to delete completed/failed items >5min old
+- Added GET /api/queue/complete health check endpoint
+- Updated queue/join to run unstick+cleanup before accepting new entries
+- Updated queue/status to run unstick during polling
+- Created php-server/cleanup.php to remove:
+  - Abandoned chunk directories (>2h old)
+  - Generated audio files in audios/generated/ (>1h old)
+- Added cleanupAudioServer() in src/lib/audio-server.ts
+- Added automatic cleanup calls in page.tsx:
+  - On page load (auth checked): queue health check + PHP cleanup
+  - Before each generation: PHP cleanup
+- Build passed successfully, pushed as commit a9a826e
+
+Stage Summary:
+- Queue now properly promotes next user even when generation fails
+- Stuck processing items auto-unstick after 10 minutes
+- PHP server cleanup runs automatically on page load and before generation
+- Generated audio was already TEMP (in-memory only) - no disk writes on Vercel side
+- Reference audios (voice clones) remain permanent as designed (needed for future generations)

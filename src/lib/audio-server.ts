@@ -81,6 +81,24 @@ export async function deleteFromAudioServer(
 }
 
 /**
+ * Cleanup temporary files (abandoned chunks, generated files) from PHP server.
+ * Called automatically on page load and before generation.
+ */
+export async function cleanupAudioServer(): Promise<void> {
+  try {
+    await fetch(`${AUDIO_SERVER_URL}/cleanup.php`, {
+      method: 'GET',
+      headers: {
+        ...(AUDIO_SERVER_API_KEY ? { 'Authorization': `Bearer ${AUDIO_SERVER_API_KEY}` } : {}),
+      },
+    })
+  } catch (error) {
+    // Silencioso - cleanup não deve quebrar a experiência
+    console.warn('[AudioServer] Cleanup skip:', error)
+  }
+}
+
+/**
  * Check if a URL is from our audio server.
  */
 export function isAudioServerUrl(url: string): boolean {

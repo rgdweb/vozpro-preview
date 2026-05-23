@@ -2,7 +2,65 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { db } from '@/lib/db'
 
-const MAX_CONCURRENT_GENERATIONS = 1 // Apenas 1 geração por vez na GPU
+const MAX_CONCURRENT_GENERATIONS = 1
+const PROCESSING_TIMEOUT_MS = 10 * 60 * 1000 // 10 minutos
+
+// Limpar itens processing presos há mais de PROCESSING_TIMEOUT_MS
+async function unstickProcessing(): Promise<number> {
+  try {
+    const result = await db.generationQueue.updateMany({
+      where: {
+        status: 'processing',
+        startedAt: { lt: new Date(Date.now() - PROCESSING_TIMEOUT_MS) },
+      },
+      data: {
+        status: 'failed',
+        completedAt: new Date(),
+      },
+    })
+    if (result.count > 0) {
+      console.log(`[Queue] Unstuck ${result.count} stuck processing items`)
+    }
+    return result.count
+  } catch {
+    return 0
+  }
+}
+
+// Promover o próximo waiting para processing
+async function promoteNext() {
+  const currentProcessing = await db.generationQueue.count({
+    where: { status: 'processing' },
+  })
+  if (currentProcessing >= MAX_CONCURRENT_GENERATIONS) return false
+
+  const nextWaiting = await db.generationQueue.findFirst({
+    where: { status: 'waiting' },
+    orderBy: { createdAt: 'asc' },
+  })
+
+  if (nextWaiting) {
+    await db.generationQueue.update({
+      where: { id: nextWaiting.id },
+      data: { status: 'processing', startedAt: new Date() },
+    })
+    console.log('[Queue] Promoted:', nextWaiting.id)
+    return true
+  }
+  return false
+}
+
+// Limpar itens completed/failed antigos
+async function cleanupOldItems() {
+  try {
+    await db.generationQueue.deleteMany({
+      where: {
+        status: { in: ['completed', 'failed'] },
+        completedAt: { lt: new Date(Date.now() - 5 * 60 * 1000) },
+      },
+    })
+  } catch {}
+}
 
 // POST /api/queue/join - Entrar na fila de geração
 export async function POST(req: NextRequest) {
@@ -11,6 +69,13 @@ export async function POST(req: NextRequest) {
     if (!session.authenticated) {
       return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
     }
+
+    // Primeiro: desbloquear itens presos e limpar antigos
+    const unstuckCount = await unstickProcessing()
+    if (unstuckCount > 0) {
+      await promoteNext()
+    }
+    await cleanupOldItems()
 
     // Verificar se já tem um item na fila do usuário
     const existingItem = await db.generationQueue.findFirst({
@@ -81,6 +146,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'ID da fila não informado' }, { status: 400 })
     }
 
+    // Desbloquear itens presos periodicamente durante o poll
+    await unstickProcessing()
+    await cleanupOldItems()
+
     const item = await db.generationQueue.findUnique({
       where: { id: queueId },
     })
@@ -99,16 +168,6 @@ export async function GET(req: NextRequest) {
         },
       }) + 1
     }
-
-    // Limpar itens antigos (completed/failed mais de 5 minutos)
-    try {
-      await db.generationQueue.deleteMany({
-        where: {
-          status: { in: ['completed', 'failed'] },
-          completedAt: { lt: new Date(Date.now() - 5 * 60 * 1000) },
-        },
-      })
-    } catch {}
 
     return NextResponse.json({
       id: item.id,

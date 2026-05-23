@@ -24,6 +24,7 @@ import PaymentDialog from '@/components/payment-dialog'
 import { optimizePronunciation, processControlTags, containsSSML, type TTSEngine } from '@/lib/pronunciation-optimizer'
 import { parseSSML } from '@/lib/ssml-parser'
 import { preprocessTTS } from '@/lib/tts-text-preprocessor'
+import { cleanupAudioServer } from '@/lib/audio-server'
 import { Users } from 'lucide-react'
 
 interface TrackControlsProps {
@@ -821,6 +822,10 @@ export default function VozProClient() {
       }
     }
     loadData()
+    // Health check da fila: desbloquear itens presos (fire-and-forget)
+    fetch('/api/queue/complete', { method: 'GET' }).catch(() => {})
+    // Limpar arquivos temporários do servidor PHP (fire-and-forget)
+    cleanupAudioServer()
   }, [authChecked])
 
   // Detectar duração da trilha quando usuário aperta play (via VoicePreviewButton)
@@ -858,6 +863,9 @@ export default function VozProClient() {
       toast.error('Digite o texto para sintetizar')
       return
     }
+
+    // Limpar arquivos temporários do servidor PHP (fire-and-forget)
+    cleanupAudioServer()
 
     // Validar baseado no modo de voz
     if (voiceMode === 'clone' && !selectedVariationId && !uploadedVoiceUrl) {

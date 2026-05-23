@@ -938,16 +938,7 @@ export default function AdminDashboard() {
         setEnableVoiceUpload(settingsData.enableVoiceUpload === 'true')
         setWatermarkPath(settingsData.watermarkAudioPath || '')
         setWatermarkVolume(settingsData.watermarkVolume ? parseFloat(settingsData.watermarkVolume) : 0.08)
-        // Carregar settings de admin (mercadoPago, google, etc)
-        const adminSettingsRes = await fetch('/api/admin/settings')
-        if (adminSettingsRes.ok) {
-          const adminData = await adminSettingsRes.json()
-          const settingsMap: Record<string, string> = {}
-          for (const s of adminData) {
-            settingsMap[s.key] = s.value
-          }
-          setAdminSettings(settingsMap)
-        }
+        setAdminSettings(settingsData)
         setSettingsLoaded(true)
       }
       if (trackCatRes.ok) setTrackCategories(await trackCatRes.json())

@@ -297,6 +297,7 @@ export async function listUsers() {
       email: true,
       role: true,
       active: true,
+      paymentExempt: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -304,12 +305,13 @@ export async function listUsers() {
   })
 }
 
-export async function updateUser(id: string, data: { name?: string; email?: string; role?: string; active?: boolean; password?: string }) {
+export async function updateUser(id: string, data: { name?: string; email?: string; role?: string; active?: boolean; paymentExempt?: boolean; password?: string }) {
   const updateData: Record<string, unknown> = {}
   if (data.name !== undefined) updateData.name = data.name
   if (data.email !== undefined) updateData.email = data.email
   if (data.role !== undefined) updateData.role = data.role
   if (data.active !== undefined) updateData.active = data.active
+  if (data.paymentExempt !== undefined) updateData.paymentExempt = data.paymentExempt
   if (data.password) updateData.password = hashPassword(data.password)
 
   return db.user.update({

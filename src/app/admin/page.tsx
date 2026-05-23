@@ -726,8 +726,8 @@ function UsersSection({ users, loaded, onRefresh }: {
                       )}
                     </div>
                     <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => handleTogglePayment(user.id, user.paymentExempt)} className={`h-8 px-2 text-xs ${user.paymentExempt ? 'text-emerald-400 hover:text-emerald-300 bg-emerald-900/20' : 'text-slate-500 hover:text-slate-300'}`} title={user.paymentExempt ? 'Cobrar pagamento' : 'Isentar de pagamento'}>
-                        R$
+                      <Button variant="ghost" size="sm" onClick={() => handleTogglePayment(user.id, user.paymentExempt)} className={`h-8 px-2 text-xs font-bold ${user.paymentExempt ? 'text-emerald-400 hover:text-emerald-300 bg-emerald-900/30 border border-emerald-500/30' : 'text-amber-400 hover:text-amber-300 bg-amber-900/20 border border-amber-500/20'}`} title={user.paymentExempt ? 'Clique para cobrar pagamento' : 'Clique para isentar de pagamento'}>
+                        {user.paymentExempt ? 'LIVRE' : 'R$'}
                       </Button>
                       <Button variant="ghost" size="sm" onClick={() => handleToggleActive(user.id, user.active)} className="text-slate-400 hover:text-white h-8 w-8 p-0" title={user.active ? 'Desativar' : 'Ativar'}>
                         {user.active ? '✓' : '○'}

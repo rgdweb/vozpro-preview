@@ -515,6 +515,221 @@ function VarDuration({ url }: { url: string }) {
 }
 
 // ============================================================
+// COMPONENTE: Monitor de Saúde do Sistema
+// ============================================================
+function HealthSection() {
+  const [healthData, setHealthData] = useState<Record<string, unknown> | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [lastCheck, setLastCheck] = useState<string>('')
+
+  const checkHealth = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/health')
+      const data = await res.json()
+      setHealthData(data)
+      setLastCheck(new Date().toLocaleTimeString('pt-BR'))
+    } catch {
+      setHealthData({ error: 'Erro ao conectar' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const runCleanup = async () => {
+    try {
+      const res = await fetch('/api/health', { method: 'POST' })
+      const data = await res.json()
+      if (data.ok) {
+        toast.success('Cleanup executado!')
+        checkHealth()
+      }
+    } catch {
+      toast.error('Erro ao executar cleanup')
+    }
+  }
+
+  const statusColor = (s: string) => {
+    if (s === 'ok') return 'text-emerald-400'
+    if (s === 'warning') return 'text-amber-400'
+    return 'text-red-400'
+  }
+
+  const statusBg = (s: string) => {
+    if (s === 'ok') return 'border-emerald-500/30 bg-emerald-900/10'
+    if (s === 'warning') return 'border-amber-500/30 bg-amber-900/10'
+    return 'border-red-500/30 bg-red-900/10'
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-white">Saúde do Sistema</h2>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-500">{lastCheck && `Última: ${lastCheck}`}</span>
+          <Button variant="outline" size="sm" onClick={runCleanup} disabled={loading} className="border-slate-600 text-slate-300 hover:bg-slate-700 text-xs">
+            Limpar Temp
+          </Button>
+          <Button size="sm" onClick={checkHealth} disabled={loading} className="bg-violet-600 hover:bg-violet-700 text-white text-xs">
+            {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : '🔍'} Verificar
+          </Button>
+        </div>
+      </div>
+
+      {!healthData ? (
+        <Card className="bg-white/5 border-white/10">
+          <CardContent className="py-12 text-center">
+            <p className="text-slate-400">Clique em &quot;Verificar&quot; para diagnosticar o sistema</p>
+            <p className="text-xs text-slate-600 mt-2">Verifica: banco de dados, GPU, tunnel, disco, RAM, fila, processos</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {/* Status Geral */}
+          {healthData.status && (
+            <Card className={`border ${statusBg(String(healthData.status))}`}>
+              <CardContent className="py-3 px-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">{String(healthData.status) === 'ok' ? '✅' : String(healthData.status) === 'warning' ? '⚠️' : '🔴'}</span>
+                  <span className={`font-semibold ${statusColor(String(healthData.status))}`}>
+                    {String(healthData.status) === 'ok' ? 'Tudo normal' : String(healthData.status) === 'warning' ? 'Atenção' : 'Crítico'}
+                  </span>
+                </div>
+                <span className="text-xs text-slate-400">{healthData.total_problemas} problema(s)</span>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Problemas */}
+          {Array.isArray(healthData.problemas) && healthData.problemas.length > 0 && (
+            <Card className="border-red-500/30 bg-red-900/10">
+              <CardContent className="py-3 px-4">
+                <p className="text-sm font-medium text-red-400 mb-2">Problemas detectados:</p>
+                {healthData.problemas.map((p: unknown, i: number) => (
+                  <p key={i} className="text-xs text-red-300">• {String(p)}</p>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Checks detalhados */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Database */}
+            {healthData.checks?.database && (
+              <Card className="bg-white/5 border-white/10">
+                <CardContent className="py-3 px-4">
+                  <p className="text-xs font-medium text-slate-300 mb-2">🗄️ Database (Neon)</p>
+                  <div className="text-xs space-y-1 text-slate-400">
+                    <p>Latência: <span className={Number((healthData.checks.database as Record<string, unknown>).latencia_ms) > 500 ? 'text-red-400' : 'text-emerald-400'}>{(healthData.checks.database as Record<string, unknown>).latencia_ms}ms</span></p>
+                    <p>Usuários: {(healthData.checks.database as Record<string, unknown>).usuarios}</p>
+                    <p>Vozes: {(healthData.checks.database as Record<string, unknown>).vozes}</p>
+                    <p>Trilhas: {(healthData.checks.database as Record<string, unknown>).trilhas}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Fila */}
+            {healthData.checks?.fila && (
+              <Card className="bg-white/5 border-white/10">
+                <CardContent className="py-3 px-4">
+                  <p className="text-xs font-medium text-slate-300 mb-2">📋 Fila de Geração</p>
+                  <div className="text-xs space-y-1 text-slate-400">
+                    <p>Processando: <span className={(healthData.checks.fila as Record<string, unknown>).processing > 0 ? 'text-amber-400' : 'text-emerald-400'}>{(healthData.checks.fila as Record<string, unknown>).processing}</span></p>
+                    <p>Aguardando: {(healthData.checks.fila as Record<string, unknown>).waiting}</p>
+                    <p>Status: {(healthData.checks.fila as Record<string, unknown>).ocupada ? '🔴 Ocupada' : '🟢 Livre'}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* PHP Server */}
+            {healthData.checks?.php_server && (
+              <Card className="bg-white/5 border-white/10 md:col-span-2">
+                <CardContent className="py-3 px-4">
+                  <p className="text-xs font-medium text-slate-300 mb-2">🖥️ Servidor PHP (GPU + Tunnel)</p>
+                  <div className="text-xs space-y-1 text-slate-400">
+                    <p>Latência: <span className={Number((healthData.checks.php_server as Record<string, unknown>).latencia_ms) > 2000 ? 'text-red-400' : 'text-emerald-400'}>{(healthData.checks.php_server as Record<string, unknown>).latencia_ms}ms</span></p>
+                    {(healthData.checks.php_server as Record<string, unknown>)?.checks?.tunnel && (
+                      <p>Tunnel: {(healthData.checks.php_server as Record<string, Record<string, unknown>>).checks?.tunnel?.ok ? '🟢 OK' : '🔴 Down'} {(healthData.checks.php_server as Record<string, Record<string, unknown>>).checks?.tunnel?.url && <span className="text-slate-600 ml-1">({String((healthData.checks.php_server as Record<string, Record<string, unknown>>).checks?.tunnel?.url).substring(0, 50)}...)</span>}</p>
+                    )}
+                    {(healthData.checks.php_server as Record<string, Record<string, unknown>>)?.checks?.gpu?.gpus?.map((gpu: Record<string, unknown>, i: number) => (
+                      <div key={i}>
+                        <p>GPU {i}: {gpu.nome} | VRAM: {gpu.vram_uso_porcento}% | Temp: {gpu.temperatura_c}°C</p>
+                      </div>
+                    ))}
+                    {(healthData.checks.php_server as Record<string, Record<string, unknown>>)?.checks?.disco && (
+                      <p>Disco: {(healthData.checks.php_server as Record<string, Record<string, unknown>>).checks?.disco?.usado_porcento}% usado ({(healthData.checks.php_server as Record<string, Record<string, unknown>>).checks?.disco?.livre_mb}MB livre)</p>
+                    )}
+                    {(healthData.checks.php_server as Record<string, Record<string, unknown>>)?.checks?.processos && (
+                      <div>
+                        <p>Gradio TTS: {(healthData.checks.php_server as Record<string, Record<string, unknown>>).checks?.processos?.rodando ? '🟢 Rodando' : '🔴 Parado'}</p>
+                        <p>Cloudflared: {(healthData.checks.php_server as Record<string, Record<string, unknown>>).checks?.processos?.cloudflared_rodando ? '🟢 Rodando' : '🔴 Parado'}</p>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Arquivos */}
+            {healthData.checks?.php_server?.checks?.arquivos && (
+              <Card className="bg-white/5 border-white/10">
+                <CardContent className="py-3 px-4">
+                  <p className="text-xs font-medium text-slate-300 mb-2">📁 Arquivos no Servidor</p>
+                  <div className="text-xs space-y-1 text-slate-400">
+                    <p>Total: {healthData.checks.php_server.checks.arquivos.total_arquivos} arquivos ({healthData.checks.php_server.checks.arquivos.total_tamanho_mb}MB)</p>
+                    <p>Ref: {healthData.checks.php_server.checks.arquivos.categorias?.ref?.quantidade || 0} | Track: {healthData.checks.php_server.checks.arquivos.categorias?.track?.quantidade || 0}</p>
+                    <p>Chunks pendentes: <span className={healthData.checks.php_server.checks.arquivos.chunks_pendentes > 0 ? 'text-amber-400' : 'text-emerald-400'}>{healthData.checks.php_server.checks.arquivos.chunks_pendentes}</span></p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Uptime */}
+            {healthData.checks?.php_server?.checks?.uptime && (
+              <Card className="bg-white/5 border-white/10">
+                <CardContent className="py-3 px-4">
+                  <p className="text-xs font-medium text-slate-300 mb-2">⏱️ Uptime do Servidor</p>
+                  <div className="text-xs text-slate-400">
+                    <p className="text-lg font-mono">{healthData.checks.php_server.checks.uptime.formatado}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          {/* Logs recentes */}
+          {healthData.checks?.php_server?.checks?.logs_recentes?.length > 0 && (
+            <Card className="bg-white/5 border-white/10">
+              <CardContent className="py-3 px-4">
+                <p className="text-xs font-medium text-slate-300 mb-2">📝 Últimos Logs</p>
+                <div className="text-xs text-slate-500 space-y-0.5 font-mono max-h-32 overflow-y-auto">
+                  {healthData.checks.php_server.checks.logs_recentes.map((log: string, i: number) => (
+                    <p key={i}>{String(log).substring(0, 100)}</p>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Recomendação */}
+          {healthData.resumo?.recomendacao && (
+            <Card className={`border ${statusBg(String(healthData.status))}`}>
+              <CardContent className="py-3 px-4">
+                <p className="text-xs text-slate-300">
+                  <span className="font-medium">💡 Recomendação:</span> {String(healthData.resumo.recomendacao)}
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ============================================================
 // COMPONENTE: Seção de Gestão de Usuários
 // ============================================================
 function UsersSection({ users, loaded, onRefresh }: {
@@ -2349,6 +2564,9 @@ export default function AdminDashboard() {
               <Users className="w-4 h-4" />
               Usuários ({users.length})
             </TabsTrigger>
+            <TabsTrigger value="health" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white gap-2">
+              🩺 Saúde
+            </TabsTrigger>
           </TabsList>
 
           {/* VOICES TAB */}
@@ -3799,6 +4017,11 @@ export default function AdminDashboard() {
               loaded={usersLoaded}
               onRefresh={loadUsers}
             />
+          </TabsContent>
+
+          {/* HEALTH TAB */}
+          <TabsContent value="health" className="space-y-4 mt-4">
+            <HealthSection />
           </TabsContent>
         </Tabs>
       </main>

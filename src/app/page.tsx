@@ -15,7 +15,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   AudioWaveform, Sparkles, Loader2, Download, Play, Pause, Square,
   Volume2, Music, Mic, ChevronRight, Settings2, Globe, Bug, Copy, ChevronDown,
-  Upload, CheckCircle2, FolderOpen, ChevronLeft, Folder
+  Upload, CheckCircle2, FolderOpen, ChevronLeft, Folder, Mail
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Label } from '@/components/ui/label'
@@ -2990,8 +2990,11 @@ export default function VozProClient() {
         open={paymentDialogOpen}
         onOpenChange={setPaymentDialogOpen}
         onPaymentApproved={handlePaymentApproved}
+        onEmailSent={() => toast.success('Áudio enviado por e-mail!', { duration: 3000 })}
         audioUrl={audioUrl || ''}
         amount={paymentAmount}
+        isPaymentExempt={paymentExempt}
+        freeDownloads={freeDownloads}
       />
     </div>
   )

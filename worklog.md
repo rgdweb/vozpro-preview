@@ -267,3 +267,25 @@ Stage Summary:
 - PHP server cleanup runs automatically on page load and before generation
 - Generated audio was already TEMP (in-memory only) - no disk writes on Vercel side
 - Reference audios (voice clones) remain permanent as designed (needed for future generations)
+---
+Task ID: 1
+Agent: main
+Task: Criar arquivo de diagnóstico + auto-restart e funcionalidade de envio de áudio por email
+
+Work Log:
+- Criou diagnostico_auto_restart.py com 10 verificações (GPU, Gradio, Tunnel, Disco, RAM, Internet, Python, Temp, Ref Audio, Riscos Futuros)
+- Auto-restart com monitoramento de fila via API Vercel, idle detection, cleanup e restart automático
+- Instalou nodemailer + @types/nodemailer no projeto
+- Criou /api/send-audio-email/route.ts (POST para enviar, GET para verificar config)
+- Reescreveu payment-dialog.tsx com 3 modos: Baixar (PC), E-mail, e Formato (MP3/WAV)
+- Atualizou page.tsx: adicionou ícone Mail e props isPaymentExempt/freeDownloads/onEmailSent ao PaymentDialog
+- Build passou sem erros
+
+Stage Summary:
+- Script de diagnóstico: /home/z/my-project/download/diagnostico_auto_restart.py
+- Script copiado para: /home/z/my-project/local-server/diagnostico_auto_restart.py
+- Instruções: /home/z/my-project/download/INSTRUCOES-DIAGNOSTICO.txt
+- API email: /api/send-audio-email (GET para config check, POST para enviar)
+- PaymentDialog agora suporta: Download direto MP3/WAV + Receber via E-mail
+- Variáveis de ambiente necessárias para email: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_FROM
+

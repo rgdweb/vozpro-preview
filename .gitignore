@@ -81,3 +81,6 @@ spawner*.log
 audio-server*.log
 server-alive.log
 backups/
+*.db
+*.sqlite
+*.sqlite3

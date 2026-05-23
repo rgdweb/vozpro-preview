@@ -1,4 +1,4 @@
-// build: 9869573-revert-stable
+// build: 9869573-revert-stable-paywall-queue-oauth
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
@@ -20,9 +20,11 @@ import {
 import { toast } from 'sonner'
 import { Label } from '@/components/ui/label'
 import VoicePreviewButton from '@/components/voice-preview-button'
+import PaymentDialog from '@/components/payment-dialog'
 import { optimizePronunciation, processControlTags, containsSSML, type TTSEngine } from '@/lib/pronunciation-optimizer'
 import { parseSSML } from '@/lib/ssml-parser'
 import { preprocessTTS } from '@/lib/tts-text-preprocessor'
+import { Users } from 'lucide-react'
 
 interface TrackControlsProps {
   selectedTrack: { id: string; name: string; audioPath: string; [key: string]: unknown } | null
@@ -729,6 +731,15 @@ export default function VozProClient() {
   const [uploadedVoiceFile, setUploadedVoiceFile] = useState<File | null>(null)
   const [uploadedVoiceUrl, setUploadedVoiceUrl] = useState<string | null>(null)
 
+  // Payment dialog state
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false)
+
+  // Queue state
+  const [queueId, setQueueId] = useState<string | null>(null)
+  const [queuePosition, setQueuePosition] = useState<number>(0)
+  const [queueStatus, setQueueStatus] = useState<string>('') // waiting, processing
+  const queuePollRef = useRef<NodeJS.Timeout | null>(null)
+
   const resultAudioRef = useRef<HTMLAudioElement | null>(null)
 
   // Get selected voice and variation
@@ -856,6 +867,8 @@ export default function VozProClient() {
       toast.error('Descreva a voz desejada para usar o Voice Design')
       return
     }
+
+    // ===== ENTRAR NA FILA DE GERAÇÃO =====
     setIsGenerating(true)
     setAudioUrl(null)
     setPreviewUrl(null)
@@ -864,6 +877,62 @@ export default function VozProClient() {
     setAudioDuration(null)
     setGeneratingTime(0)
     setPreviewingVoiceId(null)
+    setQueueStatus('')
+
+    try {
+      const queueRes = await fetch('/api/queue/join', { method: 'POST' })
+      const queueData = await queueRes.json()
+
+      if (!queueRes.ok) {
+        toast.error(queueData.error || 'Erro ao entrar na fila')
+        setIsGenerating(false)
+        return
+      }
+
+      const qId = queueData.id
+      setQueueId(qId)
+
+      if (queueData.status === 'waiting') {
+        // Tem que esperar na fila
+        setQueueStatus('waiting')
+        setQueuePosition(queueData.position)
+        toast.info(`Você está na posição ${queueData.position} da fila`, { duration: 4000 })
+
+        // Poll queue status until it's our turn
+        const pollQueue = async () => {
+          const statusRes = await fetch(`/api/queue/status?id=${qId}`)
+          const statusData = await statusRes.json()
+
+          if (statusData.status === 'processing') {
+            setQueueStatus('processing')
+            setQueuePosition(0)
+            return true // Our turn!
+          }
+          if (statusData.status === 'failed') {
+            toast.error('Erro na fila de geração')
+            setIsGenerating(false)
+            setQueueStatus('')
+            return false
+          }
+          if (statusData.position) setQueuePosition(statusData.position)
+          return false
+        }
+
+        // Poll every 2 seconds
+        while (true) {
+          const isMyTurn = await pollQueue()
+          if (isMyTurn) break
+          await new Promise(resolve => setTimeout(resolve, 2000))
+        }
+      } else {
+        setQueueStatus('processing')
+      }
+    } catch (queueErr) {
+      console.warn('[Queue] Erro ao entrar na fila, gerando diretamente:', queueErr)
+      setQueueStatus('processing')
+    }
+
+    setGeneratingTime(0) // Reset timer after queue wait
 
     // ===== OTIMIZAÇÃO DE PRONÚNCIA (pipeline completo) =====
     let textToSend = text.trim()
@@ -1244,6 +1313,17 @@ export default function VozProClient() {
       clearTimeout(timeoutId)
       setIsGenerating(false)
       setGeneratingTime(0)
+      setQueueStatus('')
+      setQueueId(null)
+      setQueuePosition(0)
+      // Marcar fila como completa (fire-and-forget)
+      if (queueId) {
+        fetch('/api/queue/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ queueId, success: !!audioUrl }),
+        }).catch(() => {})
+      }
     }
   }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs, voiceMode, uploadedVoiceUrl])
 
@@ -1303,17 +1383,22 @@ export default function VozProClient() {
     }
   }, [])
 
-  const handleDownload = useCallback(async () => {
-    const url = mixedAudioUrl || audioUrl
+  // Abre o dialog de pagamento (paywall)
+  const handleDownloadClick = useCallback(() => {
+    const url = audioUrl // sempre usa o audio limpo (sem watermark)
     if (!url) return
+    setPaymentDialogOpen(true)
+  }, [audioUrl])
 
-    toast.info('Convertendo para MP3...')
+  // Download real após pagamento aprovado
+  const handlePaymentApproved = useCallback(async (format: 'mp3' | 'wav') => {
+    const url = audioUrl // áudio limpo
+    if (!url) return
 
     try {
       let audioBuffer: AudioBuffer
 
       if (url.startsWith('data:')) {
-        // Base64 audio
         const byteString = atob(url.split(',')[1])
         const ab = new ArrayBuffer(byteString.length)
         const ia = new Uint8Array(ab)
@@ -1324,7 +1409,6 @@ export default function VozProClient() {
         audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
         await audioCtx.close()
       } else {
-        // Remote URL
         const response = await fetch(url)
         const arrayBuffer = await response.arrayBuffer()
         const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
@@ -1332,63 +1416,72 @@ export default function VozProClient() {
         await audioCtx.close()
       }
 
-      // Encode to MP3 using lamejs
-      if (!(window as unknown as { lamejs?: object }).lamejs) {
-        await new Promise<void>((resolve, reject) => {
-          if (document.querySelector('script[src*="lame"]')) { resolve(); return }
-          const script = document.createElement('script')
-          script.src = 'https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js'
-          script.onload = () => resolve()
-          script.onerror = () => reject(new Error('Falha ao carregar encoder MP3'))
-          document.head.appendChild(script)
-        })
-      }
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const lamejsMod = (window as any).lamejs
-      const Mp3Encoder = lamejsMod.Mp3Encoder
-      const numCh = Math.min(audioBuffer.numberOfChannels, 2)
-      const sr = audioBuffer.sampleRate
-      const encoder = new Mp3Encoder(numCh, sr, 320)
-      const mp3Data: Int8Array[] = []
-      const sampleBlockSize = 1152
-      const left = audioBuffer.getChannelData(0)
-      const right = numCh > 1 ? audioBuffer.getChannelData(1) : left
-
-      for (let i = 0; i < left.length; i += sampleBlockSize) {
-        const leftChunk = new Int16Array(sampleBlockSize)
-        const rightChunk = numCh > 1 ? new Int16Array(sampleBlockSize) : undefined
-        for (let j = 0; j < sampleBlockSize; j++) {
-          const idx = i + j
-          if (idx < left.length) {
-            leftChunk[j] = Math.max(-32768, Math.min(32767, Math.round(left[idx] * 32767)))
-            if (rightChunk) rightChunk[j] = Math.max(-32768, Math.min(32767, Math.round(right[idx] * 32767)))
-          }
+      if (format === 'wav') {
+        // Download como WAV
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `vozpro_${Date.now()}.wav`
+        a.click()
+        toast.success('WAV baixado com sucesso!')
+      } else {
+        // Encode to MP3 using lamejs
+        if (!(window as unknown as { lamejs?: object }).lamejs) {
+          await new Promise<void>((resolve, reject) => {
+            if (document.querySelector('script[src*="lame"]')) { resolve(); return }
+            const script = document.createElement('script')
+            script.src = 'https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js'
+            script.onload = () => resolve()
+            script.onerror = () => reject(new Error('Falha ao carregar encoder MP3'))
+            document.head.appendChild(script)
+          })
         }
-        const mp3buf = encoder.encodeBuffer(leftChunk, rightChunk)
-        if (mp3buf.length > 0) mp3Data.push(mp3buf)
-      }
-      const end = encoder.flush()
-      if (end.length > 0) mp3Data.push(end)
 
-      const blob = new Blob(mp3Data, { type: 'audio/mpeg' })
-      const blobUrl = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = blobUrl
-      a.download = `vozpro_${Date.now()}.mp3`
-      a.click()
-      URL.revokeObjectURL(blobUrl)
-      toast.success('MP3 baixado com sucesso!')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const lamejsMod = (window as any).lamejs
+        const Mp3Encoder = lamejsMod.Mp3Encoder
+        const numCh = Math.min(audioBuffer.numberOfChannels, 2)
+        const sr = audioBuffer.sampleRate
+        const encoder = new Mp3Encoder(numCh, sr, 320)
+        const mp3Data: Int8Array[] = []
+        const sampleBlockSize = 1152
+        const left = audioBuffer.getChannelData(0)
+        const right = numCh > 1 ? audioBuffer.getChannelData(1) : left
+
+        for (let i = 0; i < left.length; i += sampleBlockSize) {
+          const leftChunk = new Int16Array(sampleBlockSize)
+          const rightChunk = numCh > 1 ? new Int16Array(sampleBlockSize) : undefined
+          for (let j = 0; j < sampleBlockSize; j++) {
+            const idx = i + j
+            if (idx < left.length) {
+              leftChunk[j] = Math.max(-32768, Math.min(32767, Math.round(left[idx] * 32767)))
+              if (rightChunk) rightChunk[j] = Math.max(-32768, Math.min(32767, Math.round(right[idx] * 32767)))
+            }
+          }
+          const mp3buf = encoder.encodeBuffer(leftChunk, rightChunk)
+          if (mp3buf.length > 0) mp3Data.push(mp3buf)
+        }
+        const end = encoder.flush()
+        if (end.length > 0) mp3Data.push(end)
+
+        const blob = new Blob(mp3Data, { type: 'audio/mpeg' })
+        const blobUrl = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = blobUrl
+        a.download = `vozpro_${Date.now()}.mp3`
+        a.click()
+        URL.revokeObjectURL(blobUrl)
+        toast.success('MP3 baixado com sucesso!')
+      }
     } catch (err) {
-      console.error('MP3 encode error:', err)
+      console.error('Download error:', err)
       // Fallback: download as original
       const a = document.createElement('a')
       a.href = url
       a.download = `vozpro_${Date.now()}.wav`
       a.click()
-      toast.error('Erro ao converter MP3, baixando WAV original.')
+      toast.error('Erro ao converter, baixando WAV original.')
     }
-  }, [mixedAudioUrl, audioUrl])
+  }, [audioUrl])
 
   if (loading) {
     return (
@@ -2328,11 +2421,11 @@ export default function VozProClient() {
                         <Square className="w-4 h-4" />
                       </Button>
                       <Button
-                        onClick={handleDownload}
+                        onClick={handleDownloadClick}
                         className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white gap-1.5"
                       >
                         <Download className="w-4 h-4" />
-                        Baixar MP3
+                        Baixar R$1
                       </Button>
                     </div>
 
@@ -2384,9 +2477,23 @@ export default function VozProClient() {
                         )}
                     </div>
                     <p className="text-slate-400">
-                      {isGenerating ? 'Gerando seu áudio...' : 'Nenhum áudio gerado ainda'}
+                      {isGenerating
+                        ? (queueStatus === 'waiting'
+                          ? `Posição ${queuePosition} na fila...`
+                          : 'Gerando seu áudio...')
+                        : 'Nenhum áudio gerado ainda'}
                     </p>
-                    {isGenerating && (
+                    {isGenerating && queueStatus === 'waiting' && (
+                      <div className="space-y-1 mt-2">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <Users className="w-4 h-4 text-amber-400" />
+                        </div>
+                        <p className="text-xs text-amber-400 mt-2">
+                          Aguarde sua vez na fila de geração
+                        </p>
+                      </div>
+                    )}
+                    {isGenerating && queueStatus !== 'waiting' && (
                       <div className="space-y-1 mt-2">
                         <div className="flex items-center justify-center gap-1.5">
                           <div className="w-1 h-1 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -2713,7 +2820,7 @@ export default function VozProClient() {
               <Button onClick={stopPlayback} variant="outline" size="sm" className="border-slate-500/40 bg-slate-500/10 text-slate-200">
                 <Square className="w-4 h-4" />
               </Button>
-              <Button onClick={handleDownload} size="sm" className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white gap-1.5">
+              <Button onClick={handleDownloadClick} size="sm" className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white gap-1.5">
                 <Download className="w-4 h-4" />
                 Baixar
               </Button>
@@ -2764,7 +2871,7 @@ export default function VozProClient() {
                 </p>
               </div>
               <button
-                onClick={(e) => { e.stopPropagation(); handleDownload() }}
+                onClick={(e) => { e.stopPropagation(); handleDownloadClick() }}
                 className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0 active:scale-95 transition-transform"
               >
                 <Download className="w-3.5 h-3.5 text-emerald-400" />
@@ -2776,7 +2883,14 @@ export default function VozProClient() {
           {isGenerating && (
             <div className="flex items-center gap-2 mb-2 pb-2 border-b border-white/10">
               <Loader2 className="w-4 h-4 text-violet-400 animate-spin shrink-0" />
-              <span className="text-xs text-violet-300 flex-1">Gerando áudio... {generatingTime}s</span>
+              {queueStatus === 'waiting' ? (
+                <span className="text-xs text-amber-300 flex-1">
+                  <Users className="w-3 h-3 inline mr-1" />
+                  Posição {queuePosition} na fila... {generatingTime}s
+                </span>
+              ) : (
+                <span className="text-xs text-violet-300 flex-1">Gerando áudio... {generatingTime}s</span>
+              )}
             </div>
           )}
 
@@ -2819,6 +2933,14 @@ export default function VozProClient() {
           <p className="text-slate-600">Powered by <span className="text-slate-400 font-medium">VozPro</span></p>
         </div>
       </footer>
+
+      {/* Payment Dialog (Paywall) */}
+      <PaymentDialog
+        open={paymentDialogOpen}
+        onOpenChange={setPaymentDialogOpen}
+        onPaymentApproved={handlePaymentApproved}
+        audioUrl={audioUrl || ''}
+      />
     </div>
   )
 }

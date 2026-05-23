@@ -14,12 +14,14 @@ model User {
   id        String   @id @default(cuid())
   name      String   // nome do usuario
   email     String   @unique // login
-  password  String   // hash SHA-256 da senha
+  password  String   @default("") // hash SHA-256 da senha (vazio para Google OAuth)
   role      String   @default("user") // "admin" ou "user"
   active    Boolean  @default(true)
+  googleId  String   @unique @default("") // Google OAuth sub
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   sessions  Session[]
+  payments  Payment[]
 }
 
 model Voice {
@@ -91,4 +93,34 @@ model SystemSetting {
   value String @default("")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  userId        String
+  externalRef   String   @unique // MercadoPago preference ID / external reference
+  status        String   @default("pending") // pending, approved, rejected, cancelled
+  amount        Float    @default(1.0)
+  format        String   @default("mp3") // mp3 ou wav
+  mpPaymentId   String   @default("") // ID do pagamento no MercadoPago
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([externalRef])
+  @@index([status])
+}
+
+model GenerationQueue {
+  id          String   @id @default(cuid())
+  userId      String
+  status      String   @default("waiting") // waiting, processing, completed, failed
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  @@index([status])
+  @@index([createdAt])
 }

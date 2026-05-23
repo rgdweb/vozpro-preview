@@ -98,3 +98,56 @@ Stage Summary:
 - Delay de 10s após SSE complete: `await new Promise(r => setTimeout(r, 10000))`
 - downloadWithRetry(): valida WAV header antes de aceitar (isWavComplete)
 - postprocess_output SEMPRE true (index 11 do gradioData)
+
+---
+Task ID: 4
+Agent: main
+Task: Implementar Paywall (MercadoPago), Google OAuth e Fila de Geração
+
+Work Log:
+- Instalou pacotes: mercadopago, google-auth-library, qrcode, @types/qrcode
+- Atualizou Prisma schema: adicionou googleId no User, model Payment, model GenerationQueue
+- Criou API routes de pagamento:
+  - /api/payment/create — cria preferência MercadoPago (R$1)
+  - /api/payment/status — verifica status do pagamento (GET + sandbox POST)
+  - /api/payment/webhook — webhook do MercadoPago para atualizar status
+  - /api/payment/qrcode — gera QR code como data URI
+- Criou API route Google OAuth:
+  - /api/auth/google — login via Google OAuth2 access token
+  - Cria/atualiza usuário no banco, cria sessão cookie
+  - 1 sessão por conta (sistema existente respeita para users normais)
+- Criou API routes de fila:
+  - /api/queue/join — entrar na fila (máx 1 geração simultânea)
+  - /api/queue/status — verificar posição (GET)
+  - /api/queue/complete — marcar como completo/falha, promover próximo
+- Criou componente PaymentDialog (src/components/payment-dialog.tsx):
+  - Escolha de formato MP3 ou WAV
+  - Geração de QR code via MercadoPago
+  - Modo sandbox (quando MP não configurado) com aprovação manual
+  - Polling automático a cada 3s para verificar pagamento
+  - Auto-download após aprovação
+- Modificou page.tsx:
+  - Botão "Baixar" agora abre PaymentDialog (paywall R$1)
+  - handleDownloadClick abre dialog, handlePaymentApproved faz download real
+  - Fila de geração: ao clicar "Gerar Voz", entra na fila primeiro
+  - Se posição > 0, mostra "Posição X na fila..." no UI
+  - Quando é a vez, gera normalmente
+  - Marca fila como completa no finally (sucesso ou falha)
+- Modificou login/page.tsx:
+  - Botão "Entrar com Google" com divisor "ou"
+  - Usa Google Identity Services (GIS) para OAuth2 client-side
+  - Envia access token + dados do usuário para /api/auth/google
+- Modificou admin/page.tsx:
+  - Seção "MercadoPago" com campo Access Token
+  - Seção "Google OAuth" com campo Google Client ID
+  - Ambos salvam via /api/admin/settings
+- Atualizou .env.example com novas variáveis
+
+Stage Summary:
+- Build OK (0 erros)
+- Novos API routes: /api/payment/*, /api/queue/*, /api/auth/google
+- Novo componente: PaymentDialog
+- Novos modelos Prisma: Payment, GenerationQueue
+- Campo novo no User: googleId
+- Para deploy: rodar `npx prisma db push` ou `npx prisma migrate dev` no servidor
+- Configurar: MERCADOPAGO_ACCESS_TOKEN e GOOGLE_CLIENT_ID no .env ou painel admin

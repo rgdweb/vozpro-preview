@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Lock, AudioWaveform, Loader2, Mail, Eye, EyeOff, ArrowRight, Sparkles, Shield, Zap, Settings } from 'lucide-react'
+import { Lock, AudioWaveform, Loader2, Mail, Eye, EyeOff, ArrowRight, Sparkles, Shield, Zap, Settings, Chrome } from 'lucide-react'
 import { toast } from 'sonner'
 import Image from 'next/image'
 
@@ -15,6 +15,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
   const [mounted, setMounted] = useState(false)
 
   // Animação de entrada
@@ -58,6 +59,88 @@ export default function LoginPage() {
       toast.error('Erro de conexão')
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Google OAuth login
+  const handleGoogleLogin = async () => {
+    // Check if Google Client ID is configured
+    const settingsRes = await fetch('/api/settings')
+    const settingsData = await settingsRes.json()
+    if (!settingsData.googleClientId) {
+      toast.error('Google Login não configurado', { description: 'Configure GOOGLE_CLIENT_ID no painel admin.' })
+      return
+    }
+
+    // Load Google Identity Services
+    const googleClientId = settingsData.googleClientId
+    setGoogleLoading(true)
+
+    try {
+      // Initialize Google Sign-In
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const google = (window as any).google
+      if (!google || !google.accounts) {
+        // Load Google Identity Services script
+        await new Promise<void>((resolve, reject) => {
+          const script = document.createElement('script')
+          script.src = 'https://accounts.google.com/gsi/client'
+          script.async = true
+          script.defer = true
+          script.onload = () => resolve()
+          script.onerror = () => reject(new Error('Falha ao carregar Google Sign-In'))
+          document.head.appendChild(script)
+        })
+      }
+
+      // Use the prompt or One Tap
+      const tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
+        client_id: googleClientId,
+        scope: 'openid email profile',
+        callback: async (response: { access_token?: string; error?: string }) => {
+          if (response.error) {
+            toast.error('Erro no login Google')
+            setGoogleLoading(false)
+            return
+          }
+          try {
+            // Use access token to get user info
+            const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+              headers: { Authorization: `Bearer ${response.access_token}` },
+            })
+            const userInfo = await userInfoRes.json()
+
+            // Create a simple token for our backend (we trust Google's verification)
+            const res = await fetch('/api/auth/google', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                token: response.access_token,
+                email: userInfo.email,
+                name: userInfo.name,
+                sub: userInfo.sub,
+              }),
+            })
+
+            const data = await res.json()
+            if (res.ok && data.success) {
+              toast.success(`Bem-vindo, ${data.name || 'Usuário'}!`)
+              router.push('/')
+            } else {
+              toast.error(data.error || 'Erro no login Google')
+            }
+          } catch {
+            toast.error('Erro na autenticação Google')
+          } finally {
+            setGoogleLoading(false)
+          }
+        },
+      })
+
+      tokenClient.requestAccessToken()
+    } catch {
+      toast.error('Erro ao carregar Google Sign-In')
+      setGoogleLoading(false)
     }
   }
 
@@ -256,6 +339,29 @@ export default function LoginPage() {
                   <ArrowRight className="w-4.5 h-4.5 ml-2" />
                 </>
               )}
+            </Button>
+
+            {/* Divider */}
+            <div className="flex items-center gap-3 my-5">
+              <div className="flex-1 h-px bg-slate-800" />
+              <span className="text-xs text-slate-600">ou</span>
+              <div className="flex-1 h-px bg-slate-800" />
+            </div>
+
+            {/* Google Login */}
+            <Button
+              type="button"
+              onClick={handleGoogleLogin}
+              disabled={googleLoading || loading}
+              variant="outline"
+              className="w-full h-12 bg-slate-900/80 border-slate-800 hover:bg-slate-800 hover:border-slate-700 text-white rounded-xl transition-all duration-300 text-[15px] gap-3"
+            >
+              {googleLoading ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Chrome className="w-5 h-5" />
+              )}
+              {googleLoading ? 'Conectando...' : 'Entrar com Google'}
             </Button>
           </form>
 

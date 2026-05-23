@@ -17,7 +17,7 @@ import {
   AudioWaveform, LogOut, Plus, Trash2, Edit, Upload, Music, Mic,
   Loader2, RefreshCw, Volume2, FileAudio, CheckCircle2, Settings2,
   FolderOpen, ChevronLeft, FolderPlus, Folder, Play, Pause, Users, UserPlus, Shield,
-  UploadCloud, X, Download, VolumeX
+  UploadCloud, X, Download, VolumeX, CreditCard, Chrome
 } from 'lucide-react'
 import { toast } from 'sonner'
 import AudioPlayer from '@/components/audio-player'
@@ -900,6 +900,7 @@ export default function AdminDashboard() {
   const [watermarkPath, setWatermarkPath] = useState('')
   const [watermarkVolume, setWatermarkVolume] = useState(0.08)
   const [watermarkUploading, setWatermarkUploading] = useState(false)
+  const [adminSettings, setAdminSettings] = useState<Record<string, string>>({})
 
   // Users state
   const [users, setUsers] = useState<Array<{ id: string; name: string; email: string; role: string; active: boolean; createdAt: string }>>([])
@@ -937,6 +938,16 @@ export default function AdminDashboard() {
         setEnableVoiceUpload(settingsData.enableVoiceUpload === 'true')
         setWatermarkPath(settingsData.watermarkAudioPath || '')
         setWatermarkVolume(settingsData.watermarkVolume ? parseFloat(settingsData.watermarkVolume) : 0.08)
+        // Carregar settings de admin (mercadoPago, google, etc)
+        const adminSettingsRes = await fetch('/api/admin/settings')
+        if (adminSettingsRes.ok) {
+          const adminData = await adminSettingsRes.json()
+          const settingsMap: Record<string, string> = {}
+          for (const s of adminData) {
+            settingsMap[s.key] = s.value
+          }
+          setAdminSettings(settingsMap)
+        }
         setSettingsLoaded(true)
       }
       if (trackCatRes.ok) setTrackCategories(await trackCatRes.json())
@@ -3605,6 +3616,64 @@ export default function AdminDashboard() {
                       <span>Muito baixo (quase inaudível)</span>
                       <span>Muito alto</span>
                     </div>
+                  </div>
+                </div>
+
+                {/* MercadoPago Config */}
+                <div className="p-4 rounded-lg bg-slate-900/50 border border-slate-700 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="w-4 h-4 text-emerald-400" />
+                    <Label className="text-sm font-medium text-white">MercadoPago (Pagamento)</Label>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Configure o token de acesso do MercadoPago para gerar QR de pagamento (R$1 por download).
+                  </p>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-400">Access Token</Label>
+                    <Input
+                      type="password"
+                      placeholder="APP_USR-xxxx..."
+                      defaultValue={adminSettings.mercadopagoAccessToken || ''}
+                      className="h-9 bg-slate-800 border-slate-700 text-sm"
+                      onChange={async (e) => {
+                        try {
+                          await fetch('/api/admin/settings', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ key: 'mercadopagoAccessToken', value: e.target.value }),
+                          })
+                        } catch {}
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Google OAuth Config */}
+                <div className="p-4 rounded-lg bg-slate-900/50 border border-slate-700 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Chrome className="w-4 h-4 text-blue-400" />
+                    <Label className="text-sm font-medium text-white">Google OAuth</Label>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Client ID do Google Cloud Console para login com Google. 1 sessão por conta.
+                  </p>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-400">Google Client ID</Label>
+                    <Input
+                      type="text"
+                      placeholder="xxxx.apps.googleusercontent.com"
+                      defaultValue={adminSettings.googleClientId || ''}
+                      className="h-9 bg-slate-800 border-slate-700 text-sm"
+                      onChange={async (e) => {
+                        try {
+                          await fetch('/api/admin/settings', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ key: 'googleClientId', value: e.target.value }),
+                          })
+                        } catch {}
+                      }}
+                    />
                   </div>
                 </div>
 

@@ -33,6 +33,11 @@ if (empty($tunnelUrl)) {
     $tunnelUrl = trim($_GET['tunnelUrl'] ?? '');
 }
 
+// Aceita tambem param 'url' (usado pelo start_tunnel.ps1)
+if (empty($tunnelUrl)) {
+    $tunnelUrl = trim($_GET['url'] ?? '');
+}
+
 if (empty($tunnelUrl)) {
     http_response_code(400);
     header('Content-Type: application/json; charset=utf-8');
@@ -40,9 +45,10 @@ if (empty($tunnelUrl)) {
     exit;
 }
 
-// Valida se e URL do cloudflared (trycloudflare.com) ou localhost
+// Valida se e URL do tunnel valido (cloudflared, localtunnel ou localhost)
 $isValid = (
     strpos($tunnelUrl, 'trycloudflare.com') !== false ||
+    strpos($tunnelUrl, 'loca.lt') !== false ||
     strpos($tunnelUrl, 'localhost') !== false ||
     strpos($tunnelUrl, '127.0.0.1') !== false
 );
@@ -50,7 +56,7 @@ $isValid = (
 if (!$isValid) {
     http_response_code(400);
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode(['error' => 'URL invalida - esperado trycloudflare.com']);
+    echo json_encode(['error' => 'URL invalida - esperado trycloudflare.com ou loca.lt']);
     exit;
 }
 
@@ -67,6 +73,7 @@ file_put_contents($iniFile, $iniContent);
 
 header('Content-Type: application/json; charset=utf-8');
 echo json_encode([
+    'ok' => true,
     'status' => 'ok',
     'tunnelUrl' => $tunnelUrl,
     'updated_at' => $now

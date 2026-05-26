@@ -6,7 +6,10 @@ echo ============================================
 echo.
 
 echo [0/4] Limpando processos antigos...
-taskkill /F /IM python.exe >nul 2>&1
+:: Matar APENAS o python na porta 7860 (NAO matar todos os python.exe!)
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":7860" ^| findstr "LISTENING"') do (
+    taskkill /F /PID %%a >nul 2>&1
+)
 taskkill /F /IM cloudflared.exe >nul 2>&1
 timeout /t 2 /nobreak >nul
 
@@ -14,8 +17,22 @@ echo [1/4] Ativando Conda...
 call C:\Users\Administrador\Miniconda3\Scripts\activate.bat
 set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:32
 
-echo [2/4] Iniciando OmniVoice Demo (porta 7860)...
-start "OmniVoice GPU" cmd /k "call C:\Users\Administrador\Miniconda3\Scripts\activate.bat && set CUDA_VISIBLE_DEVICES=0 && set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:32 && omnivoice-demo --ip 0.0.0.0 --port 7860"
+echo [1.5/4] Verificando omnivoice_gpu.py...
+if not exist omnivoice_gpu.py (
+    echo      Baixando do GitHub...
+    powershell -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/rgdweb/Omnivoice/main/local-server/omnivoice_gpu.py' -OutFile 'omnivoice_gpu.py'" 2>nul
+    if not exist omnivoice_gpu.py (
+        echo [ERRO] Nao conseguiu baixar! Verifique sua internet.
+        pause
+        exit /b 1
+    )
+    echo      Arquivo baixado com sucesso!
+) else (
+    echo      Arquivo encontrado!
+)
+
+echo [2/4] Iniciando OmniVoice com GPU Limiter (porta 7860)...
+start "OmniVoice GPU" cmd /k "call C:\Users\Administrador\Miniconda3\Scripts\activate.bat && set CUDA_VISIBLE_DEVICES=0 && set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:32 && python omnivoice_gpu.py --ip 0.0.0.0 --port 7860"
 
 echo      Aguardando servidor GPU ficar pronto...
 set WAITED=0

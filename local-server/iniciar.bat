@@ -6,7 +6,10 @@ echo ============================================
 echo.
 
 echo [0/4] Limpando processos antigos...
-taskkill /F /IM python.exe >nul 2>&1
+:: Matar APENAS o python na porta 7860 (NAO matar todos os python.exe!)
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":7860" ^| findstr "LISTENING"') do (
+    taskkill /F /PID %%a >nul 2>&1
+)
 taskkill /F /IM cloudflared.exe >nul 2>&1
 timeout /t 2 /nobreak >nul
 

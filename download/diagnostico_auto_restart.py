@@ -7,7 +7,7 @@
 VERIFICA:
   1. GPU NVIDIA (VRAM, temperatura, uso, drivers)
   2. Modelo OmniVoice carregado na memória
-  3. Servidor Gradio rodando (porta 7861)
+  3. Servidor Gradio rodando (porta 7860)
   4. Tunnel Cloudflared ativo e respondendo
   5. Áudios de referência (integridade, tamanho)
   6. Disco livre (C: e pasta temp)
@@ -61,7 +61,7 @@ def _get_hidden_startupinfo():
 # ============================================
 CONFIG = {
     # Servidor Gradio (VozPro)
-    "gradio_port": 7861,
+    "gradio_port": 7860,
     "gradio_host": "127.0.0.1",
 
     # Auto-restart
@@ -249,7 +249,7 @@ def check_gradio_server() -> Dict:
     }
 
     # Verificar processo
-    code, output = run_cmd('netstat -ano | findstr ":7861"')
+    code, output = run_cmd('netstat -ano | findstr ":7860"')
     if "LISTENING" in output:
         result["running"] = True
         # Tentar pegar PID
@@ -275,7 +275,7 @@ def check_gradio_server() -> Dict:
         else:
             log(f"  Servidor respondendo mas com status {status}!", "WARN")
     else:
-        log("  Servidor NÃO está rodando na porta 7861!", "ERROR")
+        log("  Servidor NÃO está rodando na porta 7860!", "ERROR")
         log("  Para iniciar: python omnivoice_server.py", "ERROR")
 
     return result
@@ -298,7 +298,7 @@ def check_tunnel() -> Dict:
         log("  Processo cloudflared rodando", "OK")
     else:
         log("  Cloudflared NÃO está rodando!", "ERROR")
-        log("  Para iniciar: cloudflared tunnel --url http://localhost:7861", "ERROR")
+        log("  Para iniciar: cloudflared tunnel --url http://localhost:7860", "ERROR")
         return result
 
     # Tentar pegar PID
@@ -642,10 +642,10 @@ def check_queue_status() -> Dict:
     return result
 
 def _kill_gradio_only():
-    """Mata APENAS o servidor Gradio (python na porta 7861), sem matar este script.
+    """Mata APENAS o servidor Gradio (python na porta 7860), sem matar este script.
     Antes fazia 'taskkill /F /IM python.exe' que matava TODOS os python incluindo o proprio
     monitoramento, causando acumulo de janelas CMD a cada restart."""
-    log("Parando servidor Gradio (somente PID na porta 7861)...", "RESTART")
+    log("Parando servidor Gradio (somente PID na porta 7860)...", "RESTART")
 
     # Encontrar PID escutando na porta do Gradio
     code, output = run_cmd(f'netstat -ano | findstr ":{CONFIG["gradio_port"]}"')
@@ -706,7 +706,7 @@ def do_restart():
     # 5. Reiniciar Gradio
     log("Reiniciando servidor Gradio...", "RESTART")
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    server_script = os.path.join(script_dir, "omnivoice_server.py")
+    server_script = os.path.join(script_dir, "omnivoice_gpu.py")
 
     startupinfo = _get_hidden_startupinfo()
 

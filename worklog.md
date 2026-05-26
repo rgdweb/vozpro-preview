@@ -421,3 +421,21 @@ Stage Summary:
 - Antes: tunnel URL era salva num servidor morto → tunnel nunca registrado
 - Depois: URL salva no Oracle (147.15.77.137) → Vercel encontra o tunnel
 - IMPORTANTE: usuario precisa copiar os .ps1 corrigidos para o PC GPU
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix port mismatch 7861→7860, update_tunnel.php param/domain validation, iniciar.bat taskkill
+
+Work Log:
+- Read diagnostico_auto_restart.py: CONFIG had gradio_port 7860 but hardcoded findstr/messages still referenced 7861
+- Read update_tunnel.php: expected param 'tunnelUrl' but PS sends 'url'; only accepted trycloudflare.com not loca.lt; returned 'status' not 'ok'
+- Read iniciar.bat: still had taskkill /F /IM python.exe killing ALL python processes
+- Fixed diagnostico_auto_restart.py: all 4 hardcoded 7861→7860 + omnivoice_server.py→omnivoice_gpu.py
+- Fixed update_tunnel.php: accept 'url' param, accept loca.lt domain, return ok:true
+- Fixed iniciar.bat: targeted PID kill on port 7860 instead of killing all python.exe
+- Copied all 4 files to /download/
+
+Stage Summary:
+- 3 files fixed: diagnostico_auto_restart.py, update_tunnel.php, iniciar.bat
+- start_tunnel.ps1 already correct in /download/ (has retry loop)
+- update_tunnel.php needs to be uploaded to Oracle server at /var/www/omnivoce/

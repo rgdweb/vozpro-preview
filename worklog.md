@@ -335,3 +335,22 @@ Stage Summary:
 RESUMO DA SESSAO COMPLETA:
 - 3 commits feitos: bce0a52 (proxy-audio edge->nodejs), 7d78f31 (sorteiomax cleanup), 6a8949b (audio preview proxy)
 - Problemas resolvidos: proxy-audio 403, painel saude critico (6 URLs sorteiomax morto), alerts falsos health.php, audio preview --s
+
+---
+Task ID: 5
+Agent: Main
+Task: Fix "audio de referencia obrigatorio" ao salvar nova variacao com corte de audio
+
+Work Log:
+- Bug: ao criar nova variacao com audio cortado, a primeira tentativa de salvar falhava com "Audio de referencia e obrigatorio" mas a segunda funcionava
+- Causa raiz: handleSaveVariation() faz upload do audio cortado e recebe pendingVoiceFileData (var local), depois chama setVariationForm() (async do React) para atualizar o estado
+- Porem a validacao na linha 1817 checa variationForm.serverUrl (estado antigo, ainda vazio) — nao checa pendingVoiceFileData
+- E o POST body usava ...variationForm (spread do estado antigo) — serverUrl chegava vazio no servidor
+- Fix 1: Adicionado `|| pendingVoiceFileData` na condicao de validacao (linha 1819)
+- Fix 2: Body do POST agora construido explicitamente com createBody, sobrescrevendo campos com pendingVoiceFileData quando disponivel
+
+Stage Summary:
+- Arquivo: src/app/admin/page.tsx, funcao handleSaveVariation()
+- Antes: validacao usava variationForm (estado async) → falhava na 1a tentativa
+- Depois: validacao checa pendingVoiceFileData tambem; body usa dados do upload diretamente
+- Resultado: salvar nova variacao com corte funciona na 1a tentativa

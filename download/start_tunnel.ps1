@@ -8,11 +8,21 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 Write-Host "[1/2] Verificando VozPro na porta $port..." -ForegroundColor Yellow
-try {
-    $null = Invoke-WebRequest -Uri "http://localhost:$port/" -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
-    Write-Host "[OK] VozPro respondendo!" -ForegroundColor Green
-} catch {
-    Write-Host "[ERRO] VozPro NAO esta rodando!" -ForegroundColor Red
+$serverReady = $false
+for ($tentativa = 0; $tentativa -lt 24; $tentativa++) {
+    try {
+        $null = Invoke-WebRequest -Uri "http://localhost:$port/" -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
+        Write-Host "[OK] VozPro respondendo! (tentativa $($tentativa + 1))" -ForegroundColor Green
+        $serverReady = $true
+        break
+    } catch {
+        $esperado = ($tentativa + 1) * 5
+        Write-Host "  Aguardando... ${esperado}s (VozPro ainda subindo)" -ForegroundColor DarkGray
+        Start-Sleep -Seconds 5
+    }
+}
+if (-not $serverReady) {
+    Write-Host "[ERRO] VozPro NAO subiu apos 120s! Verifique a janela OmniVoice GPU." -ForegroundColor Red
     Read-Host "Pressione Enter para sair"
     exit 1
 }

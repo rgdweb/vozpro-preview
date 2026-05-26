@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { validateGeneratedAudio, formatValidationLog } from '@/lib/asr-validator'
 import { stripSSMLForTTS } from '@/lib/ssml-parser'
+import { fixAudioServerUrl } from '@/lib/audio-server'
 
 // POST /api/tunnel-generate - Geracao direta via tunnel cloudflared
 // Pipeline completo com prosódia:
@@ -319,8 +320,10 @@ export async function POST(req: NextRequest) {
         audioBuffer = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0)).buffer
         debug.log('Ref Audio', 'ok', `Base64: ${(audioBuffer.byteLength / 1024).toFixed(1)}KB`)
       } else if (referenceAudioUrl) {
-        const audioRes = await fetch(referenceAudioUrl)
-        if (!audioRes.ok) throw new Error('Falha ao baixar audio de referencia')
+        const fixedUrl = fixAudioServerUrl(referenceAudioUrl)
+        debug.log('Ref Audio', 'info', `URL: ${fixedUrl}`)
+        const audioRes = await fetch(fixedUrl)
+        if (!audioRes.ok) throw new Error(`Falha ao baixar audio de referencia (HTTP ${audioRes.status})`)
         audioBuffer = await audioRes.arrayBuffer()
         debug.log('Ref Audio', 'ok', `Download: ${(audioBuffer.byteLength / 1024).toFixed(1)}KB`)
       } else {

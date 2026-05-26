@@ -28,15 +28,15 @@ if (-not $serverReady) {
 }
 
 Write-Host ""
-Write-Host "[2/2] Abrindo localtunnel..." -ForegroundColor Yellow
+Write-Host "[2/2] Abrindo Cloudflared Tunnel..." -ForegroundColor Yellow
 Write-Host ""
 
-$outputFile = "$env:TEMP\lt_output.txt"
+$outputFile = "$env:TEMP\cf_output.txt"
 Remove-Item $outputFile -Force -ErrorAction SilentlyContinue
 
 $job = Start-Job -ScriptBlock {
     param($p)
-    cmd /c "npx localtunnel --port $p 2>&1" | Out-File -FilePath $using:outputFile -Encoding ascii
+    cmd /c "cloudflared tunnel --url http://localhost:$p 2>&1" | Out-File -FilePath $using:outputFile -Encoding ascii
 } -ArgumentList $port
 
 $url = $null
@@ -44,7 +44,7 @@ for ($i = 0; $i -lt 60; $i++) {
     Start-Sleep -Milliseconds 500
     if (Test-Path $outputFile) {
         $content = Get-Content $outputFile -Raw -ErrorAction SilentlyContinue
-        if ($content -match "your url is: (https://[a-z0-9\-]+\.loca\.lt)") {
+        if ($content -match "(https://[a-z0-9\-]+\.trycloudflare\.com)") {
             $url = $Matches[1]
             break
         }
@@ -79,7 +79,9 @@ if ($url) {
         Start-Sleep -Seconds 999999
     }
 } else {
-    Write-Host "[ERRO] Nao conseguiu obter URL" -ForegroundColor Red
+    Write-Host "[ERRO] Nao conseguiu obter URL do Cloudflared." -ForegroundColor Red
+    Write-Host "Verifique se o cloudflared esta instalado:" -ForegroundColor Yellow
+    Write-Host "  winget install Cloudflare.cloudflared" -ForegroundColor Yellow
     Stop-Job $job -ErrorAction SilentlyContinue
     Read-Host "Pressione Enter para sair"
 }

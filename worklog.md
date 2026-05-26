@@ -439,3 +439,29 @@ Stage Summary:
 - 3 files fixed: diagnostico_auto_restart.py, update_tunnel.php, iniciar.bat
 - start_tunnel.ps1 already correct in /download/ (has retry loop)
 - update_tunnel.php needs to be uploaded to Oracle server at /var/www/omnivoce/
+
+---
+Task ID: 9
+Agent: Main
+Task: Fix {{slow}} tag + manutencao GPU automatica inteligente
+
+Work Log:
+- Descobriu que processControlTags() (que processa {{pause}}, {{slow}}, {{fast}}, {{emphasis}}, {{whisper}}) NUNCA era chamado no pipeline de geracao
+- Em page.tsx so parseSSML() era chamado quando detectava SSML — tags diretos como {{slow}} passavam cru pro TTS e eram lidos em voz alta
+- {{slow}} handler antigo so triplicava virgulas existentes, sem efeito se nao houvesse virgulas no texto
+- Corrigiu processControlTags() no pipeline: substituiu bloco SSML-only por processControlTags() que faz TUDO (SSML + control tags)
+- Melhorou {{slow}} handler: agora insere virgulas entre palavras para criar pausas (antes so triplicava virgulas existentes)
+- Adicionou defesa no stripSSMLForTTS() para remover tags {{}} residuais no backend
+- Reescreveu omnivoice_gpu.py com manutencao 100% automatica:
+  - Monitor em background: verifica VRAM a cada 3 min, limpa se >70%
+  - Pre-geracao: se VRAM >80%, cleanup agressivo; se >90%, deep cleanup
+  - Pos-geracao: cleanup inteligente (ja existia)
+  - Deep cleanup: a cada 5 geracoes, cleanup triplo preventivo
+  - Tudo sem botao, sem painel, 100% automatico
+
+Stage Summary:
+- Arquivos: pronunciation-optimizer.ts, page.tsx, ssml-parser.ts, omnivoice_gpu.py
+- {{slow}}...{{/slow}} agora funciona — insere pausas entre palavras
+- {{pause:500}}, {{emphasis}}, {{whisper}}, {{fast}} tambem passam a funcionar
+- GPU maintenance totalmente automatica, sem interacao humana
+- Commit: 6e5cddc

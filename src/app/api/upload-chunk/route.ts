@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminSession } from '@/lib/auth'
 
-const AUDIO_SERVER_URL = process.env.AUDIO_SERVER_URL || 'https://sorteiomax.com.br/omnivoice'
+const AUDIO_SERVER_URL = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
 const AUDIO_SERVER_API_KEY = process.env.AUDIO_SERVER_API_KEY || ''
 
 export const maxDuration = 60

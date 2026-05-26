@@ -11,7 +11,7 @@ import { stripSSMLForTTS } from '@/lib/ssml-parser'
 
 export const maxDuration = 300
 
-const HOSTGATOR_BASE = 'https://sorteiomax.com.br/omnivoice'
+const ORACLE_BASE = 'http://147.15.77.137'
 
 function createDebug() {
   const steps: { time: string; step: string; status: string; detail?: string; duration?: number }[] = []
@@ -59,7 +59,7 @@ async function downloadWithRetry(
 
 async function getTunnelUrl(debug: ReturnType<typeof createDebug>): Promise<string> {
   try {
-    const res = await fetch(`${HOSTGATOR_BASE}/get_tunnel.php`, { signal: AbortSignal.timeout(10000) })
+    const res = await fetch(`${ORACLE_BASE}/get_tunnel.php`, { signal: AbortSignal.timeout(10000) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     if (data.status !== 'online' || !data.tunnelUrl) {

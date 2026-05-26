@@ -1,12 +1,12 @@
 /**
- * Audio Server Client - uploads to shared PHP hosting (sorteiomax.com.br)
+ * Audio Server Client - uploads to Oracle VPS (147.15.77.137)
  * Replaces Vercel Blob for audio file storage.
  *
- * Flow: Upload audio → saved permanently on PHP hosting → when generating TTS,
- * fetch from hosting → re-upload to HuggingFace Space → generate speech.
+ * Flow: Upload audio → saved permanently on PHP server → when generating TTS,
+ * fetch from server → re-upload to HuggingFace Space → generate speech.
  */
 
-const AUDIO_SERVER_URL = process.env.AUDIO_SERVER_URL || 'https://sorteiomax.com.br/omnivoice'
+const AUDIO_SERVER_URL = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
 const AUDIO_SERVER_API_KEY = process.env.AUDIO_SERVER_API_KEY || 'vozpro_2024_a8f7d9e2b4c1m6n3p5q0r9s2t8u1'
 
 export interface AudioUploadResult {

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
-const AUDIO_SERVER_URL = process.env.AUDIO_SERVER_URL || 'https://sorteiomax.com.br/omnivoice'
+const AUDIO_SERVER_URL = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
 const AUDIO_SERVER_API_KEY = process.env.AUDIO_SERVER_API_KEY || 'vozpro_2024_a8f7d9e2b4c1m6n3p5q0r9s2t8u1'
 
 // GET /api/health — Diagnóstico completo do sistema
@@ -107,16 +107,27 @@ export async function GET() {
         ...phpData,
       }
 
-      // Propagar problemas do PHP
+      // Propagar problemas do PHP (filtrando falsos positivos)
       if (phpData.problemas && Array.isArray(phpData.problemas)) {
+        const tunnelOk = phpData.checks?.tunnel?.ok === true && phpData.checks?.tunnel?.url
         for (const p of phpData.problemas) {
+          // Filtrar: cloudflared não é necessário quando localtunnel está ativo
+          const isCloudflaredWarn = /cloudflared.*n[oã]o.*rodando/i.test(p)
+          if (isCloudflaredWarn && tunnelOk) continue
+          // Filtrar: nvidia-smi no Oracle (GPU fica no PC local)
+          const isNvidiaWarn = /nvidia-smi.*not found/i.test(p)
+          if (isNvidiaWarn) continue
+          // Filtrar: python_tts não rodando no Oracle (roda no PC local)
+          const isPythonTtsWarn = /python_tts.*n[oã]o|TTS.*parado|Gradio.*Parado/i.test(p)
+          if (isPythonTtsWarn) continue
           result.problemas.push(`[PHP] ${p}`)
         }
       }
 
-      // Atualizar status geral baseado no PHP
-      if (phpData.status === 'critical') result.status = 'critical'
-      else if (phpData.status === 'warning' && result.status === 'ok') result.status = 'warning'
+      // Atualizar status geral baseado no PHP (só se houver problemas reais)
+      const hasRealProblems = Array.isArray(result.problemas) && result.problemas.length > 0
+      if (phpData.status === 'critical' && hasRealProblems) result.status = 'critical'
+      else if (phpData.status === 'warning' && result.status === 'ok' && hasRealProblems) result.status = 'warning'
     } else {
       result.checks.php_server = { ok: false, status: phpRes.status }
       result.problemas.push('Servidor PHP inacessível')
@@ -149,9 +160,9 @@ export async function GET() {
 // POST /api/health?restart=true — Trigger cleanup no PHP server
 export async function POST() {
   try {
-    const cleanupRes = await fetch(`${AUDIO_SERVER_URL}/cleanup.php`, {
+    // Usa proxy interno para evitar mixed content
+    const cleanupRes = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ''}/api/cleanup`, {
       method: 'GET',
-      headers: { 'Authorization': `Bearer ${AUDIO_SERVER_API_KEY}` },
       signal: AbortSignal.timeout(15000),
     })
 

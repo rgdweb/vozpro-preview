@@ -1256,7 +1256,7 @@ export default function VozProClient() {
           // Preview: aplicar watermark SÓ se paywall está ativo E tem watermark configurado
           if (paywallEnabled && watermarkAudioPath) {
             try {
-              const previewWithWm = await applyWatermark(mixedDataUri, watermarkAudioPath, watermarkVolume)
+              const previewWithWm = await applyWatermark(mixedDataUri, toProxyAudioUrl(watermarkAudioPath), watermarkVolume)
               setPreviewUrl(previewWithWm)
               setMixedAudioUrl(previewWithWm)
             } catch { setMixedAudioUrl(mixedDataUri) }
@@ -1272,7 +1272,7 @@ export default function VozProClient() {
           // Aplicar watermark no preview se paywall ativo E tem marca d'água
           if (paywallEnabled && watermarkAudioPath) {
             try {
-              const previewWithWm = await applyWatermark(finalAudioUrl, watermarkAudioPath, watermarkVolume)
+              const previewWithWm = await applyWatermark(finalAudioUrl, toProxyAudioUrl(watermarkAudioPath), watermarkVolume)
               setPreviewUrl(previewWithWm)
             } catch {}
           }
@@ -1285,7 +1285,7 @@ export default function VozProClient() {
         // Preview: aplicar watermark SÓ se paywall está ativo E tem watermark configurado
         if (paywallEnabled && watermarkAudioPath) {
           try {
-            const previewWithWm = await applyWatermark(finalAudioUrl, watermarkAudioPath, watermarkVolume)
+            const previewWithWm = await applyWatermark(finalAudioUrl, toProxyAudioUrl(watermarkAudioPath), watermarkVolume)
             setPreviewUrl(previewWithWm)
           } catch (wmErr) {
             console.warn('[VozPro] Watermark failed:', wmErr)

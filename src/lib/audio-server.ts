@@ -27,15 +27,11 @@ export function fixAudioServerUrl(url: string): string {
   // Se aponta pro sorteiomax (morto), extrair path e remontar com Oracle
   const sorteiomaxMatch = url.match(/sorteiomax\.com\.br\/omnivoice\/(.+)/i)
   if (sorteiomaxMatch) {
-    const fixedUrl = `${AUDIO_SERVER_URL}/${sorteiomaxMatch[1]}`
-    console.log(`[AudioServer] URL corrigida: ${url} -> ${fixedUrl}`)
-    return fixedUrl
+    return `${AUDIO_SERVER_URL}/${sorteiomaxMatch[1]}`
   }
   // Se e caminho relativo (comeca com /), prefixar com Oracle base
   if (url.startsWith('/') && !url.startsWith('//')) {
-    const fixedUrl = `${AUDIO_SERVER_URL}${url}`
-    console.log(`[AudioServer] URL relativa corrigida: ${url} -> ${fixedUrl}`)
-    return fixedUrl
+    return `${AUDIO_SERVER_URL}${url}`
   }
   return url
 }

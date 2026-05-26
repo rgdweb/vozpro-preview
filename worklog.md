@@ -354,3 +354,49 @@ Stage Summary:
 - Antes: validacao usava variationForm (estado async) → falhava na 1a tentativa
 - Depois: validacao checa pendingVoiceFileData tambem; body usa dados do upload diretamente
 - Resultado: salvar nova variacao com corte funciona na 1a tentativa
+
+---
+Task ID: 6
+Agent: Main
+Task: Fix mixed-content e preview de voz no site principal
+
+Work Log:
+- cleanupAudioServer() era chamado do navegador (HTTPS) → fetch direto ao http://147.15.77.137 → bloqueado mixed-content
+- Preview de voz e trilha no site principal usavam URL direta http:// → bloqueado pelo browser
+- mixAudioClientSide fazia fetch direto da track URL → tambem bloqueado
+- tunnel-generate: refAudioUrl podia apontar pro sorteiomax morto
+
+- Criado /api/cleanup (server-side proxy) para limpeza PHP
+- Adicionado toProxyAudioUrl() no page.tsx (mesma logica do admin)
+- Todos os VoicePreviewButton de voz agora usam proxy (3 locais)
+- Todos os VoicePreviewButton de trilha agora usam proxy (3 locais)
+- mixAudioClientSide agora recebe URL via proxy
+- refAudioUrl para tunnel-generate usa fixAudioServerUrl()
+- tunnel-generate: adicionado fixAudioServerUrl + logging melhorado
+
+Stage Summary:
+- Commit 825647c: mixed-content e preview de voz no site principal
+- Commit d69471e: tunnel-generate aplica fixAudioServerUrl + logging
+
+---
+Task ID: 7
+Agent: Main
+Task: Fix diagnostico_auto_restart.py acumulando janelas CMD
+
+Work Log:
+- do_restart() fazia taskkill /F /IM python.exe → matava TODOS os python.exe incluindo o proprio script de monitoramento
+- Quando o monitor morria, se algo reiniciasse (Task Scheduler, .bat), abria nova janela CMD
+- A cada ciclo de restart automatico (60 min idle), nova janela se acumulava
+- Alem disso, subprocess.Popen para reiniciar Gradio/cloudflared podia abrir janelas visiveis
+
+- Criado MY_PID = os.getpid() para proteger o proprio processo
+- Nova funcao _kill_gradio_only(): mata APENAS o PID na porta do Gradio (netstat + taskkill /PID)
+- Adicionado _get_hidden_startupinfo() com STARTUPINFO(SW_HIDE) para esconder janelas no Windows
+- subprocess.Popen agora usa startupinfo para nao abrir janelas CMD extras
+- iniciar.bat (linha 9) tem o mesmo bug (taskkill /F /IM python.exe) mas nao foi modificado (so e executado manualmente)
+
+Stage Summary:
+- Arquivo: local-server/diagnostico_auto_restart.py e download/diagnostico_auto_restart.py
+- Antes: do_restart() matava o proprio script + abria janelas visiveis a cada restart
+- Depois: mata so o Gradio (PID especifico), monitor sobrevive, janelas escondidas
+- NOTA: usuario precisa copiar o novo script para o PC GPU e fechar as janelas acumuladas manualmente

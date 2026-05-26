@@ -43,6 +43,19 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 
+# PID do proprio processo (para nao se matar no restart)
+MY_PID = os.getpid()
+
+# No Windows, subprocess.STARTUPINFO para esconder janelas
+def _get_hidden_startupinfo():
+    """Retorna STARTUPINFO para esconder janela no Windows."""
+    if sys.platform == 'win32':
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+        return si
+    return None
+
 # ============================================
 # CONFIGURAÇÃO - Edite conforme necessário
 # ============================================
@@ -628,6 +641,33 @@ def check_queue_status() -> Dict:
         pass
     return result
 
+def _kill_gradio_only():
+    """Mata APENAS o servidor Gradio (python na porta 7861), sem matar este script.
+    Antes fazia 'taskkill /F /IM python.exe' que matava TODOS os python incluindo o proprio
+    monitoramento, causando acumulo de janelas CMD a cada restart."""
+    log("Parando servidor Gradio (somente PID na porta 7861)...", "RESTART")
+
+    # Encontrar PID escutando na porta do Gradio
+    code, output = run_cmd(f'netstat -ano | findstr ":{CONFIG["gradio_port"]}"')
+    killed_any = False
+    for line in output.splitlines():
+        if "LISTENING" in line:
+            parts = line.strip().split()
+            if parts:
+                pid = parts[-1]
+                if pid and int(pid) != MY_PID:
+                    log(f"  Matando PID {pid} (porta {CONFIG['gradio_port']})")
+                    run_cmd(f"taskkill /F /PID {pid}", 10)
+                    killed_any = True
+                elif int(pid) == MY_PID:
+                    log(f"  Pulando PID {pid} (este script de monitoramento)")
+
+    if not killed_any:
+        log("  Nenhum processo encontrado na porta do Gradio (já estava parado?)", "WARN")
+
+    return killed_any
+
+
 def do_restart():
     """Executa o restart completo do servidor."""
     log("INICIANDO RESTART AUTOMÁTICO!", "RESTART")
@@ -655,9 +695,8 @@ def do_restart():
     run_cmd("taskkill /F /IM cloudflared.exe", 10)
     time.sleep(3)
 
-    # 3. Matar Python/Gradio
-    log("Parando servidor Gradio...", "RESTART")
-    run_cmd("taskkill /F /IM python.exe", 10)
+    # 3. Matar APENAS o Gradio (NAO matar todos os python.exe!)
+    _kill_gradio_only()
     time.sleep(3)
 
     # 4. Limpar cache PyTorch (se possível via subprocess)
@@ -669,13 +708,16 @@ def do_restart():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     server_script = os.path.join(script_dir, "omnivoice_server.py")
 
+    startupinfo = _get_hidden_startupinfo()
+
     if os.path.exists(server_script):
-        # Iniciar em background
+        # Iniciar em background SEM abrir janela CMD
         subprocess.Popen(
             ["python", server_script],
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
             stdout=open(os.path.join(script_dir, "gradio.log"), "a"),
             stderr=open(os.path.join(script_dir, "gradio_error.log"), "a"),
+            startupinfo=startupinfo,
         )
         log("Servidor Gradio iniciado em background", "RESTART")
     else:
@@ -687,7 +729,7 @@ def do_restart():
     time.sleep(30)
 
     # Verificar se subiu
-    code, output = run_cmd('netstat -ano | findstr ":7861"')
+    code, output = run_cmd(f'netstat -ano | findstr ":{CONFIG["gradio_port"]}"')
     if "LISTENING" in output:
         log("Servidor Gradio está rodando!", "OK")
     else:
@@ -700,6 +742,7 @@ def do_restart():
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
         stdout=open(os.path.join(script_dir, "tunnel.log"), "a"),
         stderr=open(os.path.join(script_dir, "tunnel_error.log"), "a"),
+        startupinfo=startupinfo,
     )
     time.sleep(10)
 

@@ -17,7 +17,7 @@ import {
   AudioWaveform, LogOut, Plus, Trash2, Edit, Upload, Music, Mic,
   Loader2, RefreshCw, Volume2, FileAudio, CheckCircle2, Settings2,
   FolderOpen, ChevronLeft, FolderPlus, Folder, Play, Pause, Users, UserPlus, Shield,
-  UploadCloud, X, Download, VolumeX, CreditCard, Chrome, DollarSign, Tag
+  UploadCloud, X, Download, VolumeX, CreditCard, Chrome, DollarSign, Tag, Wrench
 } from 'lucide-react'
 import { toast } from 'sonner'
 import AudioPlayer from '@/components/audio-player'
@@ -541,6 +541,8 @@ function HealthSection() {
   const [healthData, setHealthData] = useState<Record<string, unknown> | null>(null)
   const [loading, setLoading] = useState(false)
   const [lastCheck, setLastCheck] = useState<string>('')
+  const [maintGpu, setMaintGpu] = useState<Record<string, unknown> | null>(null)
+  const [maintLoading, setMaintLoading] = useState(false)
 
   const checkHealth = async () => {
     setLoading(true)
@@ -549,6 +551,11 @@ function HealthSection() {
       const data = await res.json()
       setHealthData(data)
       setLastCheck(new Date().toLocaleTimeString('pt-BR'))
+      // Tambem buscar GPU status em paralelo
+      fetch('/api/maintenance?action=gpu-status')
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d) setMaintGpu(d) })
+        .catch(() => {})
     } catch {
       setHealthData({ error: 'Erro ao conectar' })
     } finally {
@@ -718,6 +725,114 @@ function HealthSection() {
               </Card>
             )}
           </div>
+
+          {/* === MANUTENCAO AO VIVO === */}
+          <Card className="bg-white/5 border-amber-500/30">
+            <CardContent className="py-3 px-4">
+              <p className="text-xs font-medium text-amber-300 mb-3">🔧 Manutenção ao Vivo</p>
+              <div className="space-y-3">
+                {/* GPU Status */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-slate-400">GPU (VRAM)</span>
+                    {maintGpu && (
+                      <span className={`text-xs ${maintGpu.vram_percent > 85 ? 'text-red-400' : maintGpu.vram_percent > 60 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                        {maintGpu.gpu || 'N/A'} — {maintGpu.vram_alloc_gb}/{maintGpu.vram_total_gb}GB ({maintGpu.vram_percent}%)
+                      </span>
+                    )}
+                    {!maintGpu && <span className="text-xs text-slate-500">Verificando...</span>}
+                  </div>
+                  {maintGpu && maintGpu.vram_total_gb > 0 && (
+                    <div className="w-full bg-slate-700 rounded-full h-1.5">
+                      <div
+                        className={`h-1.5 rounded-full ${maintGpu.vram_percent > 85 ? 'bg-red-500' : maintGpu.vram_percent > 60 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                        style={{ width: `${Math.min(100, maintGpu.vram_percent)}%` }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Botoes de acao */}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10 text-xs h-7"
+                    disabled={maintLoading}
+                    onClick={async () => {
+                      setMaintLoading(true)
+                      try {
+                        const res = await fetch('/api/maintenance?action=gpu-cleanup', { method: 'POST' })
+                        const data = await res.json()
+                        if (data.status === 'ok') {
+                          toast.success(`GPU limpa! VRAM: ${data.vram_alloc_gb}GB alloc / ${data.vram_reserved_gb}GB reservado`)
+                          // Atualizar status
+                          const statusRes = await fetch('/api/maintenance?action=gpu-status')
+                          if (statusRes.ok) setMaintGpu(await statusRes.json())
+                        } else {
+                          toast.error(data.error || 'Erro ao limpar GPU')
+                        }
+                      } catch { toast.error('Falha na comunicacao com GPU') }
+                      setMaintLoading(false)
+                    }}
+                  >
+                    {maintLoading ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Wrench className="w-3 h-3 mr-1" />}
+                    Limpar GPU
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-blue-500/50 text-blue-400 hover:bg-blue-500/10 text-xs h-7"
+                    disabled={maintLoading}
+                    onClick={async () => {
+                      setMaintLoading(true)
+                      try {
+                        const res = await fetch('/api/maintenance?action=oracle-cleanup', { method: 'POST' })
+                        const data = await res.json()
+                        if (res.ok) {
+                          toast.success(`Oracle limpo! ${data.chunks_removidos || 0} chunks, ${data.generated_removidos || 0} arquivos gerados removidos`)
+                          checkHealth() // recarregar health data
+                        } else {
+                          toast.error(data.error || 'Erro ao limpar Oracle')
+                        }
+                      } catch { toast.error('Falha na comunicacao com Oracle') }
+                      setMaintLoading(false)
+                    }}
+                  >
+                    <Trash2 className="w-3 h-3 mr-1" />
+                    Limpar Oracle
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-slate-500/50 text-slate-300 hover:bg-slate-500/10 text-xs h-7"
+                    disabled={maintLoading}
+                    onClick={async () => {
+                      setMaintLoading(true)
+                      try {
+                        const res = await fetch('/api/maintenance?action=gpu-status')
+                        if (res.ok) {
+                          setMaintGpu(await res.json())
+                          toast.success('Status GPU atualizado')
+                        } else {
+                          toast.error('GPU inacessível via tunnel')
+                        }
+                      } catch { toast.error('Falha ao verificar GPU') }
+                      setMaintLoading(false)
+                    }}
+                  >
+                    <RefreshCw className="w-3 h-3 mr-1" />
+                    Atualizar Status
+                  </Button>
+                </div>
+
+                {/* Tunnel info */}
+                {maintGpu && !maintGpu.tunnel_ok && (
+                  <p className="text-xs text-red-400">⚠️ GPU inacessível via tunnel. Verifique se o cloudflared está rodando no PC.</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Logs recentes */}
           {healthData.checks?.php_server?.checks?.logs_recentes?.length > 0 && (

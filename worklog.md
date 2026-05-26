@@ -314,3 +314,24 @@ Task: Investigar audios que mostram --s e não tocam no preview do painel admin
 
 Work Log:
 - Investigando...
+
+---
+Task ID: 3
+Agent: Main
+Task: Fix preview e duracao de audio que mostravam --s e nao tocavam
+
+Work Log:
+- Investigado: VarDuration usava new Audio(url) direto — falhava com URLs antigas/mortas
+- toggleVoicePreview tambem usava URL direta sem proxy
+- toggleTrackPreview (preview de trilhas) mesma questao
+- Edit ja usava /api/proxy-audio (por isso funcionava)
+- Criada funcao toProxyAudioUrl() helper em admin/page.tsx
+- VarDuration, toggleVoicePreview, toggleTrackPreview agora usam proxy
+
+Stage Summary:
+- Commit 6a8949b: preview e duracao de audio usam proxy-audio
+- Usuario confirmou: "ok resolveu tbm"
+
+RESUMO DA SESSAO COMPLETA:
+- 3 commits feitos: bce0a52 (proxy-audio edge->nodejs), 7d78f31 (sorteiomax cleanup), 6a8949b (audio preview proxy)
+- Problemas resolvidos: proxy-audio 403, painel saude critico (6 URLs sorteiomax morto), alerts falsos health.php, audio preview --s

@@ -18,6 +18,23 @@ export interface AudioUploadResult {
 }
 
 /**
+ * Corrige URLs de audio que ainda apontam pro sorteiomax.com.br (dominio morto).
+ * O upload.php no Oracle ainda retorna URLs com sorteiomax hard-coded.
+ * Extrai o path (/audios/ref/arquivo.mp3) e monta a URL correta do Oracle.
+ */
+export function fixAudioServerUrl(url: string): string {
+  if (!url || typeof url !== 'string') return url
+  // Se aponta pro sorteiomax (morto), extrair path e remontar com Oracle
+  const sorteiomaxMatch = url.match(/sorteiomax\.com\.br\/omnivoice\/(.+)/i)
+  if (sorteiomaxMatch) {
+    const fixedUrl = `${AUDIO_SERVER_URL}/${sorteiomaxMatch[1]}`
+    console.log(`[AudioServer] URL corrigida: ${url} -> ${fixedUrl}`)
+    return fixedUrl
+  }
+  return url
+}
+
+/**
  * Upload a file to the PHP audio server.
  */
 export async function uploadToAudioServer(
@@ -52,7 +69,7 @@ export async function uploadToAudioServer(
 
   return {
     success: true,
-    url: data.url,
+    url: fixAudioServerUrl(data.url as string),
     filename: data.arquivo,
     size: data.tamanho || 0,
     tipo: data.tipo || tipo,

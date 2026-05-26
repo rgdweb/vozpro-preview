@@ -489,13 +489,20 @@ const INSTRUCT_OPTIONS = [
 // ============================================================
 // Helper: Converte URL de audio do servidor para URL do proxy
 // Evita CORS/mixed-content: sempre passa pelo /api/proxy-audio
+// Tambem corrige URLs do sorteiomax.com.br (dominio morto) para Oracle
 // ============================================================
 function toProxyAudioUrl(url: string): string {
   if (!url) return ''
   // Se ja e nosso proxy, nao duplicar
   if (url.startsWith('/api/proxy-audio')) return url
-  // Se e URL absoluta do servidor de audio, usar proxy
-  return `/api/proxy-audio?url=${encodeURIComponent(url)}`
+  // Corrigir URLs do sorteiomax (morto) para Oracle
+  let resolvedUrl = url
+  const sorteiomaxMatch = url.match(/sorteiomax\.com\.br\/omnivoice\/(.+)/i)
+  if (sorteiomaxMatch) {
+    resolvedUrl = `http://147.15.77.137/${sorteiomaxMatch[1]}`
+  }
+  // Usar proxy para qualquer URL absoluta
+  return `/api/proxy-audio?url=${encodeURIComponent(resolvedUrl)}`
 }
 
 // ============================================================
@@ -1574,7 +1581,7 @@ export default function AdminDashboard() {
     // Carregar audio via proxy para evitar CORS
     setLoadingExistingAudio(true)
     try {
-      const proxyUrl = `/api/proxy-audio?url=${encodeURIComponent(audioUrl)}`
+      const proxyUrl = toProxyAudioUrl(audioUrl)
       const res = await fetch(proxyUrl)
 
       if (!res.ok) {
@@ -3045,7 +3052,7 @@ export default function AdminDashboard() {
                                       )}
                                       <input type="file" accept="audio/*" onChange={(e) => handleQuickUploadAudio(v.id, e)} className="hidden" id={`quick-audio-${selectedVoiceCategory}-${v.id}`} />
                                       {v.refAudioServerUrl && (
-                                        <a href={v.refAudioServerUrl} download={v.refAudioName || undefined} target="_blank" rel="noopener noreferrer" className="h-7 px-2 text-xs gap-1 inline-flex items-center text-blue-400 hover:text-blue-300 hover:bg-blue-900/30 rounded-md transition-colors" title="Baixar áudio de referência"><Download className="w-3 h-3" /></a>
+                                        <a href={toProxyAudioUrl(v.refAudioServerUrl)} download={v.refAudioName || undefined} target="_blank" rel="noopener noreferrer" className="h-7 px-2 text-xs gap-1 inline-flex items-center text-blue-400 hover:text-blue-300 hover:bg-blue-900/30 rounded-md transition-colors" title="Baixar áudio de referência"><Download className="w-3 h-3" /></a>
                                       )}
                                       <Button variant="ghost" size="sm" onClick={() => document.getElementById(`quick-audio-${selectedVoiceCategory}-${v.id}`)?.click()} className={`h-7 px-2 text-xs gap-1 ${(v.refAudioPath || v.refAudioServerUrl) ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30' : 'text-amber-400 hover:text-amber-300 hover:bg-amber-900/30'}`}><Upload className="w-3 h-3" />{(v.refAudioPath || v.refAudioServerUrl) ? 'Update' : 'Add'}</Button>
                                       <Button variant="ghost" size="sm" onClick={() => handleEditVariationWithAudio(v)} className="h-7 px-2 text-xs text-slate-400 hover:text-white hover:bg-slate-700 gap-1"><Edit className="w-3 h-3" />Editar</Button>
@@ -3100,7 +3107,7 @@ export default function AdminDashboard() {
                               </div>
                               <div className="flex items-center gap-1">
                                 {(() => { const dv = voice.variations.find(v => v.active !== false && v.refAudioServerUrl); return dv ? (
-                                  <a href={dv.refAudioServerUrl} download={dv.refAudioName || undefined} target="_blank" rel="noopener noreferrer" className="h-8 w-8 rounded-full flex items-center justify-center text-blue-400 hover:text-blue-300 hover:bg-blue-900/30 transition-colors" title={`Baixar áudio: ${dv.label}`}><Download className="w-3.5 h-3.5" /></a>
+                                  <a href={toProxyAudioUrl(dv.refAudioServerUrl)} download={dv.refAudioName || undefined} target="_blank" rel="noopener noreferrer" className="h-8 w-8 rounded-full flex items-center justify-center text-blue-400 hover:text-blue-300 hover:bg-blue-900/30 transition-colors" title={`Baixar áudio: ${dv.label}`}><Download className="w-3.5 h-3.5" /></a>
                                 ) : null })()}
                                 <Switch checked={voice.active} onCheckedChange={() => handleToggleVoice(voice)} className="scale-75" />
                                 <Button variant="ghost" size="icon" onClick={() => { setEditingVoiceId(voice.id); setVoiceForm({ name: voice.name, description: voice.description, gender: voice.gender, age: voice.age, accent: voice.accent, pitch: voice.pitch, category: voice.category || '' }); setVoiceDialogOpen(true) }} className="text-slate-400 hover:text-white h-8 w-8"><Edit className="w-3.5 h-3.5" /></Button>

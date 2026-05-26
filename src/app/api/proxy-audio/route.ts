@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 
 export const runtime = 'edge'
 
+const AUDIO_SERVER_URL = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
+
 /**
  * Proxy de áudio para evitar CORS ao carregar áudios do servidor PHP
  * no painel admin (waveform preview, trim, etc)
@@ -14,7 +16,13 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const res = await fetch(url, {
+    // Se URL for path relativo (/audios/...), converter para URL completa do Oracle
+    let fullUrl = url
+    if (url.startsWith('/')) {
+      fullUrl = AUDIO_SERVER_URL + url
+    }
+
+    const res = await fetch(fullUrl, {
       headers: {
         'Accept': 'audio/*, */*',
       },

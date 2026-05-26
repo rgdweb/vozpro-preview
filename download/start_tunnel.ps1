@@ -59,7 +59,7 @@ if ($url) {
 
     try {
         $resp = Invoke-RestMethod -Uri "$serverUpdate`?auth=$auth&url=$url" -TimeoutSec 15
-        if ($resp.ok) {
+        if ($resp.ok -or $resp.status -eq 'ok') {
             Write-Host "[OK] Servidor atualizado automaticamente!" -ForegroundColor Green
         } else {
             Write-Host "[ERRO] $($resp.error)" -ForegroundColor Red

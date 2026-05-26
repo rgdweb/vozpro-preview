@@ -3860,7 +3860,7 @@ export default function AdminDashboard() {
                       </div>
                     </label>
                     {watermarkPath && (
-                      <audio controls src={watermarkPath} className="h-8 w-32" />
+                      <audio controls src={toProxyAudioUrl(watermarkPath)} className="h-8 w-32" />
                     )}
                   </div>
 

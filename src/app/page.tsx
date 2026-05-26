@@ -1253,8 +1253,9 @@ export default function VozProClient() {
           )
           setAudioUrl(finalAudioUrl) // voz limpa (sem trilha)
           setCleanMixedUrl(mixedDataUri) // voz + trilha SEM watermark (para download)
-          // Preview: aplicar watermark SÓ se paywall está ativo E tem watermark configurado
-          if (paywallEnabled && watermarkAudioPath) {
+          // Preview: aplicar watermark SÓ se paywall ativo E usuario nao tem gratis E nao isento
+          const needWm = paywallEnabled && watermarkAudioPath && freeDownloads <= 0 && !paymentExempt
+          if (needWm) {
             try {
               const previewWithWm = await applyWatermark(mixedDataUri, toProxyAudioUrl(watermarkAudioPath), watermarkVolume)
               setPreviewUrl(previewWithWm)
@@ -1269,8 +1270,8 @@ export default function VozProClient() {
           console.error('[VozPro] Client-side mixing failed:', mixErr)
           setAudioUrl(finalAudioUrl)
           setCleanMixedUrl(null)
-          // Aplicar watermark no preview se paywall ativo E tem marca d'água
-          if (paywallEnabled && watermarkAudioPath) {
+          // Aplicar watermark no preview se paywall ativo E sem gratis E sem isencao
+          if (paywallEnabled && watermarkAudioPath && freeDownloads <= 0 && !paymentExempt) {
             try {
               const previewWithWm = await applyWatermark(finalAudioUrl, toProxyAudioUrl(watermarkAudioPath), watermarkVolume)
               setPreviewUrl(previewWithWm)
@@ -1282,8 +1283,8 @@ export default function VozProClient() {
         // No track - just voice
         setAudioUrl(finalAudioUrl) // limpo (pra download)
         setCleanMixedUrl(null) // sem trilha = sem mix limpo
-        // Preview: aplicar watermark SÓ se paywall está ativo E tem watermark configurado
-        if (paywallEnabled && watermarkAudioPath) {
+        // Preview: aplicar watermark SÓ se paywall ativo E usuario nao tem gratis E nao isento
+        if (paywallEnabled && watermarkAudioPath && freeDownloads <= 0 && !paymentExempt) {
           try {
             const previewWithWm = await applyWatermark(finalAudioUrl, toProxyAudioUrl(watermarkAudioPath), watermarkVolume)
             setPreviewUrl(previewWithWm)
@@ -1368,7 +1369,9 @@ export default function VozProClient() {
   }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs, voiceMode, uploadedVoiceUrl, paywallEnabled, watermarkAudioPath, watermarkVolume])
 
   // Get the active audio URL
-  const activeAudioUrl = previewUrl || mixedAudioUrl || audioUrl
+  // Se o usuario tem downloads gratis ou e isento, NAO mostra watermark no preview
+  const shouldShowWatermark = paywallEnabled && watermarkAudioPath && freeDownloads <= 0 && !paymentExempt
+  const activeAudioUrl = shouldShowWatermark ? (previewUrl || mixedAudioUrl || audioUrl) : (mixedAudioUrl || audioUrl)
 
   // Detectar duração do áudio quando carregar
   useEffect(() => {

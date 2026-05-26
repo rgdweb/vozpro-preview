@@ -487,13 +487,26 @@ const INSTRUCT_OPTIONS = [
 ]
 
 // ============================================================
+// Helper: Converte URL de audio do servidor para URL do proxy
+// Evita CORS/mixed-content: sempre passa pelo /api/proxy-audio
+// ============================================================
+function toProxyAudioUrl(url: string): string {
+  if (!url) return ''
+  // Se ja e nosso proxy, nao duplicar
+  if (url.startsWith('/api/proxy-audio')) return url
+  // Se e URL absoluta do servidor de audio, usar proxy
+  return `/api/proxy-audio?url=${encodeURIComponent(url)}`
+}
+
+// ============================================================
 // Componente: Mostra duracao do audio da variacao com indicador verde
 // ============================================================
 function VarDuration({ url }: { url: string }) {
   const [dur, setDur] = useState<number | null>(null)
   useEffect(() => {
     if (!url) return
-    const a = new Audio(url)
+    const proxyUrl = toProxyAudioUrl(url)
+    const a = new Audio(proxyUrl)
     const onLoaded = () => { setDur(a.duration); URL.revokeObjectURL(a.src) }
     const onError = () => { setDur(-1); URL.revokeObjectURL(a.src) }
     a.addEventListener('loadedmetadata', onLoaded)
@@ -1101,7 +1114,8 @@ export default function AdminDashboard() {
       trackPreviewAudioRef.current?.pause()
       trackPreviewAudioRef.current = null
       if (track.audioPath) {
-        const audio = new Audio(track.audioPath)
+        const proxyUrl = toProxyAudioUrl(track.audioPath)
+        const audio = new Audio(proxyUrl)
         audio.play().catch(() => {})
         audio.onended = () => setPreviewingTrackId(null)
         trackPreviewAudioRef.current = audio
@@ -1120,7 +1134,8 @@ export default function AdminDashboard() {
       voicePreviewAudioRef.current = null
       const audioUrl = variation.refAudioServerUrl || variation.refAudioPath
       if (audioUrl) {
-        const audio = new Audio(audioUrl)
+        const proxyUrl = toProxyAudioUrl(audioUrl)
+        const audio = new Audio(proxyUrl)
         audio.play().catch(() => {})
         audio.onended = () => setPreviewingVoiceVarId(null)
         voicePreviewAudioRef.current = audio

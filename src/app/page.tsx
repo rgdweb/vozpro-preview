@@ -1363,6 +1363,19 @@ export default function VozProClient() {
   const shouldShowWatermark = paywallEnabled && watermarkAudioPath && freeDownloads <= 0 && !paymentExempt
   const activeAudioUrl = shouldShowWatermark ? (previewUrl || mixedAudioUrl || audioUrl) : (mixedAudioUrl || audioUrl)
 
+  // Quando freeDownloads chega a 0, aplicar watermark em tempo real no audio existente
+  // (evita ter que atualizar a pagina pra marca d'agua aparecer)
+  useEffect(() => {
+    if (!shouldShowWatermark) return
+    if (previewUrl) return // ja tem watermark
+    const source = mixedAudioUrl || audioUrl
+    if (!source || !watermarkAudioPath) return
+    // Aplicar watermark de forma nao-bloqueante
+    applyWatermark(source, toProxyAudioUrl(watermarkAudioPath), watermarkVolume)
+      .then(wmUrl => { if (wmUrl) setPreviewUrl(wmUrl) })
+      .catch(() => {})
+  }, [shouldShowWatermark, mixedAudioUrl, audioUrl, watermarkAudioPath, watermarkVolume, previewUrl])
+
   // Detectar duração do áudio quando carregar
   useEffect(() => {
     const el = resultAudioRef.current
@@ -2424,6 +2437,7 @@ export default function VozProClient() {
                         src={mixedAudioUrl || audioUrl || undefined}
                         className="w-full relative z-10"
                         controls
+                        controlsList="nodownload"
                         autoPlay
                       />
                     </div>
@@ -2849,6 +2863,7 @@ export default function VozProClient() {
                 src={mixedAudioUrl || audioUrl || undefined}
                 className="w-full relative z-10"
                 controls
+                controlsList="nodownload"
                 autoPlay
               />
             </div>

@@ -2531,7 +2531,7 @@ export default function VozProClient() {
                             const el = resultAudioRef.current
                             if (el) {
                               const wasPlaying = !el.paused
-                              el.src = audioUrl
+                              el.src = previewUrl || audioUrl
                               if (wasPlaying) el.play().catch(() => {})
                             }
                           }}
@@ -2906,7 +2906,7 @@ export default function VozProClient() {
               <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
                 <Button variant="ghost" size="sm" className="h-7 px-3 text-xs" onClick={() => { const a = resultAudioRef.current; if (a) { a.src = mixedAudioUrl; a.play().catch(() => {}) } }}>Com trilha</Button>
                 <span className="text-slate-600">|</span>
-                <Button variant="ghost" size="sm" className="h-7 px-3 text-xs" onClick={() => { const a = resultAudioRef.current; if (a) { a.src = audioUrl; a.play().catch(() => {}) } }}>Somente voz</Button>
+                <Button variant="ghost" size="sm" className="h-7 px-3 text-xs" onClick={() => { const a = resultAudioRef.current; if (a) { a.src = previewUrl || audioUrl; a.play().catch(() => {}) } }}>Somente voz</Button>
               </div>
             )}
           </div>

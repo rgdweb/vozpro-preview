@@ -101,14 +101,26 @@ async function callNativeGenerate(
       signal: AbortSignal.timeout(180000),
     })
 
-    const result: NativeResult = await res.json()
+    const responseText = await res.text()
+    debug.log('Native API', 'info', `HTTP ${res.status} (${responseText.length} bytes)`)  
+
+    // Log primeiros 500 chars da resposta bruta pra debug
+    debug.log('Native API Raw', res.ok ? 'info' : 'error', responseText.substring(0, 500))
+
+    let result: NativeResult
+    try {
+      result = JSON.parse(responseText)
+    } catch {
+      debug.log('Native API', 'error', `Resposta nao e JSON valido: ${responseText.substring(0, 200)}`)
+      return null
+    }
 
     if (result.status === 'ok') {
       debug.log('Native API', 'ok', `${result.duration}s gerado em ${result.generation_time}s (RTF=${result.rtf})`)
       return result
     }
 
-    debug.log('Native API', 'error', result.error || 'Erro desconhecido')
+    debug.log('Native API', 'error', result.error || `status=${result.status}, sem campo error`)
     return null
   } catch (err) {
     debug.log('Native API', 'error', err instanceof Error ? err.message : String(err))

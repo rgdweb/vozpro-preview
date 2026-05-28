@@ -188,7 +188,14 @@ async function streamResult(
           debug.log('SSE Stream', 'ok', 'Evento COMPLETE recebido!')
           try {
             const resultData = JSON.parse(eventData)
+            // Log cru do Gradio pra debug quando falha
+            const rawSummary = Array.isArray(resultData)
+              ? `[array ${resultData.length} itens] item0=${resultData[0] === null ? 'null' : typeof resultData[0]} item1=${JSON.stringify(resultData[1]).substring(0, 200)}`
+              : `${typeof resultData}: ${JSON.stringify(resultData).substring(0, 300)}`
+            debug.log('Gradio Raw', 'info', rawSummary)
+
             if (!Array.isArray(resultData) || resultData.length < 2) {
+              debug.log('SSE Stream', 'error', 'Formato inesperado (nao e array ou length < 2)')
               return { audioUrl: null, error: 'Formato inesperado' }
             }
             const audioOutput = resultData[0]
@@ -201,9 +208,12 @@ async function streamResult(
               return { audioUrl, error: null, gradioMessage }
             }
             // Audio null = Gradio nao gerou. gradioMessage tem o motivo real.
-            debug.log('SSE Stream', 'error', `Gradio: ${gradioMessage}`)
+            debug.log('SSE Stream', 'error', `Gradio sem audio: ${gradioMessage}`)
             return { audioUrl: null, error: `GPU: ${gradioMessage}`, gradioMessage }
-          } catch { return { audioUrl: null, error: 'Parse error' } }
+          } catch (parseErr) {
+            debug.log('SSE Stream', 'error', `Parse falhou: ${parseErr instanceof Error ? parseErr.message : String(parseErr)} | raw: ${eventData.substring(0, 300)}`)
+            return { audioUrl: null, error: 'Parse error' }
+          }
         }
 
         if (eventType === 'error') {

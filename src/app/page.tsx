@@ -1098,7 +1098,7 @@ export default function VozProClient() {
 
         // Chamar Oracle PHP direto (bypass Vercel — zero timeout, zero custo)
         const oracleUrl = process.env.NEXT_PUBLIC_AUDIO_SERVER_URL || 'http://147.15.77.137'
-        res = await fetch(`${oracleUrl}/omnivoice/tunnel-generate.php`, {
+        res = await fetch(`${oracleUrl}/tunnel-generate.php`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

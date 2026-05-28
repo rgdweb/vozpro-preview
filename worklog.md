@@ -1,3 +1,24 @@
+---
+Task ID: 1
+Agent: Main Agent
+Task: Deploy tunnel-generate.php no Oracle VPS e corrigir path do frontend
+
+Work Log:
+- Conectou ao Oracle VPS (147.15.77.137) via SSH com paramiko (user: ubuntu)
+- Verificou estrutura do servidor: nginx root = /var/www/omnivoice (sem prefixo /omnivoice/)
+- Confirmou API_KEY no config.php bate com a do generate-token Vercel
+- Upload do tunnel-generate.php via SFTP (tmp -> sudo cp -> chown www-data)
+- Teste local: http://127.0.0.1/tunnel-generate.php -> 405 (PHP rodando)
+- Teste externo: sem token -> 401, com token -> 200 + audio base64 (SUCESSO!)
+- Corrigiu path no tunnel-generate.php: get_tunnel.php de /omnivoice/ para / (sem prefixo)
+- Corrigiu frontend page.tsx linha 1101: removido /omnivoice/ do path
+
+Stage Summary:
+- tunnel-generate.php部署完成 no Oracle: /var/www/omnivoice/tunnel-generate.php
+- Path correto: http://147.15.77.137/tunnel-generate.php (SEM /omnivoice/)
+- Frontend atualizado: ${oracleUrl}/tunnel-generate.php
+- End-to-end test passed: Browser -> Oracle PHP -> Tunnel -> GPU PC -> Audio returned
+
 # OmniVoice TTS — Worklog Completo
 
 ---

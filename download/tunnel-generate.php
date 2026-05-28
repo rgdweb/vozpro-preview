@@ -97,7 +97,7 @@ if (empty($tunnelUrl)) {
 
 if (empty($tunnelUrl)) {
     // Fallback: chamar get_tunnel.php localmente
-    $tunnelResp = @file_get_contents('http://127.0.0.1/omnivoice/get_tunnel.php');
+    $tunnelResp = @file_get_contents('http://127.0.0.1/get_tunnel.php');
     if ($tunnelResp) {
         $tunnelData = json_decode($tunnelResp, true);
         if ($tunnelData && ($tunnelData['status'] ?? '') === 'online' && !empty($tunnelData['tunnelUrl'])) {

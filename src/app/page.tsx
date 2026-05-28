@@ -1054,12 +1054,11 @@ export default function VozProClient() {
 
       let res: Response
 
-      // ===== F5-TTS via Tunnel (GPU local via Oracle PHP) =====
+      // ===== F5-TTS via Tunnel (GPU local via Oracle PHP, HTTPS direto) =====
       if (useTunnelGenerate) {
-        // ===== TUNNEL: Browser -> Vercel (HTTPS proxy) -> Oracle PHP -> GPU local (nativo) =====
-        // Usa Vercel como proxy HTTPS para evitar Mixed Content (browser bloqueia HTTP em pagina HTTPS).
-        // O route.ts no Vercel encaminha pro Oracle via HTTP server-to-server (sem mixed content).
-        console.log(`[F5-TTS] Gerando via tunnel (Oracle PHP)... modo: ${voiceMode}`)
+        // ===== TUNNEL: Browser -> Oracle HTTPS -> GPU local (nativo, sem Vercel no meio) =====
+        // SSL (Let's Encrypt) em api.sorteiomax.com.br — zero mixed content, zero Vercel.
+        console.log(`[F5-TTS] Gerando via tunnel (Oracle HTTPS)... modo: ${voiceMode}`)
 
         // Determinar instruct baseado no modo
         let finalInstruct = instructStr
@@ -1085,8 +1084,9 @@ export default function VozProClient() {
           voiceMode,
         }
 
-        // Chamar via Vercel proxy (same-origin HTTPS, sem Mixed Content)
-        res = await fetch('/api/tunnel-generate', {
+        // Chamar Oracle PHP direto via HTTPS (SSL Letsencrypt, sem Vercel no meio)
+        const oracleApi = process.env.NEXT_PUBLIC_AUDIO_SERVER_URL || 'https://api.sorteiomax.com.br'
+        res = await fetch(`${oracleApi}/tunnel-generate.php`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(tunnelBody),

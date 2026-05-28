@@ -55,8 +55,54 @@ async function downloadWithRetry(
 }
 
 // ============================================================
-// FUNÇÕES AUXILIARES (tunnel, upload, submit, stream)
+// FUNÇÕES AUXILIARES (normalização de áudio, tunnel, upload, submit, stream)
 // ============================================================
+
+/**
+ * Converte WAV stereo pra mono (mistura os canais).
+ * OmniVoice funciona melhor com mono — stereo pode causar mudança de voz/gênero.
+ * Se já for mono ou não for WAV, retorna o buffer original.
+ */
+function convertWavToMono(buf: Buffer): Buffer {
+  if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF') return buf
+
+  const channels = buf.readUInt16LE(22)
+  if (channels <= 1) return buf // já é mono
+
+  const bitsPerSample = buf.readUInt16LE(34)
+  const bytesPerSample = bitsPerSample / 8
+  const blockAlign = channels * bytesPerSample
+  const dataSize = buf.readUInt32LE(40)
+  const numFrames = dataSize / blockAlign
+
+  // Criar novo buffer mono
+  const newBuf = Buffer.alloc(44 + numFrames * bytesPerSample)
+  buf.copy(newBuf, 0, 0, 22)  // copiar header (até channels)
+
+  // Sobrescrever channels = 1, blockAlign, byteRate
+  newBuf.writeUInt16LE(1, 22)                                    // channels = 1
+  newBuf.writeUInt32LE(buf.readUInt32LE(28) / channels, 28)      // byteRate
+  newBuf.writeUInt16LE(bytesPerSample, 32)                       // blockAlign
+
+  // Copiar chunk IDs e sizes
+  newBuf.write('data', 36)
+  newBuf.writeUInt32LE(numFrames * bytesPerSample, 40)          // novo data size
+  newBuf.writeUInt32LE(36 + numFrames * bytesPerSample, 4)      // novo file size
+
+  // Misturar canais (média simples)
+  for (let i = 0; i < numFrames; i++) {
+    const offset = 44 + i * blockAlign
+    for (let b = 0; b < bytesPerSample; b++) {
+      let sum = 0
+      for (let ch = 0; ch < channels; ch++) {
+        sum += buf[offset + ch * bytesPerSample + b]
+      }
+      newBuf[44 + i * bytesPerSample + b] = Math.round(sum / channels)
+    }
+  }
+
+  return newBuf
+}
 
 async function getTunnelUrl(debug: ReturnType<typeof createDebug>): Promise<string> {
   try {
@@ -403,6 +449,18 @@ export async function POST(req: NextRequest) {
       // }
 
       fileName = referenceAudioName || 'reference.wav'
+
+      // 2.5 Normalizar áudio: converter WAV stereo pra mono
+      // OmniVoice funciona melhor com mono — stereo pode causar mudança de voz/gênero
+      const rawBuf = Buffer.from(audioBuffer)
+      const monoBuf = convertWavToMono(rawBuf)
+      if (monoBuf.length !== rawBuf.length) {
+        const oldChannels = rawBuf.readUInt16LE(22)
+        const oldSize = (rawBuf.length / 1024).toFixed(0)
+        const newSize = (monoBuf.length / 1024).toFixed(0)
+        debug.log('Audio Normalize', 'ok', `Stereo ${oldChannels}ch → Mono (${oldSize}KB → ${newSize}KB)`)
+        audioBuffer = monoBuf.buffer as ArrayBuffer
+      }
 
       // 3. Upload pro Gradio via tunnel (UMA VEZ — referencia compartilhada entre chunks)
       debug.log('Upload', 'info', 'Enviando audio pro Gradio...')

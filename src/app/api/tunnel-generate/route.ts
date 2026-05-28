@@ -60,7 +60,7 @@ async function downloadWithRetry(
 
 async function getTunnelUrl(debug: ReturnType<typeof createDebug>): Promise<string> {
   try {
-    const res = await fetch(`${ORACLE_BASE}/get_tunnel.php`, { signal: AbortSignal.timeout(10000) })
+    const res = await fetch(`${ORACLE_BASE}/get_tunnel.php`, { cache: 'no-store', signal: AbortSignal.timeout(10000) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     if (data.status !== 'online' || !data.tunnelUrl) {

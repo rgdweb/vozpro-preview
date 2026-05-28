@@ -992,17 +992,49 @@ export default function VozProClient() {
 
     try {
       // Montar instruct a partir dos metadados da voz
-      // IMPORTANTE: só usar instruct se a variação pertence à voz selecionada
+      // IMPORTANTE: deduplicar para evitar "Conflicting instruct items" do OmniVoice
+      // Os valores dos dropdowns vêm como "Female / 女" etc, precisam normalizar.
       const voice = selectedVoice
       const variationBelongsToVoice = selectedVoice?.variations.some(v => v.id === selectedVariationId)
       const instructParts: string[] = []
-      if (voice && voice.gender !== 'Auto') instructParts.push(voice.gender.toLowerCase())
-      if (voice && voice.age !== 'Auto') instructParts.push(voice.age.toLowerCase())
-      if (voice && voice.pitch !== 'Auto') instructParts.push(voice.pitch.toLowerCase())
-      if (voice && voice.accent !== 'Auto') instructParts.push(voice.accent.toLowerCase())
+      // Mapa de categorias OmniVoice para normalizar (ex: "female / 女" → "female")
+      const categoryKeywords: Record<string, string[]> = {
+        'female': ['female', 'feminino'],
+        'male': ['male', 'masculino'],
+        'child': ['child', 'criança', 'crianca'],
+        'young adult': ['young adult', 'jovem'],
+        'middle-aged': ['middle-aged', 'adulto', 'middle aged'],
+        'elderly': ['elderly', 'idoso'],
+        'low pitch': ['low pitch', 'grave'],
+        'moderate pitch': ['moderate pitch', 'médio', 'medio'],
+        'high pitch': ['high pitch', 'agudo'],
+      }
+      // Extrai o keyword OmniVoice válido de um texto (ex: "Female / 女" → "female")
+      function normalizeInstructItem(item: string): string {
+        const lower = item.trim().toLowerCase()
+        for (const [canonical, keywords] of Object.entries(categoryKeywords)) {
+          for (const kw of keywords) {
+            if (lower === kw || lower.includes(kw)) return canonical
+          }
+        }
+        return lower
+      }
+      const seen = new Set<string>()
+      function addInstruct(raw: string) {
+        const normalized = normalizeInstructItem(raw)
+        if (normalized && !seen.has(normalized)) {
+          seen.add(normalized)
+          instructParts.push(normalized)
+        }
+      }
+      if (voice && voice.gender !== 'Auto') addInstruct(voice.gender)
+      if (voice && voice.age !== 'Auto') addInstruct(voice.age)
+      if (voice && voice.pitch !== 'Auto') addInstruct(voice.pitch)
+      if (voice && voice.accent !== 'Auto') addInstruct(voice.accent)
       // Só adicionar instruct da variação se ela realmente pertence à voz selecionada
       if (variationBelongsToVoice && selectedVariation?.instruct && selectedVariation.instruct.trim()) {
-        instructParts.push(selectedVariation.instruct.trim())
+        // A variação pode ter múltiplos itens separados por vírgula
+        selectedVariation.instruct.trim().split(',').forEach(addInstruct)
       }
       const instructStr = instructParts.join(', ')
 

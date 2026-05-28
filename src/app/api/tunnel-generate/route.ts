@@ -144,7 +144,7 @@ async function streamResult(
   eventId: string,
   debug: ReturnType<typeof createDebug>,
   timeoutMs = 180000
-): Promise<{ audioUrl: string | null; error: string | null }> {
+): Promise<{ audioUrl: string | null; error: string | null; gradioMessage?: string }> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
@@ -192,14 +192,17 @@ async function streamResult(
               return { audioUrl: null, error: 'Formato inesperado' }
             }
             const audioOutput = resultData[0]
+            const gradioMessage = resultData[1] || ''
             let audioUrl: string | null = null
             if (audioOutput?.url) audioUrl = audioOutput.url
             else if (audioOutput?.path) audioUrl = `${tunnelUrl}/gradio_api/file=${audioOutput.path}`
             if (audioUrl) {
               debug.log('SSE Stream', 'ok', `Audio: ${audioUrl.substring(0, 80)}`)
-              return { audioUrl, error: null }
+              return { audioUrl, error: null, gradioMessage }
             }
-            return { audioUrl: null, error: 'Sem URL no output' }
+            // Audio null = Gradio nao gerou. gradioMessage tem o motivo real.
+            debug.log('SSE Stream', 'error', `Gradio: ${gradioMessage}`)
+            return { audioUrl: null, error: `GPU: ${gradioMessage}`, gradioMessage }
           } catch { return { audioUrl: null, error: 'Parse error' } }
         }
 
@@ -231,12 +234,17 @@ async function streamResult(
 // GERACAO SINGLE-SHOT (texto inteiro, 1 chamada API)
 // ============================================================
 
+interface GenResult {
+  buffer: Buffer | null
+  failReason: string
+}
+
 async function generateSingleShot(
   tunnelUrl: string,
   text: string,
   gradioData: unknown[],
   debug: ReturnType<typeof createDebug>
-): Promise<Buffer | null> {
+): Promise<GenResult> {
   debug.log('Geracao', 'info', 'Gerando audio (single-shot)...')
 
   let eventId: string | null = null
@@ -249,17 +257,17 @@ async function generateSingleShot(
     if (eventId) break
   }
 
-  if (!eventId) return null
+  if (!eventId) return { buffer: null, failReason: 'Falha ao enviar job para GPU (3 tentativas)' }
 
   const result = await streamResult(tunnelUrl, eventId, debug, 180000)
-  if (!result.audioUrl) return null
+  if (!result.audioUrl) return { buffer: null, failReason: result.error || 'Stream sem resultado' }
 
   // Delay fixo 10s — dar tempo do Gradio salvar o WAV via tunnel
   await new Promise(r => setTimeout(r, 10000))
   debug.log('Download', 'info', 'Aguardou 10s apos SSE complete')
 
   const voiceBuffer = await downloadWithRetry(result.audioUrl, 3, 3000)
-  if (!voiceBuffer) return null
+  if (!voiceBuffer) return { buffer: null, failReason: `Falha ao baixar audio gerado (URL: ${result.audioUrl.substring(0, 80)})` }
 
   const sr = voiceBuffer.readUInt32LE(24)
   const ch = voiceBuffer.readUInt16LE(22)
@@ -268,7 +276,7 @@ async function generateSingleShot(
   const dur = (ds / ch / Math.floor(bps / 8) / sr).toFixed(1)
   debug.log('Download', 'ok', `${(voiceBuffer.length / 1024).toFixed(1)}KB, ${dur}s`)
 
-  return voiceBuffer
+  return { buffer: voiceBuffer, failReason: '' }
 }
 
 // ============================================================
@@ -388,15 +396,46 @@ export async function POST(req: NextRequest) {
 
     // SINGLE-SHOT: manda texto inteiro, 1 chamada API (igual localhost demo)
     debug.log('Pipeline', 'info', `Modo SINGLE-SHOT (${cleanText.length} chars)`)
-    finalBuffer = await generateSingleShot(tunnelUrl, cleanText, gradioBaseData, debug)
+    let genResult = await generateSingleShot(tunnelUrl, cleanText, gradioBaseData, debug)
 
-    // 6. Verificar resultado
-    if (!finalBuffer) {
-      return NextResponse.json({
-        error: 'GPU nao conseguiu gerar audio',
-        debug: debug.result(),
-      }, { status: 500 })
+    // 6. Verificar resultado + retry automatico com tunnel novo se for 502/timeout
+    if (!genResult.buffer) {
+      const needsRetry = genResult.failReason.includes('502') || genResult.failReason.includes('timeout') || genResult.failReason.includes('HTTP 5')
+      if (needsRetry) {
+        debug.log('Pipeline', 'warn', 'Tunnel pode estar stale, buscando novo URL...')
+        try {
+          const newTunnelUrl = await getTunnelUrl(debug)
+          if (newTunnelUrl !== tunnelUrl) {
+            debug.log('Pipeline', 'info', `Novo tunnel: ${newTunnelUrl.substring(0, 60)}...`)
+            // Re-upload se modo clone
+            if (voiceMode === 'clone' && audioBuffer) {
+              filePath = await uploadToGradio(newTunnelUrl, audioBuffer, fileName, debug)
+              if (!filePath) {
+                return NextResponse.json({ error: 'Falha no upload via novo tunnel', debug: debug.result() }, { status: 502 })
+              }
+              gradioBaseData[2] = filePath ? {
+                path: filePath, orig_name: fileName,
+                mime_type: fileName.endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav',
+                is_stream: false, meta: { _type: 'gradio.FileData' },
+              } : null
+            }
+            genResult = await generateSingleShot(newTunnelUrl, cleanText, gradioBaseData, debug)
+          }
+        } catch (retryErr) {
+          return NextResponse.json({
+            error: `GPU falhou e retry tbm: ${genResult.failReason}. ${retryErr instanceof Error ? retryErr.message : retryErr}`,
+            debug: debug.result(),
+          }, { status: 500 })
+        }
+      }
+      if (!genResult.buffer) {
+        return NextResponse.json({
+          error: `GPU nao conseguiu gerar audio: ${genResult.failReason}`,
+          debug: debug.result(),
+        }, { status: 500 })
+      }
     }
+    finalBuffer = genResult.buffer
 
     // 7. Validação ASR (opcional, no audio final)
     let asrResult = null

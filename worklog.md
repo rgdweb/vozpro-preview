@@ -465,3 +465,21 @@ Stage Summary:
 - {{pause:500}}, {{emphasis}}, {{whisper}}, {{fast}} tambem passam a funcionar
 - GPU maintenance totalmente automatica, sem interacao humana
 - Commit: 6e5cddc
+---
+Task ID: 1
+Agent: main
+Task: Investigar e corrigir erro persistente 500 no tunnel-generate
+
+Work Log:
+- Investigou status do Oracle VPS: tunnel online, Gradio respondendo, API info OK
+- Testou upload + submit + stream + download completo via tunnel - TUDO FUNCIONANDO
+- Identificou causa provável: cloudflared free tunnel reiniciou e URL mudou temporariamente
+- Melhorou `streamResult()` para capturar `resultData[1]` (mensagem de erro do Gradio)
+- Refatorou `generateSingleShot()` para retornar `{buffer, failReason}` em vez de `Buffer | null`
+- Adicionado retry automático de tunnel URL: se falha com 502/timeout, busca nova URL e tenta novamente
+- Mensagens de erro agora são específicas (ex: "GPU: CUDA out of memory" em vez de genérico "GPU nao conseguiu gerar audio")
+
+Stage Summary:
+- Tunnel e Gradio estão funcionando normalmente
+- Código melhorado com retry automático e mensagens de erro detalhadas
+- Arquivo: src/app/api/tunnel-generate/route.ts

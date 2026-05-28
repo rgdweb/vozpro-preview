@@ -2392,14 +2392,14 @@ export default function VozProClient() {
                     <div className="space-y-2">
                       <div className="flex justify-between">
                         <label className="text-xs text-slate-400">Passos</label>
-                        <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{numStep}</Badge>
+                        <Badge variant="outline" className={`text-xs ${numStep < 20 ? 'border-yellow-500/50 text-yellow-400' : numStep > 50 ? 'border-orange-500/50 text-orange-400' : 'border-white/10 text-slate-500'}`}>{numStep}{numStep < 20 ? ' (baixa qualidade)' : numStep > 50 ? ' (lento)' : ''}</Badge>
                       </div>
                       <Slider value={[numStep]} onValueChange={([v]) => setNumStep(v)} min={4} max={64} step={1} />
                     </div>
                     <div className="space-y-2">
                       <div className="flex justify-between">
                         <label className="text-xs text-slate-400">Guia (CFG)</label>
-                        <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{guidanceScale.toFixed(1)}</Badge>
+                        <Badge variant="outline" className={`text-xs ${guidanceScale < 1 ? 'border-yellow-500/50 text-yellow-400' : guidanceScale > 3.5 ? 'border-orange-500/50 text-orange-400' : 'border-white/10 text-slate-500'}`}>{guidanceScale.toFixed(1)}{guidanceScale < 1 ? ' (fraco)' : guidanceScale > 3.5 ? ' (alucinação!)' : ''}</Badge>
                       </div>
                       <Slider value={[guidanceScale]} onValueChange={([v]) => setGuidanceScale(v)} min={0} max={4} step={0.1} />
                     </div>
@@ -2407,7 +2407,7 @@ export default function VozProClient() {
                   <div className="space-y-2">
                     <div className="flex justify-between">
                       <label className="text-xs text-slate-400">Velocidade</label>
-                      <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{speed.toFixed(2)}x</Badge>
+                      <Badge variant="outline" className={`text-xs ${speed < 0.85 ? 'border-red-500/50 text-red-400' : speed > 1.15 ? 'border-orange-500/50 text-orange-400' : 'border-white/10 text-slate-500'}`}>{speed.toFixed(2)}x{speed < 0.85 ? ' (distorção!)' : speed > 1.15 ? ' (alucinação!)' : ''}</Badge>
                     </div>
                     <Slider value={[speed]} onValueChange={([v]) => setSpeed(v)} min={0.5} max={1.5} step={0.05} />
                   </div>

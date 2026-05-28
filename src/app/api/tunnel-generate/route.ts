@@ -432,11 +432,11 @@ export async function POST(req: NextRequest) {
         meta: { _type: 'gradio.FileData' },
       } : null, // null no modo design/auto
       refText,
-      instruct || '',
-      numStep || 32,
-      guidanceScale || 2.0,
+      instruct ?? '',
+      numStep ?? 32,
+      guidanceScale ?? 2.0,
       true,   // denoise
-      speed || 1,
+      speed ?? 1,
       null,   // duration
       true,   // preprocess_prompt
       true,   // postprocess_output (NECESSARIO: remove estalinhos/artefatos do audio gerado)

@@ -1054,23 +1054,12 @@ export default function VozProClient() {
 
       let res: Response
 
-      // ===== F5-TTS via Tunnel (GPU local via PHP Oracle, sem Vercel) =====
+      // ===== F5-TTS via Tunnel (GPU local via Oracle PHP) =====
       if (useTunnelGenerate) {
-        // ===== TUNNEL: Browser -> Oracle PHP -> GPU local (nativo, sem Gradio, sem Vercel) =====
-        console.log(`[F5-TTS] Gerando via tunnel PHP (GPU local)... modo: ${voiceMode}`)
-
-        // Obter token HMAC pra chamar PHP diretamente
-        const tokenRes = await fetch('/api/generate-token')
-        if (!tokenRes.ok) {
-          toast.error('Erro ao obter token de geracao')
-          return
-        }
-        const { token } = await tokenRes.json()
-
-        if (!token) {
-          toast.error('Servidor PHP nao configurado corretamente')
-          return
-        }
+        // ===== TUNNEL: Browser -> Vercel (HTTPS proxy) -> Oracle PHP -> GPU local (nativo) =====
+        // Usa Vercel como proxy HTTPS para evitar Mixed Content (browser bloqueia HTTP em pagina HTTPS).
+        // O route.ts no Vercel encaminha pro Oracle via HTTP server-to-server (sem mixed content).
+        console.log(`[F5-TTS] Gerando via tunnel (Oracle PHP)... modo: ${voiceMode}`)
 
         // Determinar instruct baseado no modo
         let finalInstruct = instructStr
@@ -1096,14 +1085,10 @@ export default function VozProClient() {
           voiceMode,
         }
 
-        // Chamar Oracle PHP direto (bypass Vercel — zero timeout, zero custo)
-        const oracleUrl = process.env.NEXT_PUBLIC_AUDIO_SERVER_URL || 'http://147.15.77.137'
-        res = await fetch(`${oracleUrl}/tunnel-generate.php`, {
+        // Chamar via Vercel proxy (same-origin HTTPS, sem Mixed Content)
+        res = await fetch('/api/tunnel-generate', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Generate-Token': token,
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(tunnelBody),
           signal: controller.signal,
         })

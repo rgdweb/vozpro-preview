@@ -503,3 +503,21 @@ Stage Summary:
 - omnivoice_gpu.py NÃO está ativo no servidor GPU — precisa reiniciar com iniciar.bat
 - Código agora detecta OOM, tenta cleanup automático e retry
 - Arquivo: src/app/api/tunnel-generate/route.ts
+---
+Task ID: 3
+Agent: main
+Task: Corrigir erros do Gradio 6.x (InvalidPathError + TypeError)
+
+Work Log:
+- Analisei os logs do GPU server fornecidos pelo usuario
+- Identifiquei que o wrapper omnivoice_gpu.py ESTA carregado corretamente
+- Erro 1: InvalidPathError - Gradio 6.x tem validacao de segurança mais rigorosa para paths de arquivos
+- Erro 2: TypeError "Parameter data is not a valid key-word argument" - Gradio 6.x middleware intercepta endpoints customizados
+- Corrigi omnivoice_gpu.py: adicionado include_in_schema=False nas rotas de manutencao para evitar interceptacao pelo middleware do Gradio 6.x
+- Corrigi tunnel-generate/route.ts: detecta {"error": null} do Gradio (CUDA OOM) e retorna mensagem clara
+- Adicionado triggerGpuCleanup() e retry automatico quando detecta OOM
+
+Stage Summary:
+- Arquivo corrigido: download/omnivoice_gpu.py (para usuario copiar no PC)
+- Arquivo corrigido: src/app/api/tunnel-generate/route.ts (deploy automatico)
+- Usuario precisa copiar omnivoice_gpu.py atualizado para o PC e reiniciar com iniciar.bat

@@ -167,22 +167,27 @@ if torch.cuda.is_available():
 
         # ============================================================
         # ENDPOINTS DE MANUTENCAO (para debug, mantidos)
+        # Gradio 6.x: registrar rotas via mount ANTES do launch para
+        # evitar que o middleware do Gradio intercepte e cause TypeError
         # ============================================================
         try:
             import gradio as gr
+            from starlette.applications import Starlette
+            from starlette.routing import Route, Mount
+            from starlette.responses import JSONResponse as _JSONResponse
+
             _orig_launch = gr.Blocks.launch
 
             def _patched_launch(self, *args, **kwargs):
                 try:
                     _app = self.app  # Cria o app FastAPI do Gradio
-                    from starlette.responses import JSONResponse
 
                     async def _maint_status(request):
                         _gc.collect()
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()
                         alloc, reserv, pct = _get_vram()
-                        info = {
+                        return _JSONResponse({
                             "cuda": torch.cuda.is_available(),
                             "gpu": gpu_name if torch.cuda.is_available() else None,
                             "vram_total_gb": round(gpu_total, 1) if torch.cuda.is_available() else 0,
@@ -192,22 +197,32 @@ if torch.cuda.is_available():
                             "vram_percent": round(pct, 1),
                             "gen_counter": _gen_counter,
                             "auto_cleanup": "active",
-                        }
-                        return JSONResponse(info)
+                        })
 
                     async def _maint_cleanup(request):
                         _deep_cleanup("API")
                         alloc, reserv, pct = _get_vram()
-                        return JSONResponse({
+                        return _JSONResponse({
                             "status": "ok",
                             "vram_alloc_gb": round(alloc, 2),
                             "vram_reserved_gb": round(reserv, 2),
                             "vram_percent": round(pct, 1),
                         })
 
-                    # Registrar rotas no app do Gradio
-                    _app.add_api_route("/api/maint/status", _maint_status, methods=["GET"])
-                    _app.add_api_route("/api/maint/cleanup", _maint_cleanup, methods=["POST"])
+                    # Gradio 6.x: usar add_api_route com include_in_schema=False
+                    # para evitar que o middleware do Gradio intercepte
+                    _app.add_api_route(
+                        "/api/maint/status",
+                        _maint_status,
+                        methods=["GET"],
+                        include_in_schema=False
+                    )
+                    _app.add_api_route(
+                        "/api/maint/cleanup",
+                        _maint_cleanup,
+                        methods=["POST"],
+                        include_in_schema=False
+                    )
                     print(f"  [OK] Endpoints de manutencao ativos:")
                     print(f"       GET  /api/maint/status  (VRAM + info)")
                     print(f"       POST /api/maint/cleanup (forcar deep cleanup)")

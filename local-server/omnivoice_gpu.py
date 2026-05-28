@@ -331,6 +331,7 @@ async def native_generate(request):
             "text": text.strip(),
             "num_step": num_step,
             "speed": speed,
+            "guidance_scale": guidance_scale,
         }
 
         if ref_audio_path:
@@ -349,7 +350,7 @@ async def native_generate(request):
         _pre_generate_cleanup()
 
         # Gerar em thread pool (OmniVoice.generate e sincrono)
-        print(f"[Native] Gerando: mode={voice_mode} speed={speed} steps={num_step} text=\"{text[:60]}...\"")
+        print(f"[Native] Gerando: mode={voice_mode} speed={speed} cfg={guidance_scale} steps={num_step} text=\"{text[:60]}...\"")
         start = time.time()
 
         loop = asyncio.get_event_loop()

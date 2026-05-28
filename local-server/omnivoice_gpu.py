@@ -343,11 +343,15 @@ if torch.cuda.is_available():
                             "vram_percent": round(pct, 1),
                         })
 
-                    # Registrar rotas no app do Gradio
-                    _app.add_api_route("/api/maint/status", _maint_status, methods=["GET"])
-                    _app.add_api_route("/api/maint/cleanup", _maint_cleanup, methods=["POST"])
-                    _app.add_api_route("/api/native-generate", _native_generate_handler, methods=["POST"])
-                    print(f"  [OK] Endpoints ativos:")
+                    # Registrar rotas DIRETAMENTE no router (posicao 0)
+                    # add_api_route NAO funciona via tunnel — Gradio 6.x middleware intercepta e retorna 404
+                    # Inserir Route no inicio de _app.routes garante que chega ANTES do middleware Gradio
+                    from starlette.routing import Route
+
+                    _app.routes.insert(0, Route("/api/native-generate", _native_generate_handler, methods=["POST"]))
+                    _app.routes.insert(0, Route("/api/maint/status", _maint_status, methods=["GET"]))
+                    _app.routes.insert(0, Route("/api/maint/cleanup", _maint_cleanup, methods=["POST"]))
+                    print(f"  [OK] Endpoints ativos (rotas diretas, sem Gradio middleware):")
                     print(f"       GET  /api/maint/status       (VRAM + info)")
                     print(f"       POST /api/maint/cleanup      (forcar deep cleanup)")
                     print(f"       POST /api/native-generate     (geracao 100% nativa)")

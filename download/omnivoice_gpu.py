@@ -22,6 +22,16 @@ USO: python omnivoice_gpu.py --ip 0.0.0.0 --port 7860
 
 import sys
 import os
+import subprocess
+
+# Auto-instalar dependencias (se ja tiver, ignora silenciosamente)
+for _pkg in ["uvicorn", "starlette"]:
+    try:
+        __import__(_pkg)
+    except ImportError:
+        print(f"[Setup] Instalando {_pkg}...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", _pkg, "-q"])
+
 import gc as _gc
 import threading
 import time

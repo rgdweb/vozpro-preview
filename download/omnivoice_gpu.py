@@ -287,7 +287,7 @@ async def native_generate(request):
         voice_mode = body.get("voice_mode", "clone")
         language = body.get("language", "Auto")
         speed = float(body.get("speed", 1.0))
-        num_step = int(body.get("num_step", 32))
+        num_step = int(body.get("num_step", 16))
         guidance_scale = float(body.get("guidance_scale", 2.0))
         denoise = body.get("denoise", True) == True
         postprocess_output = body.get("postprocess_output", True) == True

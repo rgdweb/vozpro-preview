@@ -722,7 +722,7 @@ export default function VozProClient() {
   const [musicStartLeadMs, setMusicStartLeadMs] = useState(DEFAULT_DUCKING.musicStartLeadMs)
   const [showDuckingSettings, setShowDuckingSettings] = useState(false)
   const [speed, setSpeed] = useState(1.0)
-  const [numStep, setNumStep] = useState(32)
+  const [numStep, setNumStep] = useState(16)
   const [guidanceScale, setGuidanceScale] = useState(2.0)
   const [denoise, setDenoise] = useState(true)
   const [postprocessOutput, setPostprocessOutput] = useState(true)
@@ -2404,9 +2404,9 @@ export default function VozProClient() {
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
                         <label className="text-xs text-slate-400">Passos</label>
-                        <input type="number" value={numStep} onChange={(e) => setNumStep(parseInt(e.target.value) || 4)} className="w-14 px-1.5 py-0.5 text-xs bg-white/5 border border-white/10 rounded text-slate-300 text-right focus:outline-none focus:border-violet-400" min={4} max={64} step={1} />
+                        <input type="number" value={numStep} onChange={(e) => setNumStep(parseInt(e.target.value) || 4)} className="w-14 px-1.5 py-0.5 text-xs bg-white/5 border border-white/10 rounded text-slate-300 text-right focus:outline-none focus:border-violet-400" min={4} max={64} step={4} />
                       </div>
-                      <Slider value={[numStep]} onValueChange={([v]) => setNumStep(v)} min={4} max={64} step={1} />
+                      <Slider value={[numStep]} onValueChange={([v]) => setNumStep(v)} min={4} max={64} step={4} />
                     </div>
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
@@ -2419,9 +2419,9 @@ export default function VozProClient() {
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
                       <label className="text-xs text-slate-400">Velocidade</label>
-                      <input type="number" value={speed.toFixed(2)} onChange={(e) => setSpeed(parseFloat(e.target.value) || 1.0)} className="w-14 px-1.5 py-0.5 text-xs bg-white/5 border border-white/10 rounded text-slate-300 text-right focus:outline-none focus:border-violet-400" min={0.5} max={1.5} step={0.01} />
+                      <input type="number" value={speed.toFixed(1)} onChange={(e) => setSpeed(parseFloat(e.target.value) || 1.0)} className="w-14 px-1.5 py-0.5 text-xs bg-white/5 border border-white/10 rounded text-slate-300 text-right focus:outline-none focus:border-violet-400" min={0.5} max={2.0} step={0.1} />
                     </div>
-                    <Slider value={[speed]} onValueChange={([v]) => setSpeed(v)} min={0.5} max={1.5} step={0.05} />
+                    <Slider value={[speed]} onValueChange={([v]) => setSpeed(v)} min={0.5} max={2.0} step={0.1} />
                   </div>
                   <div className="flex items-center justify-between">
                     <label className="text-xs text-slate-400">Denoise (remover ruído do ref)</label>

@@ -40,11 +40,18 @@ $job = Start-Job -ScriptBlock {
 } -ArgumentList $port
 
 $url = $null
+$pattern1 = '(https://[a-z0-9\-\.]+\.trycloudflare\.com)'
+$pattern2 = '(https://[a-z0-9\-\.]+\.cfargotunnel\.com)'
+
 for ($i = 0; $i -lt 60; $i++) {
     Start-Sleep -Milliseconds 500
     if (Test-Path $outputFile) {
         $content = Get-Content $outputFile -Raw -ErrorAction SilentlyContinue
-        if ($content -match "(https://[a-z0-9\-]+\.trycloudflare\.com)") {
+        if ($url -eq $null -and $content -match $pattern1) {
+            $url = $Matches[1]
+            break
+        }
+        if ($url -eq $null -and $content -match $pattern2) {
             $url = $Matches[1]
             break
         }
@@ -82,6 +89,13 @@ if ($url) {
     Write-Host "[ERRO] Nao conseguiu obter URL do Cloudflared." -ForegroundColor Red
     Write-Host "Verifique se o cloudflared esta instalado:" -ForegroundColor Yellow
     Write-Host "  winget install Cloudflare.cloudflared" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "[DEBUG] Conteudo capturado do cloudflared:" -ForegroundColor DarkGray
+    if (Test-Path $outputFile) {
+        Get-Content $outputFile -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+    } else {
+        Write-Host "  (nenhum output capturado)" -ForegroundColor DarkGray
+    }
     Stop-Job $job -ErrorAction SilentlyContinue
     Read-Host "Pressione Enter para sair"
 }

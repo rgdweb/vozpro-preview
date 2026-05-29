@@ -1,4 +1,4 @@
-// build: 9869573-revert-stable-paywall-queue-oauth
+// build: 9869573-revert-stable
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
@@ -15,33 +15,15 @@ import { Separator } from '@/components/ui/separator'
 import {
   AudioWaveform, Sparkles, Loader2, Download, Play, Pause, Square,
   Volume2, Music, Mic, ChevronRight, Settings2, Globe, Bug, Copy, ChevronDown,
-  Upload, CheckCircle2, FolderOpen, ChevronLeft, Folder, Mail
+  Upload, CheckCircle2, Zap, FolderOpen, ChevronLeft, Folder
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Label } from '@/components/ui/label'
 import VoicePreviewButton from '@/components/voice-preview-button'
-import PaymentDialog from '@/components/payment-dialog'
 import { optimizePronunciation, processControlTags, containsSSML, type TTSEngine } from '@/lib/pronunciation-optimizer'
 import { parseSSML } from '@/lib/ssml-parser'
 import { preprocessTTS } from '@/lib/tts-text-preprocessor'
-import { fixAudioServerUrl } from '@/lib/audio-server'
-
-/** Converte qualquer URL de audio para passar pelo proxy /api/proxy-audio.
- * Isso evita Mixed Content (HTTPS carregando HTTP) e CORS. */
-function toProxyAudioUrl(url: string): string {
-  if (!url) return ''
-  if (url.startsWith('/api/proxy-audio')) return url
-  if (url.startsWith('data:')) return url
-  // Corrigir URLs mortas (sorteiomax) e extrair path
-  const resolved = fixAudioServerUrl(url)
-  try {
-    const path = resolved.startsWith('http') ? new URL(resolved).pathname : resolved
-    return `/api/proxy-audio?url=${encodeURIComponent(path)}`
-  } catch {
-    return `/api/proxy-audio?url=${encodeURIComponent(resolved)}`
-  }
-}
-import { Users } from 'lucide-react'
+import { chunkText, type TextChunk } from '@/lib/tts-chunker'
 
 interface TrackControlsProps {
   selectedTrack: { id: string; name: string; audioPath: string; [key: string]: unknown } | null
@@ -91,10 +73,10 @@ function TrackControls({
       </div>
       <Slider value={[trackVolume]} onValueChange={([v]) => onTrackVolumeChange(v)} min={0} max={1} step={0.05} className="w-full" />
       <div className="pt-3 border-t border-white/10">
-        <button onClick={onToggleDuckingSettings} className="flex items-center gap-2 text-sm text-slate-400 hover:text-violet-300 transition-colors duration-200 w-full hover:bg-white/5 -ml-2 px-2 py-1 rounded-lg">
+        <button onClick={onToggleDuckingSettings} className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-300 transition-colors w-full">
           <Volume2 className="w-4 h-4" />
           Controles de Ducking
-          <ChevronDown className={`w-3 h-3 ml-auto transition-transform duration-300 ${showDuckingSettings ? 'rotate-180' : ''}`} />
+          <ChevronDown className={`w-3 h-3 ml-auto transition-transform ${showDuckingSettings ? 'rotate-180' : ''}`} />
         </button>
         {showDuckingSettings && (
           <div className="mt-3 space-y-3">
@@ -224,17 +206,6 @@ const DEFAULT_DUCKING: DuckingConfig = {
   musicStartLeadMs: 3000,
 }
 
-/** Formata duração em segundos para exibição amigável */
-function formatDuration(seconds: number): string {
-  if (!seconds || !isFinite(seconds) || seconds <= 0) return ''
-  if (seconds >= 60) {
-    const min = Math.floor(seconds / 60)
-    const sec = Math.round(seconds % 60)
-    return `${min}:${String(sec).padStart(2, '0')}`
-  }
-  return `${Math.round(seconds * 10) / 10}s`
-}
-
 const LANGUAGES = [
   { value: 'Auto', label: 'Auto Detectar' },
   { value: 'Portuguese', label: 'Português' },
@@ -311,55 +282,6 @@ function getVoicePreviewUrl(voice: Voice, selectedVarId?: string): string | unde
   // Fallback to first active variation
   const firstVariation = voice.variations.find(v => v.active !== false)
   return firstVariation?.refAudioServerUrl || firstVariation?.refAudioPath || undefined
-}
-
-/**
- * Mix marca d'água no áudio da voz (client-side).
- * Repete o watermark ao longo do áudio a cada N segundos.
- * Retorna data URI do áudio com watermark.
- */
-async function applyWatermark(
-  voiceDataUri: string,
-  watermarkUrl: string,
-  volume: number = 0.08
-): Promise<string> {
-  const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
-
-  // Decode voice audio
-  const voiceRes = await fetch(voiceDataUri)
-  const voiceBuf = await voiceRes.arrayBuffer()
-  const voiceBuffer = await audioCtx.decodeAudioData(voiceBuf)
-
-  // Decode watermark audio
-  const wmRes = await fetch(watermarkUrl)
-  const wmBuf = await wmRes.arrayBuffer()
-  const wmBuffer = await audioCtx.decodeAudioData(wmBuf)
-
-  const totalDuration = voiceBuffer.duration + 0.5
-  const sampleRate = voiceBuffer.sampleRate
-  const length = Math.round(totalDuration * sampleRate)
-  const offlineCtx = new OfflineAudioContext(1, length, sampleRate)
-
-  // Voice source (full volume)
-  const voiceSource = offlineCtx.createBufferSource()
-  voiceSource.buffer = voiceBuffer
-  voiceSource.connect(offlineCtx.destination)
-  voiceSource.start(0)
-
-  // Watermark source (loop, low volume)
-  const wmSource = offlineCtx.createBufferSource()
-  wmSource.buffer = wmBuffer
-  const wmGain = offlineCtx.createGain()
-  wmGain.gain.value = Math.max(0.01, Math.min(0.5, volume))
-  wmSource.connect(wmGain)
-  wmGain.connect(offlineCtx.destination)
-  wmSource.loop = true
-  wmSource.start(0)
-
-  const mixedBuffer = await offlineCtx.startRendering()
-  const wavDataUri = audioBufferToWav(mixedBuffer)
-  await audioCtx.close()
-  return wavDataUri
 }
 
 /**
@@ -705,10 +627,6 @@ export default function VozProClient() {
   const [selectedTrackId, setSelectedTrackId] = useState<string>('')
   const [trackShowLimit, setTrackShowLimit] = useState(15)
   const [language, setLanguage] = useState('Auto')
-  const [watermarkAudioPath, setWatermarkAudioPath] = useState('')
-  const [watermarkVolume, setWatermarkVolume] = useState(0.08)
-  const [paywallEnabled, setPaywallEnabled] = useState(false)
-  const [paymentAmount, setPaymentAmount] = useState('1.00')
 
   // Settings
   const [text, setText] = useState('')
@@ -724,22 +642,16 @@ export default function VozProClient() {
   const [speed, setSpeed] = useState(1.0)
   const [numStep, setNumStep] = useState(32)
   const [guidanceScale, setGuidanceScale] = useState(2.0)
-  const [denoise, setDenoise] = useState(true)
-  const [postprocessOutput, setPostprocessOutput] = useState(true)
-  const [preprocessPrompt, setPreprocessPrompt] = useState(true)
-  const [targetDuration, setTargetDuration] = useState<number | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [pronunciationOptimization, setPronunciationOptimization] = useState(false) // Agente IA de pronúncia (ligado por padrão)
+  const [llmPreprocess, setLlmPreprocess] = useState(false) // LLM pré-processador (opcional)
 
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false)
-  const [audioUrl, setAudioUrl] = useState<string | null>(null) // voz limpa (sem trilha, sem watermark)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null) // audio com marca d'água para preview (só voz)
-  const [mixedAudioUrl, setMixedAudioUrl] = useState<string | null>(null) // voz + trilha + watermark (preview)
-  const [cleanMixedUrl, setCleanMixedUrl] = useState<string | null>(null) // voz + trilha SEM watermark (para download)
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [mixedAudioUrl, setMixedAudioUrl] = useState<string | null>(null)
   const [isMixed, setIsMixed] = useState(false)
-  const [audioDuration, setAudioDuration] = useState<number | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
-  const [mobilePlayerExpanded, setMobilePlayerExpanded] = useState(false)
   const [generatingTime, setGeneratingTime] = useState(0)
 
   // Debug state
@@ -754,17 +666,6 @@ export default function VozProClient() {
   const [enableFrontendUpload, setEnableFrontendUpload] = useState(false) // liberado via admin
   const [uploadedVoiceFile, setUploadedVoiceFile] = useState<File | null>(null)
   const [uploadedVoiceUrl, setUploadedVoiceUrl] = useState<string | null>(null)
-
-  // Payment dialog state
-  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false)
-  const [freeDownloads, setFreeDownloads] = useState(0)
-  const [paymentExempt, setPaymentExempt] = useState(false)
-
-  // Queue state
-  const [queueId, setQueueId] = useState<string | null>(null)
-  const [queuePosition, setQueuePosition] = useState<number>(0)
-  const [queueStatus, setQueueStatus] = useState<string>('') // waiting, processing
-  const queuePollRef = useRef<NodeJS.Timeout | null>(null)
 
   const resultAudioRef = useRef<HTMLAudioElement | null>(null)
 
@@ -798,11 +699,6 @@ export default function VozProClient() {
           fetch('/api/track-categories'),
           fetch('/api/voice-categories'),
         ])
-        // Carregar downloads grátis do usuário (não bloqueante)
-        fetch('/api/free-download').then(res => res.json()).then(data => {
-          if (typeof data.freeDownloads === 'number') setFreeDownloads(data.freeDownloads)
-          if (data.paymentExempt) setPaymentExempt(true)
-        }).catch(() => {})
         if (voicesRes.ok) {
           const voicesData = await voicesRes.json()
           // Manter todas as vozes — mesmo sem variação ativa ou sem áudio
@@ -815,7 +711,13 @@ export default function VozProClient() {
             })),
           }))
           setVoices(filteredVoices)
-          // NÃO auto-selecionar voz — usuário deve escolher explicitamente
+          // Auto-selecionar primeira voz COM áudio disponível
+          const firstWithAudio = filteredVoices.find((v: Voice) => v.variations.some((vr: VoiceVariation) => vr.hasAudio))
+          if (firstWithAudio) {
+            setSelectedVoiceId(firstWithAudio.id)
+          } else if (filteredVoices.length > 0) {
+            setSelectedVoiceId(filteredVoices[0].id)
+          }
         }
         if (tracksRes.ok) {
           const tracksData = await tracksRes.json()
@@ -825,18 +727,31 @@ export default function VozProClient() {
           const configData = await configRes.json()
           setUsePhpGenerate(!!configData.phpServerUrl)
           setUseTunnelGenerate(true)
+          // Verificar se VozPro PHP direto esta disponivel
+          if (configData.phpServerUrl) {
+            try {
+              const ovTokenRes = await fetch('/api/omnivoice-token')
+              if (ovTokenRes.ok) {
+                const ovTokenData = await ovTokenRes.json()
+                if (ovTokenData.generateUrl) setOmnivoicePhpUrl(ovTokenData.generateUrl)
+              }
+            } catch { /* VozPro PHP nao disponivel */ }
+          }
         }
         if (settingsRes.ok) {
           const settingsData = await settingsRes.json()
           setEnableFrontendUpload(!!settingsData.enableVoiceUpload)
-          setWatermarkAudioPath(settingsData.watermarkAudioPath || '')
-          setWatermarkVolume(settingsData.watermarkVolume ? parseFloat(settingsData.watermarkVolume) : 0.08)
-          setPaywallEnabled(!!settingsData.paywallEnabled && settingsData.paywallEnabled !== 'false')
-          setPaymentAmount(settingsData.paymentAmount || '1.00')
         }
         if (trackCatRes.ok) setTrackCategories(await trackCatRes.json())
         if (voiceCatRes.ok) setVoiceCategories(await voiceCatRes.json())
-
+        // Verificar se VozPro server esta disponivel
+        try {
+          const ovRes = await fetch('/api/omnivoice-generate')
+          if (ovRes.ok) {
+            const ovData = await ovRes.json()
+            if (ovData.reachable) setOmnivoiceAvailable(true)
+          }
+        } catch { /* VozPro nao disponivel, tudo bem */ }
       } catch {
         toast.error('Erro ao carregar dados')
       } finally {
@@ -844,20 +759,9 @@ export default function VozProClient() {
       }
     }
     loadData()
-    // Health check da fila: desbloquear itens presos (fire-and-forget)
-    fetch('/api/queue/complete', { method: 'GET' }).catch(() => {})
-    // Limpar arquivos temporários do servidor PHP via API proxy (evita mixed-content)
-    fetch('/api/cleanup', { method: 'GET' }).catch(() => {})
   }, [authChecked])
 
-  // Detectar duração da trilha quando usuário aperta play (via VoicePreviewButton)
-  const handleTrackDurationDetected = useCallback((trackId: string, duration: number) => {
-    setTracks(prev => prev.map(t => t.id === trackId ? { ...t, duration } : t))
-  }, [])
-
   // Auto-select first variation WITH AUDIO when voice changes
-  // IMPORTANTE: só auto-selecionar se a variação TEM áudio.
-  // Se não tem áudio, deixar selectedVariationId vazio → botão fica disabled.
   useEffect(() => {
     if (selectedVoice && selectedVoice.variations.length > 0) {
       // Priorizar variação ativa com áudio
@@ -872,8 +776,8 @@ export default function VozProClient() {
         setSelectedVariationId(withAudio.id)
         return
       }
-      // SEM áudio disponível → não selecionar (botão fica disabled, pede upload)
-      setSelectedVariationId('')
+      // Último recurso: primeira disponível
+      setSelectedVariationId(selectedVoice.variations[0].id)
     } else {
       setSelectedVariationId('')
     }
@@ -885,9 +789,6 @@ export default function VozProClient() {
       toast.error('Digite o texto para sintetizar')
       return
     }
-
-    // Limpar arquivos temporários do servidor PHP via API proxy (evita mixed-content)
-    fetch('/api/cleanup', { method: 'GET' }).catch(() => {})
 
     // Validar baseado no modo de voz
     if (voiceMode === 'clone' && !selectedVariationId && !uploadedVoiceUrl) {
@@ -902,83 +803,66 @@ export default function VozProClient() {
         return
       }
     }
-    // Voice Design requer descrição da voz
     if (voiceMode === 'design' && !voiceDesignInstruct.trim()) {
-      toast.error('Descreva a voz desejada para usar o Voice Design')
-      return
+      // OK - sem descrição, VozPro vai usar todos os params como Auto
     }
-
-    // ===== ENTRAR NA FILA DE GERAÇÃO =====
     setIsGenerating(true)
     setAudioUrl(null)
-    setPreviewUrl(null)
     setMixedAudioUrl(null)
-    setCleanMixedUrl(null)
     setIsMixed(false)
-    setAudioDuration(null)
     setGeneratingTime(0)
     setPreviewingVoiceId(null)
-    setQueueStatus('')
 
-    try {
-      const queueRes = await fetch('/api/queue/join', { method: 'POST' })
-      const queueData = await queueRes.json()
-
-      if (!queueRes.ok) {
-        toast.error(queueData.error || 'Erro ao entrar na fila')
-        setIsGenerating(false)
-        return
-      }
-
-      const qId = queueData.id
-      setQueueId(qId)
-
-      if (queueData.status === 'waiting') {
-        // Tem que esperar na fila
-        setQueueStatus('waiting')
-        setQueuePosition(queueData.position)
-        toast.info(`Você está na posição ${queueData.position} da fila`, { duration: 4000 })
-
-        // Poll queue status until it's our turn
-        const pollQueue = async () => {
-          const statusRes = await fetch(`/api/queue/status?id=${qId}`)
-          const statusData = await statusRes.json()
-
-          if (statusData.status === 'processing') {
-            setQueueStatus('processing')
-            setQueuePosition(0)
-            return true // Our turn!
-          }
-          if (statusData.status === 'failed') {
-            toast.error('Erro na fila de geração')
-            setIsGenerating(false)
-            setQueueStatus('')
-            return false
-          }
-          if (statusData.position) setQueuePosition(statusData.position)
-          return false
-        }
-
-        // Poll every 2 seconds
-        while (true) {
-          const isMyTurn = await pollQueue()
-          if (isMyTurn) break
-          await new Promise(resolve => setTimeout(resolve, 2000))
-        }
-      } else {
-        setQueueStatus('processing')
-      }
-    } catch (queueErr) {
-      console.warn('[Queue] Erro ao entrar na fila, gerando diretamente:', queueErr)
-      setQueueStatus('processing')
-    }
-
-    setGeneratingTime(0) // Reset timer after queue wait
-
-    // Texto limpo — enviado direto ao TTS sem processamento de tags
+    // ===== OTIMIZAÇÃO DE PRONÚNCIA (pipeline completo) =====
     let textToSend = text.trim()
 
+    // Pipeline normal (sem SSML)
+    const engine: TTSEngine = 'f5tts'
 
+    // Se contém SSML, converter para formato nativo do TTS engine
+    // parseSSML converte tags para notação VozPro/F5-TTS (brackets, pausas, ênfase)
+    if (containsSSML(textToSend)) {
+      textToSend = parseSSML(textToSend, engine)
+      console.log('[Pipeline] SSML convertido para formato nativo do', engine)
+    }
+
+    // 1. Control tags (sempre ativo)
+    textToSend = processControlTags(textToSend, engine)
+
+    // 1b. H MUDO — REMOVIDO DAQUI! O pronunciation-optimizer.ts (step 1d) já trata H mudo
+    // com proteção completa via H_DICT_WORDS. Palavras em inglês como "Hello", "Hear", etc.
+    // são protegidas automaticamente. Remover H aqui ANTES do dicionário corrompia palavras em inglês.
+    // O optimizePronunciation() na linha 728 faz todo o trabalho corretamente.
+
+    // 2. Text preprocessor (pontuação, spacing)
+    if (pronunciationOptimization) {
+      textToSend = preprocessTTS(textToSend)
+    }
+
+    // 3. Regex + dictionary pipeline
+    if (pronunciationOptimization) {
+      textToSend = await optimizePronunciation(textToSend)
+    }
+
+    // 4. LLM pre-processor (opcional, só quando toggle ativo)
+    if (llmPreprocess && textToSend.length > 20) {
+      try {
+        const res = await fetch('/api/optimize-pronunciation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: textToSend }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.optimized && data.changed) {
+            textToSend = data.optimized
+          }
+        }
+      } catch {
+        // Fallback silencioso — nunca bloqueia a geração
+        console.log('[LLM Pre-process] Falha, usando texto original')
+      }
+    }
 
     // Timer para mostrar tempo decorrido ao usuario
     const genStartTime = Date.now()
@@ -996,49 +880,17 @@ export default function VozProClient() {
 
     try {
       // Montar instruct a partir dos metadados da voz
-      // IMPORTANTE: deduplicar para evitar "Conflicting instruct items" do OmniVoice
-      // Os valores dos dropdowns vêm como "Female / 女" etc, precisam normalizar.
+      // IMPORTANTE: só usar instruct se a variação pertence à voz selecionada
       const voice = selectedVoice
       const variationBelongsToVoice = selectedVoice?.variations.some(v => v.id === selectedVariationId)
       const instructParts: string[] = []
-      // Mapa de categorias OmniVoice para normalizar (ex: "female / 女" → "female")
-      const categoryKeywords: Record<string, string[]> = {
-        'female': ['female', 'feminino'],
-        'male': ['male', 'masculino'],
-        'child': ['child', 'criança', 'crianca'],
-        'young adult': ['young adult', 'jovem'],
-        'middle-aged': ['middle-aged', 'adulto', 'middle aged'],
-        'elderly': ['elderly', 'idoso'],
-        'low pitch': ['low pitch', 'grave'],
-        'moderate pitch': ['moderate pitch', 'médio', 'medio'],
-        'high pitch': ['high pitch', 'agudo'],
-      }
-      // Extrai o keyword OmniVoice válido de um texto (ex: "Female / 女" → "female")
-      function normalizeInstructItem(item: string): string {
-        const lower = item.trim().toLowerCase()
-        for (const [canonical, keywords] of Object.entries(categoryKeywords)) {
-          for (const kw of keywords) {
-            if (lower === kw || lower.includes(kw)) return canonical
-          }
-        }
-        return lower
-      }
-      const seen = new Set<string>()
-      function addInstruct(raw: string) {
-        const normalized = normalizeInstructItem(raw)
-        if (normalized && !seen.has(normalized)) {
-          seen.add(normalized)
-          instructParts.push(normalized)
-        }
-      }
-      if (voice && voice.gender !== 'Auto') addInstruct(voice.gender)
-      if (voice && voice.age !== 'Auto') addInstruct(voice.age)
-      if (voice && voice.pitch !== 'Auto') addInstruct(voice.pitch)
-      if (voice && voice.accent !== 'Auto') addInstruct(voice.accent)
+      if (voice && voice.gender !== 'Auto') instructParts.push(voice.gender.toLowerCase())
+      if (voice && voice.age !== 'Auto') instructParts.push(voice.age.toLowerCase())
+      if (voice && voice.pitch !== 'Auto') instructParts.push(voice.pitch.toLowerCase())
+      if (voice && voice.accent !== 'Auto') instructParts.push(voice.accent.toLowerCase())
       // Só adicionar instruct da variação se ela realmente pertence à voz selecionada
       if (variationBelongsToVoice && selectedVariation?.instruct && selectedVariation.instruct.trim()) {
-        // A variação pode ter múltiplos itens separados por vírgula
-        selectedVariation.instruct.trim().split(',').forEach(addInstruct)
+        instructParts.push(selectedVariation.instruct.trim())
       }
       const instructStr = instructParts.join(', ')
 
@@ -1054,19 +906,347 @@ export default function VozProClient() {
         speed,
         numStep,
         guidanceScale,
-        denoise,
-        postprocessOutput,
-        preprocessPrompt,
-        targetDuration,
       }
 
       let res: Response
 
-      // ===== F5-TTS via Tunnel (GPU local via Oracle PHP, HTTPS direto) =====
+      // ===== F5-TTS via Tunnel (GPU local) =====
       if (useTunnelGenerate) {
-        // ===== TUNNEL: Browser -> Oracle HTTPS -> GPU local (nativo, sem Vercel no meio) =====
-        // SSL (Let's Encrypt) em api.sorteiomax.com.br — zero mixed content, zero Vercel.
-        console.log(`[F5-TTS] Gerando via tunnel (Oracle HTTPS)... modo: ${voiceMode}`)
+        // ===== TUNNEL DIRETO: Vercel -> GPU local via cloudflared =====
+        console.log(`[F5-TTS] Gerando via tunnel (GPU local)... modo: ${voiceMode}`)
+
+        // Determinar instruct baseado no modo
+        let finalInstruct = instructStr
+          const chunks = chunkText(textToSend)
+          console.log(`[VozPro] ${chunks.length} chunks identificados`)
+          console.log('[VozPro] Chunks:', chunks.map((c, i) => `  [${i}] "${c.text}" (${c.pauseAfterMs}ms, ${c.punctuation})`).join('\n'))
+
+          if (chunks.length >= 1 && chunks.length <= 50) {
+            // ===== GERACAO PARALELA: até 3 chunks ao mesmo tempo =====
+            const CONCURRENCY = 3
+            const audioResults: { index: number; buffer: ArrayBuffer; pauseMs: number }[] = []
+            let failedCount = 0
+
+            // Função para gerar um único chunk
+            const generateChunk = async (chunk: TextChunk, chunkIndex: number): Promise<{ buffer: ArrayBuffer; pauseMs: number } | null> => {
+              const chunkBody: Record<string, unknown> = {
+                text: chunk.text,
+                mode: voiceMode,
+                instruct: '',
+                referenceAudioUrl: uploadedVoiceUrl || selectedVariation?.refAudioServerUrl || '',
+                referenceAudioName: uploadedVoiceFile?.name || selectedVariation?.refAudioName || 'ref_audio.wav',
+                refText: selectedVariation?.refText || '',
+                numStep: 32, // OmniVoice: 32 = qualidade padrao (igual ao local)
+                speed,
+                language,
+                gender: isAutoMode ? 'Auto' : (isDesignMode ? designParams.gender : 'Auto'),
+                age: isAutoMode ? 'Auto' : (isDesignMode ? designParams.age : 'Auto'),
+                pitch: isAutoMode ? 'Auto' : (isDesignMode ? designParams.pitch : 'Auto'),
+                style: isAutoMode ? 'Auto' : (isDesignMode ? designParams.style : 'Auto'),
+                accent: isAutoMode ? 'Auto' : (isDesignMode ? designParams.accent : 'Auto'),
+              }
+
+              try {
+                let chunkRes: Response
+                if (omnivoicePhpUrl) {
+                  const tokenData = await fetch('/api/omnivoice-token').then(r => r.json())
+                  if (tokenData.generateUrl && tokenData.token) {
+                    chunkRes = await fetch(tokenData.generateUrl, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'X-Generate-Token': tokenData.token },
+                      body: JSON.stringify(chunkBody),
+                      signal: controller.signal,
+                    })
+                  } else {
+                    chunkRes = await fetch('/api/omnivoice-generate', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(chunkBody),
+                      signal: controller.signal,
+                    })
+                  }
+                } else {
+                  chunkRes = await fetch('/api/omnivoice-generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(chunkBody),
+                    signal: controller.signal,
+                  })
+                }
+
+                if (chunkRes.ok) {
+                  const contentType = chunkRes.headers.get('content-type') || ''
+                  if (contentType.includes('audio') || contentType.includes('octet-stream')) {
+                    // Resposta raw (wav/mp3 direto)
+                    const buffer = await chunkRes.arrayBuffer()
+                    return { buffer, pauseMs: chunk.pauseAfterMs }
+                  }
+                  // API retorna JSON com { audioUrl, ... } — buscar o áudio real
+                  const json = await chunkRes.json().catch(() => null)
+                  if (json?.audioUrl) {
+                    try {
+                      const url = json.audioUrl
+                      let buffer: ArrayBuffer
+
+                      if (url.startsWith('data:')) {
+                        // Data URI (base64) — converter direto para ArrayBuffer
+                        const base64 = url.split(',')[1]
+                        const binaryStr = atob(base64)
+                        const bytes = new Uint8Array(binaryStr.length)
+                        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i)
+                        buffer = bytes.buffer
+                      } else {
+                        // URL remoto — buscar
+                        const audioRes = await fetch(url)
+                        if (!audioRes.ok) throw new Error(`HTTP ${audioRes.status}`)
+                        buffer = await audioRes.arrayBuffer()
+                      }
+
+                      console.log(`[VozPro Chunk ${chunkIndex + 1}] Áudio obtido (${(buffer.byteLength / 1024).toFixed(0)} KB)`)
+                      return { buffer, pauseMs: chunk.pauseAfterMs }
+                    } catch (e) {
+                      console.warn(`[VozPro Chunk ${chunkIndex + 1}] Falha ao obter áudio:`, e)
+                    }
+                  }
+                  // Sem audioUrl — é erro mesmo
+                  console.warn(`[VozPro Chunk ${chunkIndex + 1}] Resposta sem áudio: ${contentType}`, json?.error || json?.message || '')
+                  return null
+                } else {
+                  console.warn(`[VozPro Chunk ${chunkIndex + 1}] Erro: ${chunkRes.status}`)
+                  return null
+                }
+              } catch (err) {
+                console.warn(`[VozPro Chunk ${chunkIndex + 1}] Falha:`, err)
+                return null
+              }
+            }
+
+            // Processar chunks em batches paralelos
+            for (let batchStart = 0; batchStart < chunks.length; batchStart += CONCURRENCY) {
+              const batchEnd = Math.min(batchStart + CONCURRENCY, chunks.length)
+              const batch = chunks.slice(batchStart, batchEnd)
+
+              const results = await Promise.all(
+                batch.map((chunk, i) => generateChunk(chunk, batchStart + i))
+              )
+
+              for (let i = 0; i < results.length; i++) {
+                if (results[i]) {
+                  audioResults.push({ index: batchStart + i, ...results[i]! })
+                } else {
+                  failedCount++
+                }
+              }
+
+              // Atualizar progresso
+              const completed = Math.min(batchEnd, chunks.length)
+              console.log(`[VozPro] Progresso: ${completed}/${chunks.length} chunks processados`)
+            }
+
+            // Ordenar resultados pelo índice original (paralelo pode desordenar)
+            audioResults.sort((a, b) => a.index - b.index)
+
+            // Concatenar áudios com silêncio entre chunks
+            // O chunker agora mantém pontuação no texto → TTS produz finais limpos
+            // Basta colar chunks com silêncio (pausa configurada) entre eles.
+            if (audioResults.length > 0) {
+              console.log(`[VozPro] Concatenando ${audioResults.length} áudios (${failedCount} falhas)...`)
+              const audioCtx = new AudioContext({ sampleRate: 44100 })
+
+              // Passo 1: Decodificar todos os buffers + trim início + trim fim + normalize
+              // Pipeline: trimStartSilence → trimEndSilence → rmsNormalize
+              // trimEndSilence corta o silêncio excedente que o VozPro adiciona no final (52s → ~14s)
+              // Conservador: 200ms de buffer para não cortar a última sílaba
+              const decodedChunks: { audioBuffer: AudioBuffer; pauseMs: number }[] = []
+              for (const { buffer, pauseMs } of audioResults) {
+                try {
+                  const raw = await audioCtx.decodeAudioData(buffer.slice(0))
+                  const mono = raw.numberOfChannels > 1 ? toMono(raw) : raw
+                  const trimmedStart = trimStartSilence(mono)
+                  const trimmedEnd = trimEndSilence(trimmedStart)
+                  const normalized = rmsNormalize(trimmedEnd, -16)
+                  decodedChunks.push({ audioBuffer: normalized, pauseMs })
+                  console.log(`[VozPro Chunk] Decodificado: ${(buffer.byteLength / 1024).toFixed(0)}KB → ${(trimmedStart.duration * 1000).toFixed(0)}ms (raw) → ${(normalized.duration * 1000).toFixed(0)}ms (após trim+normalize)`)
+                } catch {
+                  console.warn('[VozPro Chunk] Falha ao decodificar áudio')
+                }
+              }
+
+              if (decodedChunks.length === 0) {
+                console.warn('[VozPro] Nenhum chunk decodificado')
+              } else {
+                // Passo 2: Concatenação com crossfade suave (5ms) para evitar cliques secos
+                // O TTS gera áudio com cauda natural. Usamos crossfade MÍNIMO (5ms)
+                // apenas para suavizar a transição, sem cortar sílabas.
+                const SAMPLE_RATE = 44100
+                const CROSSFADE_MS = 5  // crossfade mínimo — só para evitar clique seco
+                const crossfadeSamples = Math.floor((CROSSFADE_MS / 1000) * SAMPLE_RATE)
+
+                try {
+                // Calcular duração total (crossfade superpõe 2 chunks, reduzindo total)
+                let totalSamples = 0
+                for (let i = 0; i < decodedChunks.length; i++) {
+                  const chunkLen = decodedChunks[i].audioBuffer.length
+                  totalSamples += chunkLen
+                  if (i < decodedChunks.length - 1) {
+                    totalSamples += Math.floor((decodedChunks[i].pauseMs / 1000) * SAMPLE_RATE)
+                    // Crossfade superpõe final de um chunk com início do próximo
+                    // Garantir que não subtrai mais que o tamanho de qualquer chunk
+                    const cfOverlap = Math.min(crossfadeSamples, chunkLen, decodedChunks[i + 1].audioBuffer.length)
+                    totalSamples -= cfOverlap
+                  }
+                }
+                totalSamples = Math.max(totalSamples, 1) // garantir positivo
+
+                // Criar buffer final
+                const output = new AudioContext({ sampleRate: SAMPLE_RATE }).createBuffer(1, totalSamples, SAMPLE_RATE)
+                const outputData = output.getChannelData(0)
+
+                let writePos = 0
+                for (let i = 0; i < decodedChunks.length; i++) {
+                  const { audioBuffer, pauseMs } = decodedChunks[i]
+                  const data = audioBuffer.getChannelData(0)
+
+                  if (i === 0) {
+                    // Primeiro chunk: copiar inteiro (menos os últimos crossfadeSamples)
+                    const cfOverlap = decodedChunks.length > 1
+                      ? Math.min(crossfadeSamples, data.length, decodedChunks[1].audioBuffer.length)
+                      : 0
+                    const copyLen = data.length - cfOverlap
+                    for (let s = 0; s < Math.max(0, copyLen) && writePos < totalSamples; s++) {
+                      outputData[writePos++] = data[s]
+                    }
+                  } else {
+                    // Chunks subsequentes: silêncio (pausa) + crossfade + restante
+                    const prevData = decodedChunks[i - 1].audioBuffer.getChannelData(0)
+                    const cfOverlap = Math.min(crossfadeSamples, prevData.length, data.length)
+
+                    // Pegar final do chunk anterior e início do atual para crossfade
+                    const prevStart = prevData.length - cfOverlap
+
+                    // Silêncio da pausa de pontuação
+                    const pauseSamples = Math.floor((pauseMs / 1000) * SAMPLE_RATE)
+                    for (let s = 0; s < pauseSamples && writePos < totalSamples; s++) {
+                      outputData[writePos++] = 0
+                    }
+
+                    // Crossfade: misturar final do chunk anterior com início do atual
+                    for (let s = 0; s < cfOverlap && writePos < totalSamples; s++) {
+                      const t = cfOverlap > 1 ? s / (cfOverlap - 1) : 0  // 0.0 → 1.0
+                      // Fade-out suave (cosseno)
+                      const fadeOut = 0.5 * (1 + Math.cos(Math.PI * t))
+                      // Fade-in suave (cosseno)
+                      const fadeIn = 0.5 * (1 - Math.cos(Math.PI * t))
+                      outputData[writePos++] = prevData[prevStart + s] * fadeOut + data[s] * fadeIn
+                    }
+
+                    // Copiar restante do chunk (após crossfade)
+                    for (let s = cfOverlap; s < data.length && writePos < totalSamples; s++) {
+                      outputData[writePos++] = data[s]
+                    }
+                  }
+                }
+
+                console.log(`[VozPro] Concatenação OK: ${writePos} samples = ${(writePos / SAMPLE_RATE).toFixed(1)}s`)
+
+                // Passo 3: Converter para WAV
+                const finalBuffer = new AudioContext({ sampleRate: SAMPLE_RATE }).createBuffer(1, writePos, SAMPLE_RATE)
+                const finalData = finalBuffer.getChannelData(0)
+                for (let i = 0; i < writePos; i++) finalData[i] = outputData[i]
+
+                const wavBlob = audioBufferToWavBlob(finalBuffer)
+                const finalUrl = URL.createObjectURL(wavBlob)
+
+                setAudioUrl(finalUrl)
+                setIsGenerating(false)
+                clearInterval(timerInterval)
+                setGeneratingTime(Math.floor((Date.now() - genStartTime) / 1000))
+
+                if (audioResults.length === chunks.length) {
+                  toast.success(`${audioResults.length} frases geradas com sucesso!`)
+                } else {
+                  toast.warning(`${audioResults.length}/${chunks.length} frases geradas${failedCount > 0 ? ` (${failedCount} falha(s))` : ''}`)
+                }
+                return
+                } catch (concatError) {
+                  console.error('[VozPro] Erro na concatenação de chunks:', concatError)
+                  // Cai pro fluxo normal (single-shot) se a concatenação falhar
+                }
+              } // fim else (decodedChunks.length > 0)
+              // Se nenhum chunk decodificou, cai pro fluxo normal
+              console.warn('[VozPro] Nenhum chunk decodificado, tentando single-shot...')
+            }
+            // Se todos falharam, cai pro fluxo normal (single-shot)
+            console.warn('[VozPro] Todos os chunks falharam, tentando single-shot...')
+          }
+        }
+
+        const ovBody: Record<string, unknown> = {
+          text: textToSend,
+          mode: voiceMode,
+          instruct: '', // _design_fn não usa instruct (usa dropdowns)
+          referenceAudioUrl: voiceMode === 'clone' ? (uploadedVoiceUrl || selectedVariation?.refAudioServerUrl || '') : '',
+          referenceAudioName: voiceMode === 'clone' ? (uploadedVoiceFile?.name || selectedVariation?.refAudioName || 'ref_audio.wav') : '',
+          refText: selectedVariation?.refText || '',
+          numStep: 32, // OmniVoice: 32 = qualidade padrao (igual ao local)
+          speed,
+          language: language, // usa o idioma selecionado pelo usuario (Portuguese, Auto, etc)
+          // Voice Design params (usados pelo _design_fn endpoint)
+          gender: isAutoMode ? 'Auto' : (isDesignMode ? designParams.gender : 'Auto'),
+          age: isAutoMode ? 'Auto' : (isDesignMode ? designParams.age : 'Auto'),
+          pitch: isAutoMode ? 'Auto' : (isDesignMode ? designParams.pitch : 'Auto'),
+          style: isAutoMode ? 'Auto' : (isDesignMode ? designParams.style : 'Auto'),
+          accent: isAutoMode ? 'Auto' : (isDesignMode ? designParams.accent : 'Auto'),
+        }
+
+        if (omnivoicePhpUrl) {
+          // ===== OMNIVOICE PHP DIRETO: browser -> PHP sorteiomax -> tunnel -> GPU (ZERO Vercel) =====
+          console.log('[VozPro] Gerando via VozPro PHP direto (bypassa Vercel)...')
+          const tokenRes = await fetch('/api/omnivoice-token')
+          if (!tokenRes.ok) {
+            toast.error('Erro ao obter token VozPro')
+            return
+          }
+          const { generateUrl: phpDirectUrl, token } = await tokenRes.json()
+          lastRequestBody = ovBody
+
+          if (!phpDirectUrl || !token) {
+            toast.error('VozPro PHP nao configurado, usando Vercel...')
+            // Fallback pra Vercel
+            lastRequestUrl = '/api/omnivoice-generate'
+            res = await fetch('/api/omnivoice-generate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(ovBody),
+              signal: controller.signal,
+            })
+          } else {
+            lastRequestUrl = phpDirectUrl
+            res = await fetch(phpDirectUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Generate-Token': token,
+              },
+              body: JSON.stringify(ovBody),
+              signal: controller.signal,
+            })
+          }
+        } else {
+          // ===== OMNIVOICE VIA VERCEL (fallback) =====
+          console.log('[VozPro] Gerando via VozPro via Vercel (sem PHP direto)...')
+          lastRequestBody = ovBody
+          lastRequestUrl = '/api/omnivoice-generate'
+          res = await fetch('/api/omnivoice-generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(ovBody),
+            signal: controller.signal,
+          })
+        }
+      } else if (useTunnelGenerate) {
+        // ===== TUNNEL DIRETO: Vercel -> GPU local via cloudflared =====
+        console.log(`[VozPro] Gerando via tunnel (GPU local)... modo: ${voiceMode}`)
 
         // Determinar instruct baseado no modo
         let finalInstruct = instructStr
@@ -1074,8 +1254,8 @@ export default function VozProClient() {
           finalInstruct = voiceDesignInstruct
         }
 
-        // Determinar audio de referencia (corrigir URL se apontar pro sorteiomax morto)
-        let refUrl = fixAudioServerUrl(selectedVariation?.refAudioServerUrl || body.refAudioUrl || '')
+        // Determinar audio de referencia
+        let refUrl = selectedVariation?.refAudioServerUrl || body.refAudioUrl
         let refName = body.refAudioName || 'ref_audio.wav'
 
         // Se tem upload de voz do frontend, usa ele
@@ -1090,11 +1270,9 @@ export default function VozProClient() {
           referenceAudioName: voiceMode !== 'clone' ? undefined : refName,
           instruct: finalInstruct,
           voiceMode,
+          useChunking: true,  // modo prosódia: gera frase por frase com pausas reais
         }
-
-        // Chamar Oracle PHP direto via HTTPS (SSL Letsencrypt, sem Vercel no meio)
-        const oracleApi = process.env.NEXT_PUBLIC_AUDIO_SERVER_URL || 'https://api.sorteiomax.com.br'
-        res = await fetch(`${oracleApi}/tunnel-generate.php`, {
+        res = await fetch('/api/tunnel-generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(tunnelBody),
@@ -1214,7 +1392,7 @@ export default function VozProClient() {
       // ===== ASR RETRY AUTOMÁTICO (VozPro) =====
       // Valida pronúncia e refaz automaticamente se errou
       let finalAudioUrl = data.audioUrl
-      const maxAsrRetries = 0
+      const maxAsrRetries = ttsModel === 'omnivoice' ? 2 : 0 // Só VozPro faz retry (é rápido)
       const originalTextForCompare = textToSend.replace(/\[.*?\]/g, '') // Remove colchetes de pronúncia pra comparar
 
       if (maxAsrRetries > 0 && originalTextForCompare.split(/\s+/).length >= 5) {
@@ -1248,6 +1426,16 @@ export default function VozProClient() {
 
                 // Regenerar com a mesma chamada
                 const retryHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
+                if (lastRequestUrl.includes('sorteiomax')) {
+                  // PHP direto precisa de token novo
+                  try {
+                    const newTokenRes = await fetch('/api/omnivoice-token')
+                    if (newTokenRes.ok) {
+                      const { token: newToken } = await newTokenRes.json()
+                      if (newToken) retryHeaders['X-Generate-Token'] = newToken
+                    }
+                  } catch { /* sem token, tenta sem */ }
+                }
 
                 const retryRes = await fetch(lastRequestUrl, {
                   method: 'POST',
@@ -1281,51 +1469,22 @@ export default function VozProClient() {
         try {
           const mixedDataUri = await mixAudioClientSide(
             finalAudioUrl,
-            toProxyAudioUrl(selectedTrack.audioPath),
+            selectedTrack.audioPath,
             trackVolume,
             { duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs }
           )
-          setAudioUrl(finalAudioUrl) // voz limpa (sem trilha)
-          setCleanMixedUrl(mixedDataUri) // voz + trilha SEM watermark (para download)
-          // Preview: aplicar watermark SÓ se paywall ativo E usuario nao tem gratis E nao isento
-          const needWm = paywallEnabled && watermarkAudioPath && freeDownloads <= 0 && !paymentExempt
-          if (needWm) {
-            try {
-              const previewWithWm = await applyWatermark(mixedDataUri, toProxyAudioUrl(watermarkAudioPath), watermarkVolume)
-              setPreviewUrl(previewWithWm)
-              setMixedAudioUrl(previewWithWm)
-            } catch { setMixedAudioUrl(mixedDataUri) }
-          } else {
-            setMixedAudioUrl(mixedDataUri)
-          }
+          setAudioUrl(finalAudioUrl)
+          setMixedAudioUrl(mixedDataUri)
           setIsMixed(true)
           toast.success(`Audio gerado com trilha "${selectedTrack.name}"!${data.viaDirectPhp ? ' (PHP direto)' : data.viaPhp ? ' (via PHP)' : ''}`)
         } catch (mixErr) {
           console.error('[VozPro] Client-side mixing failed:', mixErr)
           setAudioUrl(finalAudioUrl)
-          setCleanMixedUrl(null)
-          // Aplicar watermark no preview se paywall ativo E sem gratis E sem isencao
-          if (paywallEnabled && watermarkAudioPath && freeDownloads <= 0 && !paymentExempt) {
-            try {
-              const previewWithWm = await applyWatermark(finalAudioUrl, toProxyAudioUrl(watermarkAudioPath), watermarkVolume)
-              setPreviewUrl(previewWithWm)
-            } catch {}
-          }
           toast.warning('Não foi possível mixar a trilha. Reproduzindo apenas a voz.')
         }
       } else {
         // No track - just voice
-        setAudioUrl(finalAudioUrl) // limpo (pra download)
-        setCleanMixedUrl(null) // sem trilha = sem mix limpo
-        // Preview: aplicar watermark SÓ se paywall ativo E usuario nao tem gratis E nao isento
-        if (paywallEnabled && watermarkAudioPath && freeDownloads <= 0 && !paymentExempt) {
-          try {
-            const previewWithWm = await applyWatermark(finalAudioUrl, toProxyAudioUrl(watermarkAudioPath), watermarkVolume)
-            setPreviewUrl(previewWithWm)
-          } catch (wmErr) {
-            console.warn('[VozPro] Watermark failed:', wmErr)
-          }
-        }
+        setAudioUrl(finalAudioUrl)
 
         if (data.mixedAudio) {
           setMixedAudioUrl(data.mixedAudio)
@@ -1388,54 +1547,11 @@ export default function VozProClient() {
       clearTimeout(timeoutId)
       setIsGenerating(false)
       setGeneratingTime(0)
-      setQueueStatus('')
-      setQueueId(null)
-      setQueuePosition(0)
-      // Marcar fila como completa (fire-and-forget)
-      if (queueId) {
-        fetch('/api/queue/complete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ queueId, success: !!audioUrl }),
-        }).catch(() => {})
-      }
     }
-  }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs, voiceMode, uploadedVoiceUrl, paywallEnabled, watermarkAudioPath, watermarkVolume])
+  }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs, omnivoicePhpUrl, ttsModel, voiceMode, uploadedVoiceUrl, pronunciationOptimization, llmPreprocess])
 
   // Get the active audio URL
-  // Se o usuario tem downloads gratis ou e isento, NAO mostra watermark no preview
-  const shouldShowWatermark = paywallEnabled && watermarkAudioPath && freeDownloads <= 0 && !paymentExempt
-  const activeAudioUrl = shouldShowWatermark ? (previewUrl || mixedAudioUrl || audioUrl) : (mixedAudioUrl || audioUrl)
-
-  // Quando freeDownloads chega a 0, aplicar watermark em tempo real no audio existente
-  // (evita ter que atualizar a pagina pra marca d'agua aparecer)
-  useEffect(() => {
-    if (!shouldShowWatermark) return
-    if (previewUrl) return // ja tem watermark
-    const source = mixedAudioUrl || audioUrl
-    if (!source || !watermarkAudioPath) return
-    // Aplicar watermark de forma nao-bloqueante
-    applyWatermark(source, toProxyAudioUrl(watermarkAudioPath), watermarkVolume)
-      .then(wmUrl => { if (wmUrl) setPreviewUrl(wmUrl) })
-      .catch(() => {})
-  }, [shouldShowWatermark, mixedAudioUrl, audioUrl, watermarkAudioPath, watermarkVolume, previewUrl])
-
-  // Detectar duração do áudio quando carregar
-  useEffect(() => {
-    const el = resultAudioRef.current
-    if (!el) return
-    const onLoaded = () => {
-      if (el.duration && isFinite(el.duration)) {
-        setAudioDuration(el.duration)
-      }
-    }
-    el.addEventListener('loadedmetadata', onLoaded)
-    // Se já carregou antes do listener
-    if (el.duration && isFinite(el.duration)) {
-      setAudioDuration(el.duration)
-    }
-    return () => { el.removeEventListener('loadedmetadata', onLoaded) }
-  }, [activeAudioUrl])
+  const activeAudioUrl = mixedAudioUrl || audioUrl
 
   // Sync playback state with result audio element
   useEffect(() => {
@@ -1473,17 +1589,17 @@ export default function VozProClient() {
     }
   }, [])
 
-  // Download real após pagamento aprovado ou download grátis
-  // Baixa: voz + trilha (se ativada) SEM watermark
-  const handlePaymentApproved = useCallback(async (format: 'mp3' | 'wav') => {
-    // Prioridade: mix limpo com trilha > voz limpa
-    const url = cleanMixedUrl || audioUrl
+  const handleDownload = useCallback(async () => {
+    const url = mixedAudioUrl || audioUrl
     if (!url) return
+
+    toast.info('Convertendo para MP3...')
 
     try {
       let audioBuffer: AudioBuffer
 
       if (url.startsWith('data:')) {
+        // Base64 audio
         const byteString = atob(url.split(',')[1])
         const ab = new ArrayBuffer(byteString.length)
         const ia = new Uint8Array(ab)
@@ -1494,6 +1610,7 @@ export default function VozProClient() {
         audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
         await audioCtx.close()
       } else {
+        // Remote URL
         const response = await fetch(url)
         const arrayBuffer = await response.arrayBuffer()
         const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
@@ -1501,112 +1618,70 @@ export default function VozProClient() {
         await audioCtx.close()
       }
 
-      if (format === 'wav') {
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `vozpro_${Date.now()}.wav`
-        a.click()
-        toast.success('WAV baixado com sucesso!')
-      } else {
-        if (!(window as unknown as { lamejs?: object }).lamejs) {
-          await new Promise<void>((resolve, reject) => {
-            if (document.querySelector('script[src*="lame"]')) { resolve(); return }
-            const script = document.createElement('script')
-            script.src = 'https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js'
-            script.onload = () => resolve()
-            script.onerror = () => reject(new Error('Falha ao carregar encoder MP3'))
-            document.head.appendChild(script)
-          })
-        }
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const lamejsMod = (window as any).lamejs
-        const Mp3Encoder = lamejsMod.Mp3Encoder
-        const numCh = Math.min(audioBuffer.numberOfChannels, 2)
-        const sr = audioBuffer.sampleRate
-        const encoder = new Mp3Encoder(numCh, sr, 320)
-        const mp3Data: Int8Array[] = []
-        const sampleBlockSize = 1152
-        const left = audioBuffer.getChannelData(0)
-        const right = numCh > 1 ? audioBuffer.getChannelData(1) : left
-
-        for (let i = 0; i < left.length; i += sampleBlockSize) {
-          const leftChunk = new Int16Array(sampleBlockSize)
-          const rightChunk = numCh > 1 ? new Int16Array(sampleBlockSize) : undefined
-          for (let j = 0; j < sampleBlockSize; j++) {
-            const idx = i + j
-            if (idx < left.length) {
-              leftChunk[j] = Math.max(-32768, Math.min(32767, Math.round(left[idx] * 32767)))
-              if (rightChunk) rightChunk[j] = Math.max(-32768, Math.min(32767, Math.round(right[idx] * 32767)))
-            }
-          }
-          const mp3buf = encoder.encodeBuffer(leftChunk, rightChunk)
-          if (mp3buf.length > 0) mp3Data.push(mp3buf)
-        }
-        const end = encoder.flush()
-        if (end.length > 0) mp3Data.push(end)
-
-        const blob = new Blob(mp3Data, { type: 'audio/mpeg' })
-        const blobUrl = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = blobUrl
-        a.download = `vozpro_${Date.now()}.mp3`
-        a.click()
-        URL.revokeObjectURL(blobUrl)
-        toast.success('MP3 baixado com sucesso!')
+      // Encode to MP3 using lamejs
+      if (!(window as unknown as { lamejs?: object }).lamejs) {
+        await new Promise<void>((resolve, reject) => {
+          if (document.querySelector('script[src*="lame"]')) { resolve(); return }
+          const script = document.createElement('script')
+          script.src = 'https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js'
+          script.onload = () => resolve()
+          script.onerror = () => reject(new Error('Falha ao carregar encoder MP3'))
+          document.head.appendChild(script)
+        })
       }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const lamejsMod = (window as any).lamejs
+      const Mp3Encoder = lamejsMod.Mp3Encoder
+      const numCh = Math.min(audioBuffer.numberOfChannels, 2)
+      const sr = audioBuffer.sampleRate
+      const encoder = new Mp3Encoder(numCh, sr, 320)
+      const mp3Data: Int8Array[] = []
+      const sampleBlockSize = 1152
+      const left = audioBuffer.getChannelData(0)
+      const right = numCh > 1 ? audioBuffer.getChannelData(1) : left
+
+      for (let i = 0; i < left.length; i += sampleBlockSize) {
+        const leftChunk = new Int16Array(sampleBlockSize)
+        const rightChunk = numCh > 1 ? new Int16Array(sampleBlockSize) : undefined
+        for (let j = 0; j < sampleBlockSize; j++) {
+          const idx = i + j
+          if (idx < left.length) {
+            leftChunk[j] = Math.max(-32768, Math.min(32767, Math.round(left[idx] * 32767)))
+            if (rightChunk) rightChunk[j] = Math.max(-32768, Math.min(32767, Math.round(right[idx] * 32767)))
+          }
+        }
+        const mp3buf = encoder.encodeBuffer(leftChunk, rightChunk)
+        if (mp3buf.length > 0) mp3Data.push(mp3buf)
+      }
+      const end = encoder.flush()
+      if (end.length > 0) mp3Data.push(end)
+
+      const blob = new Blob(mp3Data, { type: 'audio/mpeg' })
+      const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = `vozpro_${Date.now()}.mp3`
+      a.click()
+      URL.revokeObjectURL(blobUrl)
+      toast.success('MP3 baixado com sucesso!')
     } catch (err) {
-      console.error('Download error:', err)
+      console.error('MP3 encode error:', err)
+      // Fallback: download as original
       const a = document.createElement('a')
       a.href = url
       a.download = `vozpro_${Date.now()}.wav`
       a.click()
-      toast.error('Erro ao converter, baixando WAV original.')
+      toast.error('Erro ao converter MP3, baixando WAV original.')
     }
-  }, [cleanMixedUrl, audioUrl])
-
-  // Abre o dialog de pagamento (paywall) ou baixa direto
-  // Se tem downloads grátis e paywall ativo, usa um download grátis
-  const handleDownloadClick = useCallback(async () => {
-    const url = audioUrl
-    if (!url) return
-    if (paywallEnabled) {
-      if (freeDownloads > 0) {
-        // Usar download grátis
-        try {
-          const res = await fetch('/api/free-download', { method: 'POST' })
-          const data = await res.json()
-          if (data.hasFree) {
-            setFreeDownloads(data.remaining)
-            if (data.paymentExempt) {
-              toast.success('Download liberado!', { duration: 2000 })
-            } else {
-              toast.success(`Download grátis! Restam ${data.remaining}`, { duration: 3000 })
-            }
-            handlePaymentApproved('mp3')
-            return
-          }
-        } catch { /* fallback to paywall */ }
-      }
-      setPaymentDialogOpen(true)
-    } else {
-      handlePaymentApproved('mp3')
-    }
-  }, [audioUrl, paywallEnabled, freeDownloads, handlePaymentApproved])
+  }, [mixedAudioUrl, audioUrl])
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-900">
-          <div className="text-center">
-          <div className="mb-6">
-            <AudioWaveform className="w-12 h-12 mx-auto text-violet-400 animate-pulse" />
-          </div>
-          <p className="text-violet-300 font-medium tracking-wide">Carregando VozPro<span className="animate-pulse">...</span></p>
-          <div className="mt-3 flex justify-center gap-1">
-            <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-            <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-            <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: '300ms' }} />
-          </div>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-violet-950 via-slate-900 to-slate-950">
+        <div className="text-center">
+          <AudioWaveform className="w-12 h-12 mx-auto mb-4 text-violet-400 animate-pulse" />
+          <p className="text-violet-300">Carregando VozPro...</p>
         </div>
       </div>
     )
@@ -1615,9 +1690,9 @@ export default function VozProClient() {
   // Aguardar verificação de autenticação
   if (!authChecked) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-900">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-violet-950 via-slate-900 to-slate-950">
         <div className="text-center text-slate-400">
-          <Loader2 className="w-10 h-10 mx-auto mb-4 text-violet-400 animate-spin" />
+          <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
           <p>Verificando acesso...</p>
         </div>
       </div>
@@ -1625,7 +1700,8 @@ export default function VozProClient() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-900 relative">
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-violet-950 via-slate-900 to-slate-950">
+
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-900/80 backdrop-blur-xl">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
@@ -1648,7 +1724,7 @@ export default function VozProClient() {
                 await fetch('/api/auth', { method: 'DELETE' })
                 router.push('/login')
               }}
-              className="text-xs text-slate-500 hover:text-rose-400 transition-colors duration-200 px-2 py-1 rounded-lg hover:bg-rose-500/10"
+              className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
               title="Sair"
             >
               Sair
@@ -1672,9 +1748,59 @@ export default function VozProClient() {
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           {/* Left Panel - Voice & Track Selection */}
           <div className="lg:col-span-3 space-y-5">
+            {/* TTS Model Selector */}
+            <Card className="bg-white/5 border-white/10 backdrop-blur">
+              <CardContent className="pt-5 space-y-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <Zap className="w-5 h-5 text-amber-400" />
+                  <h3 className="text-lg font-bold text-white">Modelo TTS</h3>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setTtsModel('f5tts')}
+                    className={`p-3 rounded-xl border text-center transition-all ${
+                      ttsModel === 'f5tts'
+                        ? 'border-violet-500 bg-violet-500/20 shadow-lg shadow-violet-500/10'
+                        : 'border-white/10 bg-white/5 hover:border-white/20'
+                    }`}
+                  >
+                    <div className="text-2xl mb-1">🎙️</div>
+                    <div className={`text-xs font-medium ${ttsModel === 'f5tts' ? 'text-violet-200' : 'text-slate-400'}`}>
+                      F5-TTS
+                    </div>
+                    <div className="text-[10px] text-slate-600 mt-1">Clonagem fiel, chunking</div>
+                  </button>
+                  <button
+                    onClick={() => setTtsModel('omnivoice')}
+                    disabled={!omnivoiceAvailable}
+                    className={`p-3 rounded-xl border text-center transition-all ${
+                      ttsModel === 'omnivoice'
+                        ? 'border-amber-500 bg-amber-500/20 shadow-lg shadow-amber-500/10'
+                        : omnivoiceAvailable
+                          ? 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/8'
+                          : 'border-white/5 bg-white/[0.02] opacity-40 cursor-not-allowed'
+                    }`}
+                  >
+                    <div className="text-2xl mb-1">⚡</div>
+                    <div className={`text-xs font-medium ${ttsModel === 'omnivoice' ? 'text-amber-200' : 'text-slate-400'}`}>
+                      VozPro Turbo
+                    </div>
+                    <div className="text-[10px] text-slate-600 mt-1">
+                      {omnivoiceAvailable ? 'RTF 0.025, 600+ idiomas' : 'Servidor offline'}
+                    </div>
+                  </button>
+                </div>
+                {ttsModel === 'omnivoice' && (
+                  <p className="text-[10px] text-amber-400/80">
+                    VozPro suporta: Voice Design, pronúncia CMU [B EY1 S], símbolos [laughter], e 600+ idiomas.
+                    Voice Design e Auto Voice funcionam melhor no VozPro.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Voice Selection */}
             <Card className="bg-white/5 border-white/10 backdrop-blur">
-              
               <CardHeader className="pb-3">
                 <CardTitle className="text-white flex items-center gap-2 text-lg">
                   <Mic className="w-5 h-5 text-violet-400" />
@@ -1683,16 +1809,13 @@ export default function VozProClient() {
               </CardHeader>
               <CardContent className="space-y-4">
                 {voices.length === 0 ? (
-                        <p className="text-slate-400 text-center py-8">
-                          <FolderOpen className="w-10 h-10 mx-auto mb-3 text-slate-700" />
-                          Nenhuma voz disponível no momento
-                        </p>
+                  <p className="text-slate-400 text-center py-6">Nenhuma voz disponível no momento</p>
                 ) : selectedVoiceCategory ? (
                   /* INSIDE A VOICE CATEGORY */
                   <>
                     <button
                       onClick={() => { setSelectedVoiceCategory(null); setSelectedVoiceId(''); setSelectedVariationId('') }}
-                      className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300 transition-colors duration-200 hover:bg-violet-500/5 -ml-2 px-2 py-1 rounded-lg"
+                      className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300 transition-colors"
                     >
                       <ChevronLeft className="w-4 h-4" />
                       Todas &gt; <span className="font-semibold">{selectedVoiceCategory}</span>
@@ -1708,7 +1831,7 @@ export default function VozProClient() {
                           const isExpanded = expandedVoiceId === voice.id
                           const isSelected = selectedVoiceId === voice.id
                           return (
-                            <div key={voice.id} className="rounded-xl overflow-hidden transition-all duration-300">
+                            <div key={voice.id} className="rounded-xl overflow-hidden transition-all">
                               {/* Voice card — clique expande/colapsa e seleciona */}
                               <button
                                 onClick={() => {
@@ -1718,15 +1841,15 @@ export default function VozProClient() {
                                     setSelectedVariationId(voice.variations[0].id)
                                   }
                                 }}
-                                className={`w-full p-3 rounded-xl border text-left transition-all duration-300 flex items-center gap-2 ${
+                                className={`w-full p-3 rounded-xl border text-left transition-all flex items-center gap-2 ${
                                   isSelected
                                     ? 'border-violet-500 bg-violet-500/20 shadow-lg shadow-violet-500/10'
                                     : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
                                 }`}
                               >
-                                <Mic className={`w-4 h-4 flex-shrink-0 transition-colors duration-200 ${isSelected ? 'text-violet-400' : 'text-slate-500'}`} />
+                                <Mic className={`w-4 h-4 flex-shrink-0 ${isSelected ? 'text-violet-400' : 'text-slate-500'}`} />
                                 <div className="flex-1 min-w-0">
-                                  <span className={`font-medium text-sm block truncate transition-colors duration-200 ${isSelected ? 'text-violet-200' : 'text-slate-300'}`}>
+                                  <span className={`font-medium text-sm block truncate ${isSelected ? 'text-violet-200' : 'text-slate-300'}`}>
                                     {voice.name}
                                   </span>
                                   {voice.description && <p className="text-xs text-slate-500 line-clamp-1">{voice.description}</p>}
@@ -1734,25 +1857,25 @@ export default function VozProClient() {
                                 <span className="text-xs text-slate-500 bg-white/5 px-1.5 py-0.5 rounded-md flex-shrink-0">
                                   {voice.variations.length}
                                 </span>
-                                <ChevronDown className={`w-3.5 h-3.5 text-slate-500 flex-shrink-0 transition-transform duration-300 ${isExpanded ? 'rotate-180 text-violet-400' : ''}`} />
+                                <ChevronDown className={`w-3.5 h-3.5 text-slate-500 flex-shrink-0 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
                               </button>
                               {/* Variações — acordeão embaixo da voz */}
                               {isExpanded && voice.variations.length > 0 && (
                                 <div className="px-2 pb-2 pt-1 ml-4 border-l-2 border-violet-500/30 space-y-1 animate-in slide-in-from-top-1 duration-150">
                                   {voice.variations.map((v) => {
-                                    const varAudioUrl = toProxyAudioUrl(v.refAudioServerUrl || v.refAudioPath || '')
+                                    const varAudioUrl = v.refAudioServerUrl || v.refAudioPath || ''
                                     const isVarSelected = selectedVariationId === v.id
                                     const isInactive = v.active === false || !v.hasAudio
                                     return (
                                       <button
                                         key={v.id}
                                         onClick={(e) => { e.stopPropagation(); setSelectedVariationId(v.id) }}
-                                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all duration-200 ${
+                                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all ${
                                           isInactive
                                             ? 'border-slate-800 bg-slate-900/30 text-slate-600 opacity-50 cursor-default'
                                             : isVarSelected
-                                              ? 'border-violet-500 bg-violet-500/20 text-violet-200'
-                                              : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'
+                                              ? 'border-violet-500/60 bg-violet-500/15 text-violet-200'
+                                              : 'border-white/5 bg-white/3 text-slate-400 hover:border-white/15 hover:bg-white/5'
                                         }`}
                                         title={isInactive ? 'Variação desativada / sem áudio' : v.label}
                                       >
@@ -1784,7 +1907,7 @@ export default function VozProClient() {
                     {/* Uncategorized voices */}
                     {voices.filter(v => !v.category).length > 0 && (
                       <div className="mb-4">
-                        <p className="text-xs text-slate-500 mb-2 font-medium tracking-wide uppercase">Sem categoria</p>
+                        <p className="text-xs text-slate-500 mb-2">Sem categoria</p>
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                           {voices.filter(v => !v.category).map((voice) => (
                             <button
@@ -1797,8 +1920,8 @@ export default function VozProClient() {
                               }`}
                             >
                               <div className="flex items-center gap-2 mb-1">
-                                <Mic className={`w-4 h-4 transition-colors duration-200 ${selectedVoiceId === voice.id ? 'text-violet-400' : 'text-slate-500'}`} />
-                                <span className={`font-medium text-sm flex-1 min-w-0 transition-colors duration-200 ${selectedVoiceId === voice.id ? 'text-violet-200' : 'text-slate-300'}`}>
+                                <Mic className={`w-4 h-4 ${selectedVoiceId === voice.id ? 'text-violet-400' : 'text-slate-500'}`} />
+                                <span className={`font-medium text-sm flex-1 min-w-0 ${selectedVoiceId === voice.id ? 'text-violet-200' : 'text-slate-300'}`}>
                                   {voice.name}
                                 </span>
                               </div>
@@ -1813,9 +1936,9 @@ export default function VozProClient() {
                         <button
                           key={cat.name}
                           onClick={() => { setSelectedVoiceCategory(cat.name); setSelectedVoiceId(''); setSelectedVariationId('') }}
-                          className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-violet-500/10 hover:border-violet-500/40 cursor-pointer group"
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/10 bg-white/5 hover:bg-violet-500/10 hover:border-violet-500/50 transition-all duration-200 cursor-pointer group"
                         >
-                          <span className="text-base group-hover:scale-110 transition-transform duration-300">{cat.emoji || '📁'}</span>
+                          <span className="text-base group-hover:scale-110 transition-transform">{cat.emoji || '📁'}</span>
                           <span className="text-sm font-medium text-white whitespace-nowrap">{cat.name}</span>
                           <span className="text-xs text-slate-500 bg-white/5 px-1.5 py-0.5 rounded-md">{cat.count}</span>
                         </button>
@@ -1827,9 +1950,9 @@ export default function VozProClient() {
                         <p className="text-sm font-medium text-slate-300 mb-2">Estilo / Emoção</p>
                         <div className="flex flex-wrap gap-2">
                           {selectedVoice.variations.map((v) => {
-                            const varAudioUrl = toProxyAudioUrl(v.refAudioServerUrl || v.refAudioPath || '')
+                            const varAudioUrl = v.refAudioServerUrl || v.refAudioPath || ''
                             return (
-                              <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all duration-300 flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
+                              <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
                                 <VoicePreviewButton
                                   audioUrl={varAudioUrl}
                                   voiceId={v.id}
@@ -1861,8 +1984,8 @@ export default function VozProClient() {
                           }`}
                         >
                           <div className="flex items-center gap-2 mb-1">
-                            <Mic className={`w-4 h-4 transition-colors duration-200 ${selectedVoiceId === voice.id ? 'text-violet-400' : 'text-slate-500'}`} />
-                            <span className={`font-medium text-sm flex-1 min-w-0 transition-colors duration-200 ${selectedVoiceId === voice.id ? 'text-violet-200' : 'text-slate-300'}`}>
+                            <Mic className={`w-4 h-4 ${selectedVoiceId === voice.id ? 'text-violet-400' : 'text-slate-500'}`} />
+                            <span className={`font-medium text-sm flex-1 min-w-0 ${selectedVoiceId === voice.id ? 'text-violet-200' : 'text-slate-300'}`}>
                               {voice.name}
                             </span>
                           </div>
@@ -1875,9 +1998,9 @@ export default function VozProClient() {
                         <p className="text-sm font-medium text-slate-300 mb-2">Estilo / Emoção</p>
                         <div className="flex flex-wrap gap-2">
                           {selectedVoice.variations.map((v) => {
-                            const varAudioUrl = toProxyAudioUrl(v.refAudioServerUrl || v.refAudioPath || '')
+                            const varAudioUrl = v.refAudioServerUrl || v.refAudioPath || ''
                             return (
-                              <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all duration-300 flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
+                              <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
                                 <VoicePreviewButton
                                   audioUrl={varAudioUrl}
                                   voiceId={v.id}
@@ -1900,7 +2023,6 @@ export default function VozProClient() {
 
             {/* Voice Mode Selector + Upload + Design */}
             <Card className="bg-white/5 border-white/10 backdrop-blur">
-              
               <CardHeader className="pb-3">
                 <CardTitle className="text-white flex items-center gap-2 text-lg">
                   <Mic className="w-5 h-5 text-purple-400" />
@@ -1912,10 +2034,10 @@ export default function VozProClient() {
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     onClick={() => setVoiceMode('clone')}
-                    className={`p-3 rounded-xl border text-center transition-all duration-300 ${
+                    className={`p-3 rounded-xl border text-center transition-all ${
                       voiceMode === 'clone'
                         ? 'border-violet-500 bg-violet-500/20'
-                        : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
+                        : 'border-white/10 bg-white/5 hover:border-white/20'
                     }`}
                   >
                     <div className="text-lg mb-1">🎙️</div>
@@ -1926,10 +2048,10 @@ export default function VozProClient() {
                   </button>
                   <button
                     onClick={() => setVoiceMode('design')}
-                    className={`p-3 rounded-xl border text-center transition-all duration-300 ${
+                    className={`p-3 rounded-xl border text-center transition-all ${
                       voiceMode === 'design'
                         ? 'border-purple-500 bg-purple-500/20'
-                        : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
+                        : 'border-white/10 bg-white/5 hover:border-white/20'
                     }`}
                   >
                     <div className="text-lg mb-1">✨</div>
@@ -1940,10 +2062,10 @@ export default function VozProClient() {
                   </button>
                   <button
                     onClick={() => setVoiceMode('auto')}
-                    className={`p-3 rounded-xl border text-center transition-all duration-300 ${
+                    className={`p-3 rounded-xl border text-center transition-all ${
                       voiceMode === 'auto'
                         ? 'border-blue-500 bg-blue-500/20'
-                        : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
+                        : 'border-white/10 bg-white/5 hover:border-white/20'
                     }`}
                   >
                     <div className="text-lg mb-1">🎲</div>
@@ -1962,7 +2084,7 @@ export default function VozProClient() {
                       value={voiceDesignInstruct}
                       onChange={(e) => setVoiceDesignInstruct(e.target.value)}
                       placeholder="female, young, low pitch, whisper, british accent"
-                      className="bg-white/5 border-white/10 text-white placeholder:text-slate-600 focus:border-violet-500"
+                      className="bg-white/5 border-white/10 text-white"
                     />
                     <p className="text-[10px] text-slate-600">
                       Atributos: <b>gender</b> (male/female), <b>age</b> (child/teen/young/old), <b>pitch</b> (low/moderate/high), <b>style</b> (whisper), <b>accent</b> (brazilian/british/american/japanese)
@@ -1974,7 +2096,7 @@ export default function VozProClient() {
                 {voiceMode === 'auto' && (
                   <div className="pt-2 border-t border-white/10">
                     <p className="text-xs text-blue-300/70 text-center">
-                      O sistema vai criar uma voz aleatória. Cada geração será diferente!
+                      O VozPro vai criar uma voz aleatória. Cada geração será diferente!
                     </p>
                   </div>
                 )}
@@ -1984,7 +2106,7 @@ export default function VozProClient() {
                   <div className="space-y-2 pt-2 border-t border-white/10">
                     <label className="text-sm text-slate-400">Upload de Voz (opcional)</label>
                     <div className="flex items-center gap-3">
-                      <label className="cursor-pointer px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-sm text-slate-300 transition-all">
+                      <label className="cursor-pointer px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 text-sm text-slate-300 transition-colors">
                         <input
                           key={uploadedVoiceUrl || 'upload-input'}
                           type="file"
@@ -2056,7 +2178,6 @@ export default function VozProClient() {
 
             {/* Text Input */}
             <Card className="bg-white/5 border-white/10 backdrop-blur">
-              
               <CardContent className="pt-5 space-y-4">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -2073,11 +2194,79 @@ export default function VozProClient() {
                   />
                 </div>
 
+                {/* Pronunciation Optimization Toggle */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+                    <span className="text-xs text-slate-400">Otimização de pronúncia IA</span>
+                  </div>
+                  <Switch
+                    checked={pronunciationOptimization}
+                    onCheckedChange={setPronunciationOptimization}
+                  />
+                </div>
+
+                {/* LLM Pre-processor Toggle */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="llm-preprocess"
+                      checked={llmPreprocess}
+                      onCheckedChange={setLlmPreprocess}
+                    />
+                    <Label htmlFor="llm-preprocess" className="text-xs text-slate-400 cursor-pointer">
+                      IA Pré-processamento (lento, mais preciso)
+                    </Label>
+                  </div>
+                </div>
+
+                {/* Emotion presets - insert control tags into text */}
+                {pronunciationOptimization && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs text-slate-500">Prosódia:</span>
+                    {[
+                      { label: '📖 Normal', insert: '' },
+                      { label: '🤫 Sussurro', insert: ' ', action: 'whisper' as const },
+                      { label: '⚡ Rápido', insert: ' ', action: 'fast' as const },
+                      { label: '🐢 Devagar', insert: ' ', action: 'slow' as const },
+                      { label: '⏸️ Pausa longa', insert: '... ' },
+                      { label: '⏸️ Pausa curta', insert: '.. ' },
+                    ].map(preset => (
+                      <button
+                        key={preset.label}
+                        onClick={() => {
+                          const textarea = document.getElementById('tts-text') as HTMLTextAreaElement
+                          if (!textarea) return
+                          const start = textarea.selectionStart
+                          const end = textarea.selectionEnd
+                          const currentText = textarea.value
+                          if ('action' in preset && preset.action) {
+                            const selected = currentText.substring(start, end)
+                            if (selected) {
+                              const newText = currentText.substring(0, start) + `{{${preset.action}}}${selected}{{/${preset.action}}}` + currentText.substring(end)
+                              setText(newText)
+                            } else {
+                              toast.info('Selecione o texto no campo acima primeiro')
+                            }
+                          } else if (preset.insert) {
+                            const newText = currentText.substring(0, start) + preset.insert + currentText.substring(end)
+                            setText(newText)
+                          }
+                        }}
+                        className="px-2 py-0.5 rounded-full text-xs border border-white/10 text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
+                        title={'action' in preset && preset.action ? `Selecione texto e clique para ${preset.action}` : 'Insere pausa no cursor'}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 {/* Language */}
                 <div className="flex items-center gap-3">
                   <label className="text-sm font-medium text-slate-300 whitespace-nowrap">Idioma</label>
                   <Select value={language} onValueChange={setLanguage}>
-                    <SelectTrigger className="bg-white/5 border-white/10 text-white focus:border-violet-500">
+                    <SelectTrigger className="bg-white/5 border-white/10 text-white">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent className="bg-slate-800 border-slate-700">
@@ -2092,7 +2281,6 @@ export default function VozProClient() {
 
             {/* Music Track */}
             <Card className="bg-white/5 border-white/10 backdrop-blur">
-              
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-white flex items-center gap-2 text-lg">
@@ -2117,7 +2305,7 @@ export default function VozProClient() {
                     <>
                       <button
                         onClick={() => setSelectedTrackCategory(null)}
-                        className="flex items-center gap-2 text-sm text-purple-400 hover:text-purple-300 transition-colors duration-200 hover:bg-purple-500/5 -ml-2 px-2 py-1 rounded-lg"
+                        className="flex items-center gap-2 text-sm text-purple-400 hover:text-purple-300 transition-colors"
                       >
                         <ChevronLeft className="w-4 h-4" />
                         Todas &gt; <span className="font-semibold">{selectedTrackCategory}</span>
@@ -2137,7 +2325,7 @@ export default function VozProClient() {
                                 className={`p-3 rounded-xl border text-left transition-all ${
                                   selectedTrackId === track.id
                                     ? 'border-purple-500 bg-purple-500/20'
-                                    : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
+                                    : 'border-white/10 bg-white/5 hover:border-white/20'
                                 }`}
                               >
                                 <div className="flex items-center gap-2 mb-1">
@@ -2146,23 +2334,19 @@ export default function VozProClient() {
                                     {track.name}
                                   </span>
                                   <VoicePreviewButton
-                                    audioUrl={toProxyAudioUrl(track.audioPath) || undefined}
+                                    audioUrl={track.audioPath || undefined}
                                     voiceId={track.id}
                                     currentlyPlayingId={previewingTrackId}
                                     onPlayStart={setPreviewingTrackId}
                                     onPlayEnd={() => setPreviewingTrackId(null)}
-                                    onDurationDetected={handleTrackDurationDetected}
                                   />
                                 </div>
                                 <p className="text-xs text-slate-500 line-clamp-1">{track.description}</p>
-                                {track.duration > 0 && (
-                                  <span className="text-[10px] text-amber-400/70 mt-0.5 block">{formatDuration(track.duration)}</span>
-                                )}
                               </button>
                             ))}
                           </div>
                           {(() => { const remaining = tracks.filter(t => t.category === selectedTrackCategory).length - trackShowLimit; if (remaining > 0) return (
-                            <button onClick={() => setTrackShowLimit(prev => prev + 15)} className="w-full text-center text-sm text-purple-400 hover:text-purple-300 py-2 rounded-lg border border-white/10 hover:border-purple-500/30 transition-all duration-200 hover:bg-purple-500/5">
+                            <button onClick={() => setTrackShowLimit(prev => prev + 15)} className="w-full text-center text-sm text-purple-400 hover:text-purple-300 py-2 rounded-lg border border-white/5 hover:border-purple-500/30 transition-all">
                               Ver mais {remaining}
                             </button>
                           ); return null; })()}
@@ -2204,7 +2388,7 @@ export default function VozProClient() {
                                 className={`p-3 rounded-xl border text-left transition-all ${
                                   selectedTrackId === track.id
                                     ? 'border-purple-500 bg-purple-500/20'
-                                    : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
+                                    : 'border-white/10 bg-white/5 hover:border-white/20'
                                 }`}
                               >
                                 <div className="flex items-center gap-2 mb-1">
@@ -2213,23 +2397,19 @@ export default function VozProClient() {
                                     {track.name}
                                   </span>
                                   <VoicePreviewButton
-                                    audioUrl={toProxyAudioUrl(track.audioPath) || undefined}
+                                    audioUrl={track.audioPath || undefined}
                                     voiceId={track.id}
                                     currentlyPlayingId={previewingTrackId}
                                     onPlayStart={setPreviewingTrackId}
                                     onPlayEnd={() => setPreviewingTrackId(null)}
-                                    onDurationDetected={handleTrackDurationDetected}
                                   />
                                 </div>
                                 <p className="text-xs text-slate-500 line-clamp-1">{track.description}</p>
-                                {track.duration > 0 && (
-                                  <span className="text-[10px] text-amber-400/70 mt-0.5 block">{formatDuration(track.duration)}</span>
-                                )}
                               </button>
                             ))}
                           </div>
                           {(() => { const remaining = tracks.filter(t => !t.category).length - trackShowLimit; if (remaining > 0) return (
-                            <button onClick={() => setTrackShowLimit(prev => prev + 15)} className="w-full text-center text-sm text-purple-400 hover:text-purple-300 py-2 rounded-lg border border-white/10 hover:border-purple-500/30 transition-all duration-200 hover:bg-purple-500/5">
+                            <button onClick={() => setTrackShowLimit(prev => prev + 15)} className="w-full text-center text-sm text-purple-400 hover:text-purple-300 py-2 rounded-lg border border-white/5 hover:border-purple-500/30 transition-all">
                               Ver mais {remaining}
                             </button>
                           ); return null; })()}
@@ -2240,9 +2420,9 @@ export default function VozProClient() {
                           <button
                             key={cat.name}
                             onClick={() => setSelectedTrackCategory(cat.name)}
-                            className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-purple-500/10 hover:border-purple-500/40 cursor-pointer group"
+                            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/10 bg-white/5 hover:bg-purple-500/10 hover:border-purple-500/50 transition-all duration-200 cursor-pointer group"
                           >
-                            <span className="text-base group-hover:scale-110 transition-transform duration-300">{cat.emoji || '📁'}</span>
+                            <span className="text-base group-hover:scale-110 transition-transform">{cat.emoji || '📁'}</span>
                             <span className="text-sm font-medium text-white whitespace-nowrap">{cat.name}</span>
                             <span className="text-xs text-slate-500 bg-white/5 px-1.5 py-0.5 rounded-md">{cat.count}</span>
                           </button>
@@ -2281,7 +2461,7 @@ export default function VozProClient() {
                             className={`p-3 rounded-xl border text-left transition-all ${
                               selectedTrackId === track.id
                                 ? 'border-purple-500 bg-purple-500/20'
-                                : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
+                                : 'border-white/10 bg-white/5 hover:border-white/20'
                             }`}
                           >
                             <div className="flex items-center gap-2 mb-1">
@@ -2290,23 +2470,19 @@ export default function VozProClient() {
                                 {track.name}
                               </span>
                               <VoicePreviewButton
-                                audioUrl={toProxyAudioUrl(track.audioPath) || undefined}
+                                audioUrl={track.audioPath || undefined}
                                 voiceId={track.id}
                                 currentlyPlayingId={previewingTrackId}
                                 onPlayStart={setPreviewingTrackId}
                                 onPlayEnd={() => setPreviewingTrackId(null)}
-                                onDurationDetected={handleTrackDurationDetected}
                               />
                             </div>
                             <p className="text-xs text-slate-500 line-clamp-1">{track.description}</p>
-                            {track.duration > 0 && (
-                              <span className="text-[10px] text-amber-400/70 mt-0.5 block">{formatDuration(track.duration)}</span>
-                            )}
                           </button>
                         ))}
                       </div>
                       {(() => { const remaining = tracks.length - trackShowLimit; if (remaining > 0) return (
-                        <button onClick={() => setTrackShowLimit(prev => prev + 15)} className="w-full text-center text-sm text-purple-400 hover:text-purple-300 py-2 rounded-lg border border-white/10 hover:border-purple-500/30">
+                        <button onClick={() => setTrackShowLimit(prev => prev + 15)} className="w-full text-center text-sm text-purple-400 hover:text-purple-300 py-2 rounded-lg border border-white/5 hover:border-purple-500/30 transition-all">
                           Ver mais {remaining}
                         </button>
                       ); return null; })()}
@@ -2318,10 +2494,10 @@ export default function VozProClient() {
                           </div>
                           <Slider value={[trackVolume]} onValueChange={([v]) => setTrackVolume(v)} min={0} max={1} step={0.05} className="w-full" />
                           <div className="pt-3 border-t border-white/10">
-                            <button onClick={() => setShowDuckingSettings(!showDuckingSettings)} className="flex items-center gap-2 text-sm text-slate-400 hover:text-violet-300 transition-colors duration-200 w-full hover:bg-white/5 -ml-2 px-2 py-1 rounded-lg">
+                            <button onClick={() => setShowDuckingSettings(!showDuckingSettings)} className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-300 transition-colors w-full">
                               <Volume2 className="w-4 h-4" />
                               Controles de Ducking
-                              <ChevronDown className={`w-3 h-3 ml-auto transition-transform duration-300 ${showDuckingSettings ? 'rotate-180' : ''}`} />
+                              <ChevronDown className={`w-3 h-3 ml-auto transition-transform ${showDuckingSettings ? 'rotate-180' : ''}`} />
                             </button>
                             {showDuckingSettings && (
                               <div className="mt-3 space-y-3">
@@ -2393,97 +2569,63 @@ export default function VozProClient() {
 
             {/* Advanced Settings */}
             <details className="group">
-              <summary className="flex items-center gap-2 cursor-pointer text-sm text-slate-400 hover:text-violet-300 transition-colors duration-200 py-1">
+              <summary className="flex items-center gap-2 cursor-pointer text-sm text-slate-400 hover:text-slate-300 transition-colors">
                 <Settings2 className="w-4 h-4" />
                 Configurações Avançadas
-                <ChevronRight className="w-3 h-3 transition-transform duration-200 group-open:rotate-90" />
+                <ChevronRight className="w-3 h-3 transition-transform group-open:rotate-90" />
               </summary>
               <Card className="mt-2 bg-white/5 border-white/10 backdrop-blur">
                 <CardContent className="pt-5 space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <div className="flex justify-between items-center">
+                      <div className="flex justify-between">
                         <label className="text-xs text-slate-400">Passos</label>
-                        <input type="number" value={numStep} onChange={(e) => setNumStep(parseInt(e.target.value) || 4)} className="w-14 px-1.5 py-0.5 text-xs bg-white/5 border border-white/10 rounded text-slate-300 text-right focus:outline-none focus:border-violet-400" min={4} max={64} step={4} />
+                        <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{numStep}</Badge>
                       </div>
-                      <Slider value={[numStep]} onValueChange={([v]) => setNumStep(v)} min={4} max={64} step={4} />
+                      <Slider value={[numStep]} onValueChange={([v]) => setNumStep(v)} min={4} max={64} step={1} />
                     </div>
                     <div className="space-y-2">
-                      <div className="flex justify-between items-center">
+                      <div className="flex justify-between">
                         <label className="text-xs text-slate-400">Guia (CFG)</label>
-                        <input type="number" value={guidanceScale.toFixed(1)} onChange={(e) => setGuidanceScale(parseFloat(e.target.value) || 0)} className="w-14 px-1.5 py-0.5 text-xs bg-white/5 border border-white/10 rounded text-slate-300 text-right focus:outline-none focus:border-violet-400" min={0} max={4} step={0.1} />
+                        <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{guidanceScale.toFixed(1)}</Badge>
                       </div>
                       <Slider value={[guidanceScale]} onValueChange={([v]) => setGuidanceScale(v)} min={0} max={4} step={0.1} />
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <label className="text-xs text-slate-400">Velocidade</label>
-                      <input type="number" value={speed.toFixed(1)} onChange={(e) => setSpeed(parseFloat(e.target.value) || 1.0)} className="w-14 px-1.5 py-0.5 text-xs bg-white/5 border border-white/10 rounded text-slate-300 text-right focus:outline-none focus:border-violet-400" min={0.5} max={1.5} step={0.1} />
-                    </div>
-                    <Slider value={[speed]} onValueChange={([v]) => setSpeed(v)} min={0.5} max={1.5} step={0.1} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs text-slate-400">Denoise (remover ruído do ref)</label>
-                    <button
-                      onClick={() => setDenoise(!denoise)}
-                      className={`relative w-9 h-5 rounded-full transition-colors ${denoise ? 'bg-emerald-500' : 'bg-white/10'}`}
-                    >
-                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${denoise ? 'translate-x-4' : ''}`} />
-                    </button>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs text-slate-400">Pós-processar (remover silêncios longos)</label>
-                    <button
-                      onClick={() => setPostprocessOutput(!postprocessOutput)}
-                      className={`relative w-9 h-5 rounded-full transition-colors ${postprocessOutput ? 'bg-emerald-500' : 'bg-white/10'}`}
-                    >
-                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${postprocessOutput ? 'translate-x-4' : ''}`} />
-                    </button>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs text-slate-400">Pré-processar ref (remover silêncios)</label>
-                    <button
-                      onClick={() => setPreprocessPrompt(!preprocessPrompt)}
-                      className={`relative w-9 h-5 rounded-full transition-colors ${preprocessPrompt ? 'bg-emerald-500' : 'bg-white/10'}`}
-                    >
-                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${preprocessPrompt ? 'translate-x-4' : ''}`} />
-                    </button>
-                  </div>
-                  <div className="space-y-2">
                     <div className="flex justify-between">
-                      <label className="text-xs text-slate-400">Duração alvo (seg, vazio = auto)</label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          value={targetDuration ?? ''}
-                          onChange={(e) => setTargetDuration(e.target.value ? parseFloat(e.target.value) : null)}
-                          placeholder="Auto"
-                          className="w-16 px-2 py-0.5 text-xs bg-white/5 border border-white/10 rounded text-slate-300 text-center focus:outline-none focus:border-violet-400"
-                          min={1}
-                          max={120}
-                          step={0.5}
-                        />
-                        <button
-                          onClick={() => setTargetDuration(null)}
-                          className="text-xs text-slate-500 hover:text-violet-300 transition-colors"
-                        >
-                          Reset
-                        </button>
-                      </div>
+                      <label className="text-xs text-slate-400">Velocidade</label>
+                      <Badge variant="outline" className="text-xs border-white/10 text-slate-500">{speed.toFixed(2)}x</Badge>
                     </div>
+                    <Slider value={[speed]} onValueChange={([v]) => setSpeed(v)} min={0.5} max={1.5} step={0.05} />
                   </div>
                 </CardContent>
               </Card>
             </details>
 
-            {/* Generate button moved to fixed bottom bar */}
+            {/* Generate Button */}
+            <Button
+              onClick={handleGenerate}
+              disabled={isGenerating || !text.trim() || (!selectedVariationId && !uploadedVoiceUrl)}
+              className="w-full h-14 text-lg font-bold bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white shadow-xl shadow-violet-500/25 disabled:opacity-50"
+            >
+              {isGenerating ? (
+                <>
+                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                  Gerando...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-5 h-5 mr-2" />
+                  Gerar Voz
+                </>
+              )}
+            </Button>
           </div>
 
           {/* Right Panel - Output */}
           <div className="lg:col-span-2 space-y-5">
             <Card className="bg-white/5 border-white/10 backdrop-blur sticky top-20">
-              
               <CardHeader className="pb-3">
                 <CardTitle className="text-white flex items-center gap-2 text-lg">
                   <Volume2 className="w-5 h-5 text-violet-400" />
@@ -2495,17 +2637,16 @@ export default function VozProClient() {
                   <div className="space-y-4">
                     {/* Audio player */}
                     <div className="bg-gradient-to-br from-violet-500/10 to-purple-500/10 rounded-xl p-4 border border-violet-500/20">
-                                            <audio
+                      <audio
                         ref={resultAudioRef}
                         src={mixedAudioUrl || audioUrl || undefined}
-                        className="w-full relative z-10"
+                        className="w-full"
                         controls
-                        controlsList="nodownload"
                         autoPlay
                       />
                     </div>
 
-                    {/* Status badges + duração */}
+                    {/* Status badges */}
                     <div className="flex flex-wrap gap-2">
                       {selectedVoice && (
                         <Badge variant="outline" className="border-violet-500/30 text-violet-300">
@@ -2521,15 +2662,6 @@ export default function VozProClient() {
                         <Badge variant="outline" className="border-emerald-500/30 text-emerald-300">
                           <Music className="w-3 h-3 mr-1" />
                           {selectedTrack.name}
-                        </Badge>
-                      )}
-                      {audioDuration !== null && (
-                        <Badge variant="outline" className="border-amber-500/30 text-amber-300">
-                          <AudioWaveform className="w-3 h-3 mr-1" />
-                          {audioDuration >= 60
-                            ? `${Math.floor(audioDuration / 60)}min ${Math.round(audioDuration % 60)}s`
-                            : `${Math.round(audioDuration * 10) / 10}s`
-                          }
                         </Badge>
                       )}
                     </div>
@@ -2552,17 +2684,11 @@ export default function VozProClient() {
                         <Square className="w-4 h-4" />
                       </Button>
                       <Button
-                        onClick={handleDownloadClick}
+                        onClick={handleDownload}
                         className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white gap-1.5"
                       >
                         <Download className="w-4 h-4" />
-                        {paywallEnabled
-                          ? (paymentExempt
-                            ? 'Baixar (grátis)'
-                            : (freeDownloads > 0
-                              ? `Baixar (${freeDownloads} grátis)`
-                              : `Baixar R$${paymentAmount}`))
-                          : 'Baixar'}
+                        Baixar MP3
                       </Button>
                     </div>
 
@@ -2594,7 +2720,7 @@ export default function VozProClient() {
                             const el = resultAudioRef.current
                             if (el) {
                               const wasPlaying = !el.paused
-                              el.src = previewUrl || audioUrl
+                              el.src = audioUrl
                               if (wasPlaying) el.play().catch(() => {})
                             }
                           }}
@@ -2607,36 +2733,17 @@ export default function VozProClient() {
                 ) : (
                   <div className="flex flex-col items-center justify-center py-12 text-center">
                     <div className="w-20 h-20 rounded-full bg-violet-500/10 flex items-center justify-center mb-4">
-                        {isGenerating ? (
-                          <Loader2 className="w-10 h-10 text-violet-400 animate-spin" />
-                        ) : (
-                          <AudioWaveform className="w-10 h-10 text-violet-500/40" />
-                        )}
+                      {isGenerating ? (
+                        <Loader2 className="w-10 h-10 text-violet-400 animate-spin" />
+                      ) : (
+                        <AudioWaveform className="w-10 h-10 text-violet-500/50" />
+                      )}
                     </div>
                     <p className="text-slate-400">
-                      {isGenerating
-                        ? (queueStatus === 'waiting'
-                          ? `Posição ${queuePosition} na fila...`
-                          : 'Gerando seu áudio...')
-                        : 'Nenhum áudio gerado ainda'}
+                      {isGenerating ? 'Gerando seu áudio...' : 'Nenhum áudio gerado ainda'}
                     </p>
-                    {isGenerating && queueStatus === 'waiting' && (
-                      <div className="space-y-1 mt-2">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <Users className="w-4 h-4 text-amber-400" />
-                        </div>
-                        <p className="text-xs text-amber-400 mt-2">
-                          Aguarde sua vez na fila de geração
-                        </p>
-                      </div>
-                    )}
-                    {isGenerating && queueStatus !== 'waiting' && (
-                      <div className="space-y-1 mt-2">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <div className="w-1 h-1 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-                          <div className="w-1 h-1 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: '100ms' }} />
-                          <div className="w-1 h-1 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: '200ms' }} />
-                        </div>
+                    {isGenerating && (
+                      <div className="space-y-1">
                         <p className="text-xs text-slate-500 mt-2">
                           {generatingTime < 5
                             ? 'Iniciando geração...'
@@ -2645,7 +2752,7 @@ export default function VozProClient() {
                               : `Ainda processando... ${generatingTime}s`}
                         </p>
                         {generatingTime >= 45 && (
-                          <p className="text-[10px] text-amber-400/70">
+                          <p className="text-[10px] text-yellow-500/70">
                             A geracao pode levar alguns minutos, dependendo do texto e servidor.
                           </p>
                         )}
@@ -2656,143 +2763,57 @@ export default function VozProClient() {
               </CardContent>
             </Card>
 
+            {/* Info card */}
+            <Card className="bg-white/5 border-white/10 backdrop-blur">
+              <CardContent className="pt-5">
+                <div className="space-y-3 text-sm text-slate-400">
+                  <h3 className="font-medium text-slate-300">Como funciona</h3>
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-2">
+                      <Badge variant="outline" className="border-violet-500/30 text-violet-400 shrink-0 mt-0.5">1</Badge>
+                      <p>Escolha uma voz e o estilo/emissão desejado</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <Badge variant="outline" className="border-violet-500/30 text-violet-400 shrink-0 mt-0.5">2</Badge>
+                      <p>Digite o texto que deseja sintetizar</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <Badge variant="outline" className="border-violet-500/30 text-violet-400 shrink-0 mt-0.5">3</Badge>
+                      <p>Opcionalmente, adicione uma trilha musical de fundo</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <Badge variant="outline" className="border-violet-500/30 text-violet-400 shrink-0 mt-0.5">4</Badge>
+                      <p>Clique em &quot;Gerar Voz&quot; e aguarde o resultado</p>
+                    </div>
+                  </div>
+                  <Separator className="bg-white/10" />
+                  <p className="text-xs text-slate-500">
+                    A emoção da voz vem do áudio de referência usado na clonagem.
+                    Cada variação de emoção usa um áudio diferente, capturando o tom e a entonação automaticamente.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Debug/Developer Panel */}
             <details open={debugOpen} className="group">
               <summary
                 onClick={() => setDebugOpen(!debugOpen)}
-                className="flex items-center gap-2 cursor-pointer text-sm text-slate-500 hover:text-slate-300 transition-colors duration-200 py-1"
+                className="flex items-center gap-2 cursor-pointer text-sm text-slate-500 hover:text-slate-400 transition-colors"
               >
                 <Bug className="w-4 h-4" />
                 Painel de Debug
-                <ChevronDown className={`w-3 h-3 transition-transform duration-300 ${debugOpen ? 'rotate-180' : ''}`} />
+                <ChevronDown className={`w-3 h-3 transition-transform ${debugOpen ? 'rotate-180' : ''}`} />
               </summary>
               <Card className="mt-2 bg-white/5 border-white/10 backdrop-blur">
                 <CardContent className="pt-5 space-y-3">
-                  {/* === CHUNKING INFO === */}
-                  {(lastGenResponse as Record<string, unknown>)?.chunking && (
-                    <div className="space-y-2">
-                      <span className="text-xs font-semibold text-blue-300">Chunking Ativo (Anti-Postprocess)</span>
-                      <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-2.5 text-xs">
-                        {(() => {
-                          const c = (lastGenResponse as Record<string, unknown>).chunking as Record<string, unknown>
-                          const mode = (lastGenResponse as Record<string, unknown>).mode as string
-                          const chunks = c.chunks as Array<{ text: string; pauseAfterMs: number; punctuation: string }> || []
-                          return (
-                            <>
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="font-semibold text-blue-400">
-                                  {c.totalChunks} chunks — modo: {mode}
-                                </span>
-                              </div>
-                              <div className="text-blue-300/80 text-[11px] mb-1.5">
-                                Texto dividido em {c.totalChunks} partes (max 250 chars) para contornar corte do postprocess.
-                                Cada chunk gerado separadamente e concatenado com silêncio.
-                              </div>
-                              <div className="space-y-1">
-                                {chunks.map((chunk, i) => (
-                                  <div key={i} className="flex items-center gap-2 text-[11px] text-slate-400">
-                                    <span className="text-blue-400 font-mono w-12">[{i + 1}/{c.totalChunks}]</span>
-                                    <span className="truncate flex-1">{chunk.text}</span>
-                                    <span className="text-slate-500">{chunk.pauseAfterMs}ms</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </>
-                          )
-                        })()}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* === DIAGNÓSTICO DO ÁUDIO === */}
-                  {(lastGenResponse as Record<string, unknown>)?.audioDiagnostics && (
-                    <div className="space-y-2">
-                      <span className="text-xs font-semibold text-slate-200">Diagnóstico do Áudio</span>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {(() => {
-                          const d = (lastGenResponse as Record<string, unknown>).audioDiagnostics as Record<string, unknown>
-                          const durationOk = d.durationOk as boolean
-                          const wavOk = d.wavHeaderValid as boolean
-                          const durSec = parseFloat(d.audioDurationSec as string)
-                          const minDur = parseFloat(d.expectedMinDuration as string)
-                          const ratio = minDur > 0 ? durSec / minDur : 0
-                          return (
-                            <>
-                              {/* Duração real vs esperada */}
-                              <div className={`col-span-2 sm:col-span-3 rounded-lg p-2.5 text-xs ${durationOk ? 'bg-green-500/10 border border-green-500/20' : 'bg-red-500/10 border border-red-500/20'}`}>
-                                <div className="flex items-center gap-2 mb-1">
-                                  <span className={`font-semibold ${durationOk ? 'text-green-400' : 'text-red-400'}`}>
-                                    {durationOk ? '✓' : '⚠'} Duração: {d.audioDurationSec}s
-                                  </span>
-                                  <span className="text-slate-500">
-                                    (mínimo esperado: {d.expectedMinDuration}s para {d.textLength} chars)
-                                  </span>
-                                </div>
-                                {!durationOk && (
-                                  <div className="text-red-300/80 text-[11px]">
-                                    O áudio está {((1 - ratio) * 100).toFixed(0)}% mais curto que o esperado. 
-                                    Possível corte pelo postprocess_output do OmniVoice.
-                                  </div>
-                                )}
-                                {/* Barra visual de proporção */}
-                                <div className="mt-1.5 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                                  <div 
-                                    className={`h-full rounded-full transition-all ${durationOk ? 'bg-green-500' : 'bg-red-500'}`}
-                                    style={{ width: `${Math.min(100, ratio * 100)}%` }}
-                                  />
-                                </div>
-                              </div>
-                              {/* Texto */}
-                              <div className="rounded-lg bg-slate-800/50 p-2 text-[11px]">
-                                <div className="text-slate-500">Texto</div>
-                                <div className="text-slate-200 font-mono">{d.textLength} chars</div>
-                              </div>
-                              {/* Tamanho arquivo */}
-                              <div className="rounded-lg bg-slate-800/50 p-2 text-[11px]">
-                                <div className="text-slate-500">Arquivo</div>
-                                <div className="text-slate-200 font-mono">{d.fileSizeKB} KB</div>
-                              </div>
-                              {/* Sample Rate */}
-                              <div className="rounded-lg bg-slate-800/50 p-2 text-[11px]">
-                                <div className="text-slate-500">Sample Rate</div>
-                                <div className="text-slate-200 font-mono">{d.sampleRate} Hz</div>
-                              </div>
-                              {/* Formato */}
-                              <div className="rounded-lg bg-slate-800/50 p-2 text-[11px]">
-                                <div className="text-slate-500">Formato</div>
-                                <div className="text-slate-200 font-mono">{d.bitsPerSample}bit / {d.channels}ch</div>
-                              </div>
-                              {/* Delay SSE */}
-                              <div className="rounded-lg bg-slate-800/50 p-2 text-[11px]">
-                                <div className="text-slate-500">Delay após SSE</div>
-                                <div className="text-slate-200 font-mono">{(d.delayAfterSse as number) / 1000}s</div>
-                              </div>
-                              {/* Silêncio adicionado */}
-                              <div className="rounded-lg bg-slate-800/50 p-2 text-[11px]">
-                                <div className="text-slate-500">Silêncio padding</div>
-                                <div className="text-slate-200 font-mono">{d.silencePadSec}s</div>
-                              </div>
-                              {/* WAV Header */}
-                              <div className={`rounded-lg p-2 text-[11px] ${wavOk ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
-                                <div className="text-slate-500">WAV Header</div>
-                                <div className={`font-mono ${wavOk ? 'text-green-400' : 'text-red-400'}`}>
-                                  {wavOk ? '✓ Válido' : '✗ Truncado'}
-                                </div>
-                              </div>
-                            </>
-                          )
-                        })()}
-                      </div>
-                    </div>
-                  )}
-
                   {/* Debug Steps Timeline */}
                   {(lastGenResponse as Record<string, unknown>)?.debug && 
                     typeof (lastGenResponse as Record<string, unknown>)?.debug === 'object' && 
                     ((lastGenResponse as Record<string, unknown>)?.debug as Record<string, unknown>)?.steps ? (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-slate-200">Log de Geração</span>
+                        <span className="text-xs font-semibold text-slate-300">Log de Geração</span>
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] text-slate-500">
                             {(((lastGenResponse as Record<string, unknown>)?.debug as Record<string, unknown>)?.totalDuration as number / 1000).toFixed(1)}s total
@@ -2800,7 +2821,7 @@ export default function VozProClient() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-5 px-1.5 text-slate-500 hover:text-white hover:bg-white/5 transition-colors duration-200"
+                            className="h-5 px-1.5 text-slate-500 hover:text-white"
                             onClick={() => { navigator.clipboard.writeText(JSON.stringify(lastGenResponse, null, 2)); toast.success('Debug copiado!') }}
                           >
                             <Copy className="w-3 h-3" />
@@ -2809,7 +2830,7 @@ export default function VozProClient() {
                       </div>
                       <div className="space-y-1 max-h-60 overflow-auto">
                         {(((lastGenResponse as Record<string, unknown>)?.debug as Record<string, unknown>)?.steps as Array<Record<string, string>>).map((step: Record<string, string>, i: number) => (
-                          <div key={i} className={`flex items-start gap-2 text-[11px] font-mono px-2 py-1 rounded-lg ${
+                          <div key={i} className={`flex items-start gap-2 text-[11px] font-mono px-2 py-1 rounded ${
                             step.status === 'error' ? 'bg-red-500/10 border border-red-500/20' :
                             step.status === 'ok' ? 'bg-green-500/5' :
                             step.status === 'warn' ? 'bg-yellow-500/5' :
@@ -2857,7 +2878,7 @@ export default function VozProClient() {
                           <Copy className="w-3 h-3" />
                         </Button>
                       </div>
-                      <pre className="bg-slate-900/50 border border-white/10 rounded-lg p-2 text-[10px] text-slate-400 max-h-40 overflow-auto whitespace-pre-wrap break-all">
+                      <pre className="bg-slate-900/50 border border-white/10 rounded p-2 text-[10px] text-slate-400 max-h-40 overflow-auto whitespace-pre-wrap break-all">
 {JSON.stringify(lastGenResponse, null, 2)}
                       </pre>
                     </div>
@@ -2869,209 +2890,15 @@ export default function VozProClient() {
             </details>
           </div>
         </div>
-
-        {/* Como funciona - abaixo do grid */}
-        <Card className="bg-white/5 border-white/10 backdrop-blur">
-          <CardContent className="pt-5">
-            <div className="space-y-3 text-sm text-slate-400">
-              <h3 className="font-medium text-slate-300">Como funciona</h3>
-              <div className="space-y-2">
-                <div className="flex items-start gap-2">
-                  <Badge variant="outline" className="border-violet-500/30 text-violet-400 shrink-0 mt-0.5">1</Badge>
-                  <p>Escolha uma voz e o estilo/emissão desejado</p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <Badge variant="outline" className="border-violet-500/30 text-violet-400 shrink-0 mt-0.5">2</Badge>
-                  <p>Digite o texto que deseja sintetizar</p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <Badge variant="outline" className="border-violet-500/30 text-violet-400 shrink-0 mt-0.5">3</Badge>
-                  <p>Opcionalmente, adicione uma trilha musical de fundo</p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <Badge variant="outline" className="border-violet-500/30 text-violet-400 shrink-0 mt-0.5">4</Badge>
-                  <p>Clique em &quot;Gerar Voz&quot; e aguarde o resultado</p>
-                </div>
-              </div>
-              <Separator className="bg-white/[0.06]" />
-              <p className="text-xs text-slate-500 leading-relaxed">
-                A emoção da voz vem do áudio de referência usado na clonagem.
-                Cada variação de emoção usa um áudio diferente, capturando o tom e a entonação automaticamente.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
       </main>
 
-      {/* ===== FIXED BOTTOM BAR ===== */}
-      <div className="fixed bottom-0 left-0 right-0 z-50">
-        {/* Backdrop when expanded */}
-        {mobilePlayerExpanded && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setMobilePlayerExpanded(false)} style={{ zIndex: 40 }} />
-        )}
-
-        {/* Expanded audio result — slides up when there's audio */}
-        {mobilePlayerExpanded && (audioUrl || mixedAudioUrl) && (
-          <div
-            className="fixed bottom-16 left-0 right-0 bg-slate-900 border-t border-white/10 rounded-t-2xl max-h-[60vh] overflow-y-auto z-50 px-4 pb-4 pt-3 space-y-3"
-          >
-            <div className="flex justify-center">
-              <div className="w-10 h-1 rounded-full bg-white/20" />
-            </div>
-
-            {/* Audio player */}
-            <div className="bg-gradient-to-br from-violet-500/10 to-purple-500/10 rounded-xl p-4 border border-violet-500/20">
-              <audio
-                ref={resultAudioRef}
-                src={mixedAudioUrl || audioUrl || undefined}
-                className="w-full relative z-10"
-                controls
-                controlsList="nodownload"
-                autoPlay
-              />
-            </div>
-
-            {/* Status badges + duração */}
-            <div className="flex flex-wrap gap-2">
-              {selectedVoice && (
-                <Badge variant="outline" className="border-violet-500/30 text-violet-300 text-xs">{selectedVoice.name}</Badge>
-              )}
-              {selectedVariation && (
-                <Badge variant="outline" className="border-purple-500/30 text-purple-300 text-xs">{selectedVariation.emoji} {selectedVariation.label}</Badge>
-              )}
-              {audioDuration !== null && (
-                <Badge variant="outline" className="border-amber-500/30 text-amber-300 text-xs">
-                  {audioDuration >= 60
-                    ? `${Math.floor(audioDuration / 60)}min ${Math.round(audioDuration % 60)}s`
-                    : `${Math.round(audioDuration * 10) / 10}s`
-                  }
-                </Badge>
-              )}
-            </div>
-
-            {/* Controls */}
-            <div className="flex gap-2">
-              <Button onClick={togglePlayback} variant="outline" size="sm" className="flex-1 border-violet-500/40 bg-violet-500/10 text-violet-100 gap-1.5">
-                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                {isPlaying ? 'Pausar' : 'Ouvir'}
-              </Button>
-              <Button onClick={stopPlayback} variant="outline" size="sm" className="border-slate-500/40 bg-slate-500/10 text-slate-200">
-                <Square className="w-4 h-4" />
-              </Button>
-              <Button onClick={handleDownloadClick} size="sm" className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white gap-1.5">
-                <Download className="w-4 h-4" />
-                Baixar
-              </Button>
-            </div>
-
-            {/* Switch voice/mixed */}
-            {isMixed && audioUrl && mixedAudioUrl && (
-              <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
-                <Button variant="ghost" size="sm" className="h-7 px-3 text-xs" onClick={() => { const a = resultAudioRef.current; if (a) { a.src = mixedAudioUrl; a.play().catch(() => {}) } }}>Com trilha</Button>
-                <span className="text-slate-600">|</span>
-                <Button variant="ghost" size="sm" className="h-7 px-3 text-xs" onClick={() => { const a = resultAudioRef.current; if (a) { a.src = previewUrl || audioUrl; a.play().catch(() => {}) } }}>Somente voz</Button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* FIXED BOTTOM BAR — always visible with Generate button */}
-        <div className="relative z-50 bg-slate-900/95 border-t border-white/10 px-4 py-3">
-          
-
-          {/* Audio generated — compact bar with play + result indicator */}
-          {(audioUrl || mixedAudioUrl) && !isGenerating && (
-            <div
-              className="flex items-center gap-3 mb-2 pb-2 border-b border-white/10 cursor-pointer"
-              onClick={() => setMobilePlayerExpanded(!mobilePlayerExpanded)}
-            >
-              <button
-                onClick={(e) => { e.stopPropagation(); togglePlayback() }}
-                className="w-9 h-9 rounded-full bg-violet-500 flex items-center justify-center shrink-0"
-              >
-                {isPlaying ? <Pause className="w-3.5 h-3.5 text-white" /> : <Play className="w-3.5 h-3.5 text-white ml-0.5" />}
-              </button>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-white font-medium truncate">
-                  {selectedVoice?.name || 'Áudio gerado'}
-                  {selectedVariation && <span className="text-slate-400"> — {selectedVariation.label}</span>}
-                  {audioDuration !== null && (
-                    <span className="text-amber-400 ml-2">
-                      {audioDuration >= 60
-                        ? `${Math.floor(audioDuration / 60)}:${String(Math.round(audioDuration % 60)).padStart(2, '0')}`
-                        : `${Math.round(audioDuration * 10) / 10}s`
-                      }
-                    </span>
-                  )}
-                </p>
-                <p className="text-[10px] text-slate-500">
-                  {mobilePlayerExpanded ? 'Toque para fechar' : 'Toque para ouvir'}
-                </p>
-              </div>
-              <button
-                onClick={(e) => { e.stopPropagation(); handleDownloadClick() }}
-                className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0 active:scale-95 transition-transform"
-              >
-                <Download className="w-3.5 h-3.5 text-emerald-400" />
-              </button>
-            </div>
-          )}
-
-          {/* Generating indicator */}
-          {isGenerating && (
-            <div className="flex items-center gap-2 mb-2 pb-2 border-b border-white/10">
-              <Loader2 className="w-4 h-4 text-violet-400 animate-spin shrink-0" />
-              {queueStatus === 'waiting' ? (
-                <span className="text-xs text-amber-300 flex-1">
-                  <Users className="w-3 h-3 inline mr-1" />
-                  Posição {queuePosition} na fila... {generatingTime}s
-                </span>
-              ) : (
-                <span className="text-xs text-violet-300 flex-1">Gerando áudio... {generatingTime}s</span>
-              )}
-            </div>
-          )}
-
-          {/* Generate Button — always in the fixed bar on mobile */}
-          <Button
-            onClick={handleGenerate}
-            disabled={isGenerating || !text.trim() || (voiceMode === 'clone' && !selectedVariationId && !uploadedVoiceUrl)}
-            className="w-full h-12 text-base font-bold bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white shadow-xl shadow-violet-500/25 disabled:opacity-50"
-            title={
-              !selectedVariationId && !uploadedVoiceUrl && voiceMode === 'clone'
-                ? 'Selecione uma voz ou faça upload de um áudio'
-                : !text.trim()
-                  ? 'Digite o texto para gerar'
-                  : undefined
-            }
-          >
-            {isGenerating ? (
-              <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Gerando...</>
-            ) : !selectedVariationId && !uploadedVoiceUrl && voiceMode === 'clone' ? (
-              <><Sparkles className="w-4 h-4 mr-2" />Selecione uma Voz</>
-            ) : (
-              <><Sparkles className="w-4 h-4 mr-2" />Gerar Voz</>
-            )}
-          </Button>
+      {/* Footer */}
+      <footer className="border-t border-white/10 bg-slate-900/80 backdrop-blur-sm mt-auto">
+        <div className="container mx-auto px-4 py-4 flex items-center justify-between text-xs text-slate-500">
+          <p>VozPro — Vozes Profissionais com IA</p>
+          <p>Powered by VozPro</p>
         </div>
-      </div>
-
-      {/* Bottom spacing so content isn't hidden behind fixed bar */}
-      <div className="h-24" />
-
-      {/* Footer hidden — fixed bottom bar replaces it */}
-
-      {/* Payment Dialog (Paywall) */}
-      <PaymentDialog
-        open={paymentDialogOpen}
-        onOpenChange={setPaymentDialogOpen}
-        onPaymentApproved={handlePaymentApproved}
-        onEmailSent={() => toast.success('Áudio enviado por e-mail!', { duration: 3000 })}
-        audioUrl={audioUrl || ''}
-        amount={paymentAmount}
-        isPaymentExempt={paymentExempt}
-        freeDownloads={freeDownloads}
-      />
+      </footer>
     </div>
   )
 }

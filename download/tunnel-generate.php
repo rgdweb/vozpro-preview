@@ -36,9 +36,36 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-// ===================== SEGURANCA =====================
-// Protegido por HTTPS (Let's Encrypt) + Rate limit simples por sessao.
-// Endpoint so acessivel via POST — GET retorna 405.
+// ===================== TOKEN HMAC =====================
+$token = $_SERVER['HTTP_X_GENERATE_TOKEN'] ?? '';
+if (empty($token)) {
+    http_response_code(401);
+    echo json_encode(['error' => 'Token necessario']);
+    exit;
+}
+
+$parts = explode('.', $token);
+if (count($parts) !== 2) {
+    http_response_code(401);
+    echo json_encode(['error' => 'Token invalido']);
+    exit;
+}
+
+$timestamp = (int)$parts[0];
+$receivedHmac = $parts[1];
+
+if (time() - $timestamp > 1800 || $timestamp > time() + 60) {
+    http_response_code(401);
+    echo json_encode(['error' => 'Token expirado']);
+    exit;
+}
+
+$expectedHmac = hash_hmac('sha256', (string)$timestamp, API_KEY);
+if (!hash_equals($expectedHmac, $receivedHmac)) {
+    http_response_code(401);
+    echo json_encode(['error' => 'Token invalido']);
+    exit;
+}
 
 // ===================== INPUT =====================
 $rawInput = file_get_contents('php://input');
@@ -87,17 +114,26 @@ if (empty($tunnelUrl)) {
 
 // ===================== MONTAR PAYLOAD PRO NATIVE-GENERATE =====================
 $nativePayload = [
-    'text'             => $input['text'] ?? '',
-    'voice_mode'       => $input['voiceMode'] ?? ($input['voice_mode'] ?? 'clone'),
-    'ref_audio_url'    => $input['referenceAudioUrl'] ?? '',
-    'ref_audio_base64' => $input['referenceAudioBase64'] ?? '',
-    'language'         => $input['language'] ?? 'Auto',
-    'instruct'         => $input['instruct'] ?? '',
-    'ref_text'         => $input['refText'] ?? '',
-    'speed'            => $input['speed'] ?? 1.0,
-    'num_step'         => $input['numStep'] ?? 32,
-    'guidance_scale'   => $input['guidanceScale'] ?? 2.0,
+    'text'                 => $input['text'] ?? '',
+    'voice_mode'           => $input['voiceMode'] ?? ($input['voice_mode'] ?? 'clone'),
+    'ref_audio_url'        => $input['referenceAudioUrl'] ?? '',
+    'ref_audio_base64'     => $input['referenceAudioBase64'] ?? '',
+    'language'             => $input['language'] ?? 'Auto',
+    'instruct'             => $input['instruct'] ?? '',
+    'ref_text'             => $input['refText'] ?? '',
+    'speed'                => $input['speed'] ?? 1.0,
+    'num_step'             => $input['numStep'] ?? 32,
+    'guidance_scale'       => $input['guidanceScale'] ?? 2.0,
+    'denoise'              => $input['denoise'] ?? true,
+    'postprocess_output'   => $input['postprocessOutput'] ?? true,
+    'preprocess_prompt'    => $input['preprocessPrompt'] ?? true,
 ];
+
+// Duração alvo: só envia se definido (> 0)
+$targetDuration = $input['targetDuration'] ?? null;
+if ($targetDuration !== null && $targetDuration > 0) {
+    $nativePayload['duration'] = (float)$targetDuration;
+}
 
 // ===================== CHAMAR NATIVE-GENERATE =====================
 $nativeUrl = rtrim($tunnelUrl, '/') . '/api/native-generate';

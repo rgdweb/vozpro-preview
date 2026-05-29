@@ -44,9 +44,19 @@ for ($i = 0; $i -lt 60; $i++) {
     Start-Sleep -Milliseconds 500
     if (Test-Path $outputFile) {
         $content = Get-Content $outputFile -Raw -ErrorAction SilentlyContinue
-        if ($content -match "(https://[a-z0-9\-]+\.trycloudflare\.com)") {
+        # Aceita qualquer URL do cloudflared (trycloudflare.com, cfargotunnel.com, etc)
+        if ($content -match "(https://[a-z0-9\-\.]+\.cloudflare\.com|[a-z0-9\-\.]+\.trycloudflare\.com|[a-z0-9\-\.]+\.cfargotunnel\.com)") {
             $url = $Matches[1]
             break
+        }
+        # Fallback: qualquer URL https que contenha palavras tipicas do cloudflared
+        if (-not $url -and $content -match "(https://[a-z0-9\-]+\.[a-z0-9\-]+\.(?:com|net|dev|io)[^\s\"'\)]*)") {
+            $candidate = $Matches[1]
+            # Filtra apenas URLs que parecem do cloudflared (nao localhost, nao oracle)
+            if ($candidate -notmatch "localhost|127\.0\.0|147\.15\.77" -and $candidate -match "cloud|tunnel|cf|flare") {
+                $url = $candidate
+                break
+            }
         }
     }
 }
@@ -82,6 +92,13 @@ if ($url) {
     Write-Host "[ERRO] Nao conseguiu obter URL do Cloudflared." -ForegroundColor Red
     Write-Host "Verifique se o cloudflared esta instalado:" -ForegroundColor Yellow
     Write-Host "  winget install Cloudflare.cloudflared" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "[DEBUG] Conteudo capturado do cloudflared:" -ForegroundColor DarkGray
+    if (Test-Path $outputFile) {
+        Get-Content $outputFile -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+    } else {
+        Write-Host "  (nenhum output capturado)" -ForegroundColor DarkGray
+    }
     Stop-Job $job -ErrorAction SilentlyContinue
     Read-Host "Pressione Enter para sair"
 }

@@ -15,15 +15,6 @@ USO: python kokoro_server.py --ip 0.0.0.0 --port 7861
 
 import sys
 import os
-import subprocess
-
-# Auto-instalar dependencias
-for _pkg in ["uvicorn", "starlette", "kokoro", "soundfile"]:
-    try:
-        __import__(_pkg)
-    except ImportError:
-        print(f"[Kokoro] Instalando {_pkg}...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", _pkg, "-q"])
 
 import gc as _gc
 import time
@@ -67,7 +58,6 @@ def load_kokoro():
     _kokoro_loading = True
     try:
         from kokoro import KPipeline
-        import soundfile as sf
 
         print("[Kokoro] Carregando modelo Kokoro-82M...")
         start = time.time()
@@ -79,15 +69,6 @@ def load_kokoro():
         _kokoro_ready = True
     except Exception as e:
         print(f"[Kokoro] ERRO ao carregar: {e}")
-        print("[Kokoro] Tentando via pip install kokoro-onnx...")
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "kokoro-onnx", "-q"])
-            from kokoro import KPipeline
-            _kokoro_pipeline = KPipeline(lang_code="b")
-            _kokoro_ready = True
-            print("[Kokoro] Carregado via kokoro-onnx!")
-        except Exception as e2:
-            print(f"[Kokoro] FALHA CRITICA: {e2}")
     finally:
         _kokoro_loading = False
 

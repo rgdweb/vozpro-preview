@@ -51,6 +51,15 @@ from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 
 # ============================================================
+# KOKORO FALLBACK CONFIG
+# ============================================================
+KOKORO_URL = os.environ.get("KOKORO_URL", "")  # Ex: http://localhost:7861
+KOKORO_ENABLED = False  # Sera ativado automaticamente se KOKORO_URL estiver configurada
+KOKORO_VRAM_THRESHOLD = 60  # % de VRAM acima do qual ativa Kokoro como fallback
+_queue_depth = 0  # Contador de requisicoes simultaneas (simples)
+_queue_lock = threading.Lock()
+
+# ============================================================
 # MANUTENCAO AUTOMATICA INTELIGENTE
 # ============================================================
 
@@ -246,6 +255,136 @@ async def maint_cleanup(request):
     })
 
 
+# ============================================================
+# ROUTER: Decide OmniVoice vs Kokoro baseado na carga
+# ============================================================
+
+def _should_use_kokoro(voice_mode, has_ref_audio):
+    """Decide se deve rotear para Kokoro em vez de OmniVoice.
+
+    Retorna True SE:
+    1. Kokoro esta configurado E disponivel
+    2. A geracao NAO precisa de clonagem/design (Kokoro nao suporta)
+    3. A GPU esta sob carga (VRAM alta OU multiplas requisicoes simultaneas)
+    """
+    global KOKORO_ENABLED
+
+    if not KOKORO_URL:
+        return False
+
+    # Clonagem e voice design SEMPRE vão pro OmniVoice
+    if voice_mode in ("clone", "design") or has_ref_audio:
+        return False
+
+    # Verificar VRAM
+    if torch.cuda.is_available():
+        _, reserv, pct = _get_vram()
+        if pct > KOKORO_VRAM_THRESHOLD:
+            print(f"[Router] VRAM em {pct:.0f}% > threshold {KOKORO_VRAM_THRESHOLD}% — roteando para Kokoro")
+            return True
+
+    # Verificar profundidade da fila (se tem mais de 1 req simultanea, desviar para Kokoro)
+    with _queue_lock:
+        if _queue_depth > 1:
+            print(f"[Router] Fila com {_queue_depth} requisicoes — roteando para Kokoro")
+            return True
+
+    return False
+
+
+async def _forward_to_kokoro(body):
+    """Encaminha a requisicao para o servidor Kokoro-82M."""
+    import urllib.request
+
+    kokoro_body = {
+        "text": body.get("text", ""),
+        "speed": body.get("speed", 1.0),
+    }
+
+    data = json.dumps(kokoro_body).encode('utf-8')
+    req = urllib.request.Request(
+        f"{KOKORO_URL}/api/kokoro-generate",
+        data=data,
+        headers={'Content-Type': 'application/json'},
+        method='POST'
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+            result["via_router"] = True
+            return result
+    except Exception as e:
+        print(f"[Router] Kokoro falhou ({e}), caindo de volta para OmniVoice")
+        return None
+
+
+async def smart_generate(request):
+    """Endpoint inteligente: roteia automaticamente entre OmniVoice e Kokoro-82M.
+
+    Logica de roteamento:
+    - clone/design → SEMPRE OmniVoice (Kokoro nao suporta)
+    - auto sem ref audio + GPU sob carga → Kokoro
+    - auto sem ref audio + GPU livre → OmniVoice
+    - Kokoro indisponivel → OmniVoice (fallback)
+
+    Mesma interface do native-generate. Transparente pro frontend.
+    """
+    try:
+        body = await request.json()
+
+        voice_mode = body.get("voice_mode", "auto")
+        has_ref_audio = bool(body.get("ref_audio_url") or body.get("ref_audio_base64"))
+
+        # Decidir: OmniVoice ou Kokoro?
+        use_kokoro = _should_use_kokoro(voice_mode, has_ref_audio)
+
+        if use_kokoro:
+            # Incrementar fila
+            with _queue_lock:
+                global _queue_depth
+                _queue_depth += 1
+
+            try:
+                result = await _forward_to_kokoro(body)
+                if result and result.get("status") == "ok":
+                    return JSONResponse(result)
+                # Se Kokoro falhou, cai pra OmniVoice abaixo
+            finally:
+                with _queue_lock:
+                    _queue_depth = max(0, _queue_depth - 1)
+
+        # OmniVoice (padrao ou fallback do Kokoro)
+        with _queue_lock:
+            _queue_depth += 1
+        try:
+            return await native_generate(request)
+        finally:
+            with _queue_lock:
+                _queue_depth = max(0, _queue_depth - 1)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
+
+
+async def router_status(request):
+    """Status do sistema de roteamento."""
+    _, reserv, pct = _get_vram()
+    return JSONResponse({
+        "engine_primary": "omnivoice",
+        "engine_fallback": "kokoro-82m",
+        "kokoro_url": KOKORO_URL or "not configured",
+        "kokoro_enabled": bool(KOKORO_URL),
+        "vram_threshold": KOKORO_VRAM_THRESHOLD,
+        "vram_current_percent": round(pct, 1),
+        "vram_reserved_gb": round(reserv, 2),
+        "current_queue_depth": _queue_depth,
+        "routing_logic": "auto -> kokoro when VRAM > threshold OR queue > 1; clone/design -> omnivoice always",
+    })
+
+
 async def native_generate(request):
     """Endpoint nativo: JSON -> OmniVoice.generate() -> WAV base64.
 
@@ -423,6 +562,8 @@ app = Starlette(
         Route("/api/maint/status", maint_status, methods=["GET"]),
         Route("/api/maint/cleanup", maint_cleanup, methods=["POST"]),
         Route("/api/native-generate", native_generate, methods=["POST"]),
+        Route("/api/smart-generate", smart_generate, methods=["POST"]),
+        Route("/api/router/status", router_status, methods=["GET"]),
     ],
     middleware=[
         Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]),
@@ -465,10 +606,16 @@ if __name__ == '__main__':
 
     print("=" * 55)
     print(f"  [OK] Endpoints ativos (servidor puro, SEM Gradio):")
-    print(f"       GET  /health                (health check)")
+    print(f"       GET  /health                 (health check)")
     print(f"       GET  /api/maint/status       (VRAM + info)")
     print(f"       POST /api/maint/cleanup      (forcar deep cleanup)")
     print(f"       POST /api/native-generate    (geracao 100% nativa)")
+    print(f"       POST /api/smart-generate     (ROTEADOR: OmniVoice/Kokoro)")
+    print(f"       GET  /api/router/status       (status do roteador)")
+    if KOKORO_URL:
+        print(f"  [OK] Kokoro fallback: {KOKORO_URL}")
+    else:
+        print(f"  [--] Kokoro fallback: nao configurado (set KOKORO_URL=http://localhost:7861)")
     print("=" * 55)
 
     # Subir servidor com uvicorn

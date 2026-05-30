@@ -581,3 +581,37 @@ Stage Summary:
 - Pipeline completo: Frontend -> PHP (Oracle) -> Python (GPU) -> model.generate()
 - Arquivos editados: src/app/page.tsx, download/tunnel-generate.php, local-server/omnivoice_gpu.py, download/omnivoice_gpu.py
 - PENDENTE: Usuario precisa copiar tunnel-generate.php para Oracle e omnivoice_gpu.py para PC GPU
+---
+Task ID: 1
+Agent: Main Agent
+Task: Migrar VozPro do Vercel para Oracle VPS com dominio vozpro.cvmnews.com.br
+
+Work Log:
+- Verificou DNS: vozprooff.com.br NAO resolve (nao registrado no registro.br)
+- vozpro.cvmnews.com.br ja resolve para 147.15.77.137 (A record criado pelo usuario no HostGator)
+- Atualizou Nginx: removeu config vozprooff.com.br, criou vozpro.cvmnews.com.br
+- Gerou certificado SSL Let's Encrypt via certbot (SUCESSO)
+- certbot configurou redirect HTTP->HTTPS automaticamente
+- Clone do repo rgdweb/Omnivoice no Oracle
+- Adicionou output: standalone no next.config.ts
+- Criou .env com DATABASE_URL Oracle, AUDIO_SERVER_URL, etc.
+- Build standalone: OK (55 paginas, 60+ API routes)
+- Copiou static/public/prisma para standalone
+- PM2 iniciado: node server.js na porta 3000
+- PM2 startup configurado: systemd service (auto-restart on boot)
+- HTTPS 200 confirmado externamente
+- HTTP 301 (redirect to HTTPS) confirmado
+
+Stage Summary:
+- Site acessivel em: https://vozpro.cvmnews.com.br
+- SSL valido (Let's Encrypt)
+- PM2 com auto-restart (systemd)
+- Banco de dados: Oracle PostgreSQL (omnivoice)
+- VARIAVEIS DO .env (texto puro - nao tem SMTP/MercadoPago/Blob ainda):
+  - DATABASE_URL, NEXT_PUBLIC_AUDIO_SERVER_URL, AUDIO_SERVER_URL
+  - NEXT_PUBLIC_APP_URL, NEXT_PUBLIC_BASE_URL, ADMIN_PASSWORD, JWT_SECRET
+  - HF_SPACE_URL, NODE_ENV
+- PENDENTE: SMTP, MercadoPago, BLOB_READ_WRITE_TOKEN nao configurados
+  - Essas variaveis estavam criptografadas na Vercel e nao puderam ser extraidas
+  - Usuario pode configurar SMTP e MercadoPago pelo painel admin
+  - BLOB token pode nao ser necessario (usado para Vercel Blob storage)

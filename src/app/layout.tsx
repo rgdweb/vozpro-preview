@@ -13,16 +13,20 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const APP_URL = "https://vozpro.cvmnews.com.br";
+
 export const metadata: Metadata = {
   title: "VozPro - Sintetizador de Voz Profissional com IA",
   description: "Crie vozes profissionais com IA. Clonagem de voz, emoções e trilhas musicais para suas propagandas e conteúdos.",
   icons: {
     icon: "/logo.jpg",
+    apple: "/logo.jpg",
   },
+  metadataBase: new URL(APP_URL),
   openGraph: {
     title: "VozPro - Sintetizador de Voz Profissional com IA",
     description: "Crie vozes profissionais com IA. Clonagem de voz, emoções e trilhas musicais para suas propagandas e conteúdos.",
-    url: "https://omnivoice-umber.vercel.app",
+    url: APP_URL,
     siteName: "VozPro",
     images: [
       {

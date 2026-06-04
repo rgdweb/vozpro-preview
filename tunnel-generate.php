@@ -57,6 +57,10 @@ if (!$input) {
     exit;
 }
 
+// === TEMP DEBUG: log raw input payload (investigacao) ===
+file_put_contents('/tmp/tunnel-debug.log', date('Y-m-d H:i:s') . ' | RAW_INPUT: ' . $rawInput . "\n", FILE_APPEND);
+file_put_contents('/tmp/tunnel-debug.log', date('Y-m-d H:i:s') . ' | voice_mode=' . ($input['voice_mode'] ?? 'NULL') . ' | voiceMode=' . ($input['voiceMode'] ?? 'NULL') . ' | speaker_id=' . ($input['speaker_id'] ?? 'NULL') . ' | speakerId=' . ($input['speakerId'] ?? 'NULL') . "\n", FILE_APPEND);
+
 // ===================== DESCOBRIR TUNNEL URL =====================
 $tunnelUrl = '';
 

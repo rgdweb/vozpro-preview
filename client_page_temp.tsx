@@ -1441,7 +1441,7 @@ export default function VozProClient() {
         }).catch(() => {})
       }
     }
-  }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs, voiceMode, uploadedVoiceUrl, selectedSpeakerId, paywallEnabled, watermarkAudioPath, watermarkVolume])
+  }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs, voiceMode, uploadedVoiceUrl, selectedSpeakerId, selectedSpeakerFile, paywallEnabled, watermarkAudioPath, watermarkVolume])
 
   // Get the active audio URL
   // Se o usuario tem downloads gratis ou e isento, NAO mostra watermark no preview

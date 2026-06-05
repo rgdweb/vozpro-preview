@@ -1,0 +1,3 @@
+{
+  "/api/omnivoice-generate/route": "app/api/omnivoice-generate/route.js"
+}

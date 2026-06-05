@@ -1,0 +1,3 @@
+{
+  "/api/upload-chunk/route": "app/api/upload-chunk/route.js"
+}

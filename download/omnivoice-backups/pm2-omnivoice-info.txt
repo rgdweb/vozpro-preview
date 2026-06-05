@@ -1,0 +1,59 @@
+ Describing process with id 0 - name omnivoice 
+┌───────────────────┬────────────────────────────────────────────┐
+│ status            │ online                                     │
+│ name              │ omnivoice                                  │
+│ namespace         │ default                                    │
+│ version           │ 1.0.0                                      │
+│ restarts          │ 0                                          │
+│ uptime            │ 5m                                         │
+│ script path       │ /home/ubuntu/omnivoice/server.js           │
+│ script args       │ N/A                                        │
+│ error log path    │ /home/ubuntu/.pm2/logs/omnivoice-error.log │
+│ out log path      │ /home/ubuntu/.pm2/logs/omnivoice-out.log   │
+│ pid path          │ /home/ubuntu/.pm2/pids/omnivoice-0.pid     │
+│ interpreter       │ node                                       │
+│ interpreter args  │ N/A                                        │
+│ script id         │ 0                                          │
+│ exec cwd          │ /home/ubuntu/omnivoice                     │
+│ exec mode         │ fork_mode                                  │
+│ node.js version   │ 20.20.2                                    │
+│ node env          │ N/A                                        │
+│ watch & reload    │ ✘                                          │
+│ unstable restarts │ 0                                          │
+│ created at        │ 2026-05-31T20:25:38.826Z                   │
+└───────────────────┴────────────────────────────────────────────┘
+ Actions available 
+┌────────────────────────┐
+│ km:heapdump            │
+│ km:cpu:profiling:start │
+│ km:cpu:profiling:stop  │
+│ km:heap:sampling:start │
+│ km:heap:sampling:stop  │
+└────────────────────────┘
+ Trigger via: pm2 trigger omnivoice <action_name>
+
+ Code metrics value 
+┌────────────────────────┬───────────────────────┐
+│ Heap Size              │ 35.68 MiB             │
+│ Heap Usage             │ 93.52 %               │
+│ Used Heap Size         │ 33.37 MiB             │
+│ Active requests        │ 0                     │
+│ Active handles         │ 4                     │
+│ Event Loop Latency     │ 0.42 ms               │
+│ Event Loop Latency p95 │ 0.98 ms               │
+│ HTTP Mean Latency      │ 4 ms                  │
+│ HTTP P95 Latency       │ 12.199999999999989 ms │
+│ HTTP                   │ 0.69 req/min          │
+└────────────────────────┴───────────────────────┘
+ Divergent env variables from local env 
+┌────────────────┬──────────────────────────────────┐
+│ PWD            │ /home/ubuntu/omnivoice           │
+│ SSH_CONNECTION │ 8.212.10.159 19161 10.0.0.171 22 │
+│ XDG_SESSION_ID │ 1242                             │
+│ SSH_CLIENT     │ 8.212.10.159 19161 22            │
+└────────────────┴──────────────────────────────────┘
+
+ Add your own code metrics: http://bit.ly/code-metrics
+ Use `pm2 logs omnivoice [--lines 1000]` to display logs
+ Use `pm2 env 0` to display environment variables
+ Use `pm2 monit` to monitor CPU and Memory usage omnivoice

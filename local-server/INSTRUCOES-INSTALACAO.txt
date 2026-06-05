@@ -1,0 +1,126 @@
+# INSTRUCOES DE INSTALACAO - PHP LOCAL
+# ======================================
+# Guia passo a passo para rodar PHP na sua maquina Windows
+# Isso elimina o tunnel e resolve os bugs no audio
+
+## PASSO 1: Instalar XAMPP (PHP + Apache)
+
+1. Acesse: https://www.apachefriends.org/download.html
+2. Baixe o XAMPP para Windows (versao 7.4.x ou 8.x)
+3. Execute o instalador
+4. Instale em: C:\xampp (padrao)
+5. Durante a instalacao, DESMARQUE: MySQL, FileZilla, Mercury, Tomcat
+   (So precisa do Apache + PHP)
+6. Apos instalar, NAO abra o painel do XAMPP (usamos via BAT)
+
+## PASSO 2: Configurar Apache na porta 8080
+
+1. Abra o arquivo: C:\xampp\apache\conf\httpd.conf
+2. Procure a linha: Listen 80
+3. Troque para: Listen 8080
+4. Salve o arquivo
+
+## PASSO 3: Habilitar CURL no PHP
+
+1. Abra o arquivo: C:\xampp\php\php.ini
+2. Procure: ;extension=curl
+3. Remova o ponto e virgula: extension=curl
+4. Procure: ;extension=mbstring
+5. Remova o ponto e virgula: extension=mbstring
+6. Salve o arquivo
+
+## PASSO 4: Copiar arquivos do sistema
+
+Copie a pasta "php-local" inteira para:
+C:\xampp\htdocs\php-local\
+
+Estrutura final:
+C:\xampp\htdocs\php-local\
+    config.php
+    generate.php
+    upload.php
+    trim_audio.py
+    teste_local.html
+    audios/
+        ref/
+        track/
+
+## PASSO 5: Verificar Python
+
+O trim_audio.py precisa do Python. Voce ja tem via Conda!
+
+Teste no CMD:
+    python --version
+
+Se funcionar, esta tudo ok.
+Se nao, use: C:\Users\Administrador\Miniconda3\python.exe
+
+## PASSO 6: Colocar os scripts na pasta local
+
+Copie estes arquivos para a pasta desejada (ex: C:\VozPro\local-server\):
+- iniciar_local.bat
+- tunnel_php.ps1
+
+## PASSO 7: Rodar!
+
+1. Doble-clique em: iniciar_local.bat
+2. Ele vai:
+   - Iniciar o Apache (PHP) na porta 8080
+   - Iniciar o VozPro na porta 7860
+   - Abrir o tunnel (para o browser acessar)
+3. Abra no navegador: http://localhost:8080/php-local/teste_local.html
+4. Ou abra o arquivo teste_local.html direto (duplo clique)
+
+## FLUXO DO AUDIO (agora tudo local!)
+
+Browser escolhe audio + texto
+    |
+    v
+Browser -> PHP Local (localhost:8080/upload.php)
+    |          [audio via HTTP interno - sem internet]
+    v
+PHP Local copia arquivo -> pasta local
+    |
+    v
+PHP Local -> GPU Local (localhost:7860/gradio_api/upload)
+    |             [audio via localhost - ZERO tunnel!]
+    v
+GPU processa e gera audio
+    |
+    v
+PHP Local <- GPU Local (localhost:7860) [resultado via localhost!]
+    |
+    v
+PHP converte para base64 -> retorna para Browser
+    |
+    v
+Browser reproduz o audio
+
+## O UNICO TUNNEL (se necessario)
+
+O tunnel so e usado se voce quiser acessar o PHP
+a partir de outro dispositivo (celular, Vercel, etc).
+
+Para testar local, NAO PRECISA de tunnel.
+Acesse http://localhost:8080/php-local/teste_local.html
+
+## RESOLUCAO DE PROBLEMAS
+
+### Apache nao sobe (porta 8080 em uso)
+- Feche programas que usam a porta 8080
+- Ou mude a porta no httpd.conf para outra (8081, 8082, etc)
+
+### Python nao encontrado
+- O generate.php tenta "python" e "python3"
+- Se seu Python esta em outro caminho, edite generate.php
+- Procure: $pythonCmd = PHP_OS_FAMILY === 'Windows' ? 'python' : 'python3';
+- Troque para o caminho completo: 'C:\\Users\\Administrador\\Miniconda3\\python.exe'
+
+### Erro CUDA OOM
+- Audio de referencia muito longo (max 10s)
+- O trim_audio.py corta automaticamente, mas precisa do Python funcionando
+
+### Audio ainda com bugs
+- Teste com um audio de referencia de 3-5 segundos
+- Use refText EXATO (transcricao perfeita do que e falado)
+- Tente steps=25 (mais rapido) e guidanceScale=1.5 (menos artefato)

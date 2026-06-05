@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "The screenshot displays a **web browser interface** (likely Google Chrome) with the following elements:  \n\n### 1. Browser Navigation Bar (Top)  \n- **Back/Forward/Refresh Buttons**: Standard browser controls (left-pointing arrow, right-pointing arrow, circular refresh icon) on the left.  \n- **Address Bar**: Contains the URL `vozpro.cvmnews.com.br` (a Brazilian financial news site, likely related to CVM—Brazil’s securities regulator).  \n- **Browser Tabs/Extensions**: To the right of the address bar, there are:  \n  - A tab labeled “Apps” (with a grid icon).  \n  - A tab labeled “FileCR - THE BIGGES...” (truncated, likely a file-sharing or news site).  \n  - A “WhatsApp” tab (with the WhatsApp logo).  \n  - A “Fa” tab (truncated, likely “Facebook” or similar).  \n\n\n### 2. Main Content Area (Below Navigation)  \n- **Loading Indicator/Icon**: A stylized “wave” or “sound” icon (possibly a loading spinner or site-specific logo) at the top.  \n- **Text**: The phrase `Carregando VozPro...` (Portuguese for *“Loading VozPro...”*), indicating the page is in the process of loading.  \n\n\n### 3. Overall State  \nThe page is **in a loading state**—no fully rendered content (e.g., articles, navigation menus) is visible beyond the loading text and icon. The browser’s tab bar shows multiple open tabs, suggesting the user has other pages open.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1780359971,
+  "id": "20260602082601b186bc86e73c48ff",
+  "model": "glm-4.6v",
+  "object": "chat.completion",
+  "request_id": "20260602082601b186bc86e73c48ff",
+  "usage": {
+    "completion_tokens": 337,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 283,
+    "prompt_tokens_details": {
+      "cached_tokens": 4
+    },
+    "total_tokens": 620
+  }
+}

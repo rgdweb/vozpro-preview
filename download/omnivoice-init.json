@@ -1,0 +1,18 @@
+{
+  "code": 200,
+  "data": {
+    "description": "",
+    "html": "<html><head><meta name=\"color-scheme\" content=\"light dark\"></head><body><pre style=\"word-wrap: break-word; white-space: pre-wrap;\">import warnings\nfrom importlib.metadata import PackageNotFoundError, version\n\nwarnings.filterwarnings(\"ignore\", module=\"torchaudio\")\nwarnings.filterwarnings(\n    \"ignore\",\n    category=SyntaxWarning,\n    message=\"invalid escape sequence\",\n    module=\"pydub.utils\",\n)\nwarnings.filterwarnings(\n    \"ignore\",\n    category=FutureWarning,\n    module=\"torch.distributed.algorithms.ddp_comm_hooks\",\n)\n\ntry:\n    __version__ = version(\"omnivoice\")\nexcept PackageNotFoundError:\n    __version__ = \"0.0.0\"\n\nfrom omnivoice.models.omnivoice import (\n    OmniVoice,\n    OmniVoiceConfig,\n    OmniVoiceGenerationConfig,\n)\n\n__all__ = [\"OmniVoice\", \"OmniVoiceConfig\", \"OmniVoiceGenerationConfig\"]\n</pre></body></html>",
+    "title": "",
+    "url": "https://huggingface.co/spaces/k2-fsa/OmniVoice/raw/main/omnivoice/__init__.py",
+    "usage": {
+      "tokens": 204
+    }
+  },
+  "meta": {
+    "usage": {
+      "tokens": 204
+    }
+  },
+  "status": 20000
+}

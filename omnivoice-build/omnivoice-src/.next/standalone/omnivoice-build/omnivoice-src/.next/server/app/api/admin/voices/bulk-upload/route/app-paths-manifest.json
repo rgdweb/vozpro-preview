@@ -1,0 +1,3 @@
+{
+  "/api/admin/voices/bulk-upload/route": "app/api/admin/voices/bulk-upload/route.js"
+}

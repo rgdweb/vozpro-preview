@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VozPro TTS - Teste Direto</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 700px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            font-size: 1.8rem;
+            margin-bottom: 5px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #666;
+            font-size: 0.85rem;
+            margin-bottom: 25px;
+        }
+        
+        /* Status Badge */
+        .status-bar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 0.85rem;
+            background: #111;
+            border: 1px solid #222;
+        }
+        
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #444;
+            transition: background 0.3s;
+        }
+        
+        .status-dot.online { background: #22c55e; box-shadow: 0 0 8px #22c55e80; }
+        .status-dot.offline { background: #ef4444; box-shadow: 0 0 8px #ef444480; }
+        .status-dot.checking { background: #f59e0b; animation: pulse 1s infinite; }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        
+        /* Cards */
+        .card {
+            background: #111;
+            border: 1px solid #222;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+        }
+        
+        .card-title {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+            margin-bottom: 12px;
+        }
+        
+        /* Upload Area */
+        .upload-area {
+            border: 2px dashed #333;
+            border-radius: 10px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+        }
+        
+        .upload-area:hover {
+            border-color: #6366f1;
+            background: #6366f110;
+        }
+        
+        .upload-area.has-file {
+            border-color: #22c55e;
+            background: #22c55e10;
+        }
+        
+        .upload-area input[type="file"] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+        
+        .upload-icon {
+            font-size: 2rem;
+            margin-bottom: 8px;
+        }
+        
+        .upload-text {
+            color: #888;
+            font-size: 0.9rem;
+        }
+        
+        .upload-text strong {
+            color: #6366f1;
+        }
+        
+        .file-info {
+            display: none;
+            margin-top: 10px;
+            padding: 8px 12px;
+            background: #1a1a2e;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            color: #aaa;
+        }
+        
+        .file-info.visible { display: flex; align-items: center; gap: 8px; }
+        
+        /* Audio Preview */
+        .audio-preview {
+            display: none;
+            margin-top: 10px;
+        }
+        
+        .audio-preview.visible { display: block; }
+        
+        .audio-preview audio {
+            width: 100%;
+            height: 36px;
+            border-radius: 6px;
+        }
+        
+        /* Textarea */
+        textarea {
+            width: 100%;
+            min-height: 100px;
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 12px;
+            color: #e0e0e0;
+            font-family: inherit;
+            font-size: 0.95rem;
+            resize: vertical;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        
+        textarea:focus { border-color: #6366f1; }
+        textarea::placeholder { color: #555; }
+        
+        .char-count {
+            text-align: right;
+            font-size: 0.75rem;
+            color: #555;
+            margin-top: 4px;
+        }
+        
+        /* Options Row */
+        .options-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+        
+        .option-group {
+            flex: 1;
+            min-width: 120px;
+        }
+        
+        .option-group label {
+            display: block;
+            font-size: 0.75rem;
+            color: #888;
+            margin-bottom: 4px;
+        }
+        
+        .option-group select,
+        .option-group input[type="number"],
+        .option-group input[type="text"] {
+            width: 100%;
+            padding: 8px 10px;
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #e0e0e0;
+            font-family: inherit;
+            font-size: 0.85rem;
+            outline: none;
+        }
+        
+        .option-group select:focus,
+        .option-group input:focus { border-color: #6366f1; }
+        
+        /* Checkbox */
+        .checkbox-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+            font-size: 0.85rem;
+            color: #aaa;
+            cursor: pointer;
+        }
+        
+        .checkbox-row input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: #6366f1;
+        }
+        
+        /* Generate Button */
+        .btn-generate {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 5px;
+        }
+        
+        .btn-generate:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 20px #6366f180;
+        }
+        
+        .btn-generate:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        /* Progress */
+        .progress-container {
+            display: none;
+            margin-top: 15px;
+        }
+        
+        .progress-container.visible { display: block; }
+        
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: #222;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #6366f1, #8b5cf6);
+            border-radius: 2px;
+            width: 0%;
+            transition: width 0.3s;
+            animation: shimmer 2s infinite;
+        }
+        
+        @keyframes shimmer {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        
+        .progress-text {
+            text-align: center;
+            font-size: 0.8rem;
+            color: #888;
+            margin-top: 8px;
+        }
+        
+        /* Result */
+        .result-container {
+            display: none;
+            margin-top: 15px;
+        }
+        
+        .result-container.visible { display: block; }
+        
+        .result-audio {
+            width: 100%;
+            border-radius: 8px;
+        }
+        
+        .btn-download {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            margin-top: 10px;
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #e0e0e0;
+            font-size: 0.85rem;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.3s;
+        }
+        
+        .btn-download:hover {
+            border-color: #6366f1;
+            background: #6366f110;
+        }
+        
+        /* Error */
+        .error-msg {
+            display: none;
+            padding: 10px 14px;
+            background: #ef444410;
+            border: 1px solid #ef444430;
+            border-radius: 8px;
+            color: #ef4444;
+            font-size: 0.85rem;
+            margin-top: 10px;
+        }
+        
+        .error-msg.visible { display: block; }
+        
+        /* Architecture Info */
+        .info-box {
+            background: #6366f110;
+            border: 1px solid #6366f130;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 0.8rem;
+            color: #aaa;
+            line-height: 1.5;
+        }
+        
+        .info-box code {
+            background: #6366f120;
+            padding: 1px 5px;
+            border-radius: 3px;
+            color: #a5b4fc;
+            font-size: 0.78rem;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>VozPro TTS</h1>
+    <p class="subtitle">Conexao direta via tunnel — sem intermediario no HostGator</p>
+    
+    <!-- Status -->
+    <div class="status-bar">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Verificando...</span>
+    </div>
+    
+    <!-- Upload Reference Audio -->
+    <div class="card">
+        <div class="card-title">Audio de Referencia</div>
+        <div class="upload-area" id="uploadArea">
+            <input type="file" id="audioInput" accept="audio/*">
+            <div class="upload-icon">&#127911;</div>
+            <div class="upload-text" id="uploadLabel">
+                Arraste ou clique para <strong>enviar o audio</strong><br>
+                <small>MP3, WAV, OGG — sera cortado para 10s automaticamente</small>
+            </div>
+        </div>
+        <div class="file-info" id="fileInfo">
+            <span>&#128196;</span>
+            <span id="fileName">-</span>
+            <span id="fileDuration" style="margin-left:auto">-</span>
+        </div>
+        <div class="audio-preview" id="audioPreview">
+            <audio id="previewAudio" controls></audio>
+        </div>
+    </div>
+    
+    <!-- Text to Generate -->
+    <div class="card">
+        <div class="card-title">Texto para Gerar</div>
+        <textarea id="textToGenerate" placeholder="Digite aqui o texto que voce quer que a voz clonada fale..."></textarea>
+        <div class="char-count"><span id="charCount">0</span> caracteres</div>
+        
+        <div class="options-row">
+            <div class="option-group">
+                <label>Idioma</label>
+                <select id="optLanguage">
+                    <option value="Auto" selected>Auto</option>
+                    <option value="pt">Portugues</option>
+                    <option value="en">English</option>
+                    <option value="es">Espanol</option>
+                </select>
+            </div>
+            <div class="option-group">
+                <label>Velocidade</label>
+                <select id="optSpeed">
+                    <option value="0.5">0.5x (lento)</option>
+                    <option value="0.8">0.8x</option>
+                    <option value="1" selected>1x (normal)</option>
+                    <option value="1.2">1.2x</option>
+                    <option value="1.5">1.5x (rapido)</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="option-group" style="margin-top:10px">
+            <label>Texto do audio de referencia (transcricao — deixe vazio se nao souber)</label>
+            <input type="text" id="optRefText" placeholder="Ex: Bom dia, seja bem vindo ao nosso canal">
+        </div>
+        
+        <label class="checkbox-row">
+            <input type="checkbox" id="optAutoTrim" checked>
+            Cortar audio para 10s no navegador (recomendado)
+        </label>
+    </div>
+    
+    <!-- Generate Button -->
+    <button class="btn-generate" id="btnGenerate" disabled>
+        &#9654; Gerar Voz
+    </button>
+    
+    <!-- Progress -->
+    <div class="progress-container" id="progressContainer">
+        <div class="progress-bar">
+            <div class="progress-bar-fill" id="progressBar"></div>
+        </div>
+        <div class="progress-text" id="progressText">Processando...</div>
+    </div>
+    
+    <!-- Error -->
+    <div class="error-msg" id="errorMsg"></div>
+    
+    <!-- Result -->
+    <div class="result-container" id="resultContainer">
+        <div class="card">
+            <div class="card-title">Audio Gerado</div>
+            <audio class="result-audio" id="resultAudio" controls></audio>
+            <button class="btn-download" id="btnDownload">&#11015; Baixar Audio WAV</button>
+        </div>
+    </div>
+    
+    <!-- Info -->
+    <div class="info-box" style="margin-top:15px">
+        <strong>Arquitetura:</strong> Seu audio vai <code>direto</code> do navegador pro GPU local via cloudflared tunnel, sem passar pelo HostGator. Isso elimina a degradacao do audio e reduz a latencia em ~5 segundos.
+    </div>
+</div>
+
+<script>
+// ============================================================
+// VozPro TTS - Teste Standalone (tudo inline)
+// ============================================================
+
+const HOSTGATOR_BASE = 'https://sorteiomax.com.br/omnivoice';
+const MAX_REF_SECONDS = 10;
+const TIMEOUT_GENERATE = 120000;
+
+// DOM Elements
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const audioInput = document.getElementById('audioInput');
+const uploadArea = document.getElementById('uploadArea');
+const uploadLabel = document.getElementById('uploadLabel');
+const fileInfo = document.getElementById('fileInfo');
+const fileName = document.getElementById('fileName');
+const fileDuration = document.getElementById('fileDuration');
+const audioPreview = document.getElementById('audioPreview');
+const previewAudio = document.getElementById('previewAudio');
+const textToGenerate = document.getElementById('textToGenerate');
+const charCount = document.getElementById('charCount');
+const btnGenerate = document.getElementById('btnGenerate');
+const progressContainer = document.getElementById('progressContainer');
+const progressBar = document.getElementById('progressBar');
+const progressText = document.getElementById('progressText');
+const errorMsg = document.getElementById('errorMsg');
+const resultContainer = document.getElementById('resultContainer');
+const resultAudio = document.getElementById('resultAudio');
+const btnDownload = document.getElementById('btnDownload');
+
+let selectedFile = null;
+let generatedBlobUrl = null;
+
+// ---- Status Check ----
+// Testa conectividade DIRETO do navegador pro tunnel
+// (HostGator nao consegue testar por bloquear HTTPS de saida)
+async function checkStatus() {
+    statusDot.className = 'status-dot checking';
+    statusText.textContent = 'Verificando GPU...';
+    
+    try {
+        // 1. Pega a URL do tunnel no HostGator
+        const resp = await fetch(`${HOSTGATOR_BASE}/get_tunnel.php`);
+        const data = await resp.json();
+        
+        if (data.status !== 'online' || !data.tunnelUrl) {
+            statusDot.className = 'status-dot offline';
+            statusText.textContent = 'GPU Offline — ' + (data.message || 'Inicie o iniciar.bat');
+            return;
+        }
+        
+        // 2. Testa o tunnel DIRETO do navegador (o navegador consegue!)
+        statusText.textContent = 'Testando tunnel...';
+        const tunnelResp = await fetch(data.tunnelUrl + '/', { 
+            method: 'HEAD',
+            mode: 'no-cors',
+            signal: AbortSignal.timeout(5000)
+        });
+        
+        // Se chegou aqui, o tunnel respondeu (no-cors sempre "sucesso" se conectar)
+        statusDot.className = 'status-dot online';
+        statusText.textContent = 'GPU Online';
+        updateGenerateButton();
+        
+    } catch (e) {
+        statusDot.className = 'status-dot offline';
+        statusText.textContent = 'GPU Offline — tunnel nao responde';
+    }
+}
+
+// ---- File Handling ----
+audioInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    selectedFile = file;
+    uploadArea.classList.add('has-file');
+    uploadLabel.innerHTML = `<strong>${file.name}</strong><br><small>Clique para trocar</small>`;
+    
+    fileName.textContent = file.name;
+    fileInfo.classList.add('visible');
+    
+    // Preview
+    const url = URL.createObjectURL(file);
+    previewAudio.src = url;
+    audioPreview.classList.add('visible');
+    
+    // Get duration
+    previewAudio.onloadedmetadata = () => {
+        const dur = previewAudio.duration;
+        const mins = Math.floor(dur / 60);
+        const secs = Math.floor(dur % 60);
+        fileDuration.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+    
+    updateGenerateButton();
+    hideError();
+});
+
+// ---- Text Area ----
+textToGenerate.addEventListener('input', () => {
+    charCount.textContent = textToGenerate.value.length;
+    updateGenerateButton();
+});
+
+function updateGenerateButton() {
+    const isOnline = statusDot.classList.contains('online');
+    btnGenerate.disabled = !(isOnline && selectedFile && textToGenerate.value.trim().length > 0);
+}
+
+// ---- Trim Audio (Web Audio API) ----
+async function trimAudio(audioFile, maxSeconds) {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const arrayBuffer = await audioFile.arrayBuffer();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    
+    const duration = Math.min(audioBuffer.duration, maxSeconds);
+    const sampleRate = audioBuffer.sampleRate;
+    const numChannels = audioBuffer.numberOfChannels;
+    const numSamples = Math.floor(duration * sampleRate);
+    
+    const offCtx = new OfflineAudioContext(numChannels, numSamples, sampleRate);
+    const source = offCtx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(offCtx.destination);
+    source.start(0, 0, duration);
+    
+    const trimmedBuffer = await offCtx.startRendering();
+    return audioBufferToWavFile(trimmedBuffer);
+}
+
+function audioBufferToWav(buffer) {
+    const numChannels = buffer.numberOfChannels;
+    const sampleRate = buffer.sampleRate;
+    
+    let interleaved;
+    if (numChannels === 1) {
+        interleaved = buffer.getChannelData(0);
+    } else {
+        const length = buffer.length * numChannels;
+        interleaved = new Float32Array(length);
+        for (let ch = 0; ch < numChannels; ch++) {
+            const channelData = buffer.getChannelData(ch);
+            for (let i = 0; i < buffer.length; i++) {
+                interleaved[i * numChannels + ch] = channelData[i];
+            }
+        }
+    }
+    
+    const dataLength = interleaved.length * 2;
+    const headerLength = 44;
+    const totalLength = headerLength + dataLength;
+    const ab = new ArrayBuffer(totalLength);
+    const view = new DataView(ab);
+    
+    const writeStr = (off, str) => { for (let i = 0; i < str.length; i++) view.setUint8(off + i, str.charCodeAt(i)); };
+    
+    writeStr(0, 'RIFF');
+    view.setUint32(4, totalLength - 8, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * numChannels * 2, true);
+    view.setUint16(32, numChannels * 2, true);
+    view.setUint16(34, 16, true);
+    writeStr(36, 'data');
+    view.setUint32(40, dataLength, true);
+    
+    let offset = 44;
+    for (let i = 0; i < interleaved.length; i++) {
+        const s = Math.max(-1, Math.min(1, interleaved[i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        offset += 2;
+    }
+    
+    return new Blob([ab], { type: 'audio/wav' });
+}
+
+function audioBufferToWavFile(buffer) {
+    const blob = audioBufferToWav(buffer);
+    return new File([blob], 'reference.wav', { type: 'audio/wav' });
+}
+
+// ---- Upload to Gradio ----
+async function uploadToGradio(tunnelUrl, file) {
+    const formData = new FormData();
+    formData.append('files', file);
+    
+    const resp = await fetch(`${tunnelUrl}/upload`, {
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout(30000)
+    });
+    
+    if (!resp.ok) throw new Error('Upload falhou: ' + resp.status);
+    const paths = await resp.json();
+    if (!paths || paths.length === 0) throw new Error('Upload retornou vazio');
+    return paths[0];
+}
+
+// ---- Stream Result ----
+function streamResult(tunnelUrl, eventId) {
+    return new Promise((resolve, reject) => {
+        const es = new EventSource(`${tunnelUrl}/call/predict/${eventId}`);
+        let done = false;
+        
+        es.onmessage = (event) => {
+            if (done) return;
+            try {
+                const data = JSON.parse(event.data);
+                
+                if (data.msg === 'generating' || data.msg === 'heartbeat') {
+                    setProgress('Gerando voz na GPU...');
+                } else if (data.msg === 'progress') {
+                    const pct = Math.round((data.data?.[0] || 0) * 100);
+                    setProgress(`Processando... ${pct}%`);
+                } else if (data.msg === 'complete') {
+                    done = true;
+                    es.close();
+                    
+                    const output = data.data;
+                    if (!output || !Array.isArray(output) || output.length === 0) {
+                        reject(new Error('Resultado vazio'));
+                        return;
+                    }
+                    
+                    const audioData = output[0];
+                    const audioUrl = audioData.url 
+                        ? audioData.url 
+                        : (audioData.path ? `${tunnelUrl}/file=${audioData.path}` : null);
+                    
+                    if (!audioUrl) {
+                        reject(new Error('Audio nao encontrado no resultado'));
+                        return;
+                    }
+                    
+                    resolve(audioUrl);
+                } else if (data.msg === 'error') {
+                    done = true;
+                    es.close();
+                    reject(new Error(data.data || 'Erro na geracao'));
+                }
+            } catch (e) {
+                console.error('SSE parse error:', e);
+            }
+        };
+        
+        es.onerror = () => {
+            if (!done) {
+                done = true;
+                es.close();
+                reject(new Error('Conexao com tunnel perdida'));
+            }
+        };
+        
+        setTimeout(() => {
+            if (!done) {
+                done = true;
+                es.close();
+                reject(new Error('Timeout na geracao'));
+            }
+        }, TIMEOUT_GENERATE);
+    });
+}
+
+// ---- Generate ----
+async function generate() {
+    if (!selectedFile || !textToGenerate.value.trim()) return;
+    
+    btnGenerate.disabled = true;
+    hideError();
+    hideResult();
+    showProgress('Descobrindo tunnel...');
+    
+    try {
+        // 1. Get tunnel URL
+        const resp = await fetch(`${HOSTGATOR_BASE}/get_tunnel.php`);
+        const tunnelData = await resp.json();
+        
+        if (tunnelData.status !== 'online') {
+            throw new Error('GPU offline: ' + (tunnelData.message || ''));
+        }
+        
+        const tunnelUrl = tunnelData.tunnelUrl;
+        
+        // 2. Trim audio (optional)
+        setProgress('Preparando audio de referencia...');
+        let audioToUpload = selectedFile;
+        
+        if (document.getElementById('optAutoTrim').checked) {
+            try {
+                audioToUpload = await trimAudio(selectedFile, MAX_REF_SECONDS);
+                console.log('Audio cortado para 10s');
+            } catch (e) {
+                console.warn('Trim falhou, usando original:', e);
+            }
+        }
+        
+        // 3. Upload to Gradio
+        setProgress('Enviando audio para GPU...');
+        const filePath = await uploadToGradio(tunnelUrl, audioToUpload);
+        
+        // 4. Submit job
+        setProgress('Iniciando geracao...');
+        
+        const language = document.getElementById('optLanguage').value;
+        const speed = parseInt(document.getElementById('optSpeed').value);
+        const refText = document.getElementById('optRefText').value.trim();
+        const text = textToGenerate.value.trim();
+        
+        const payload = {
+            data: [
+                { path: filePath, meta: { _type: 'gradio.FileData' } },
+                refText,
+                text,
+                language,
+                null,  // instruct
+                speed,
+                0      // duration
+            ]
+        };
+        
+        const submitResp = await fetch(`${tunnelUrl}/call/predict`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(TIMEOUT_GENERATE)
+        });
+        
+        if (!submitResp.ok) {
+            const errText = await submitResp.text();
+            throw new Error('Erro Gradio: ' + submitResp.status + ' - ' + errText);
+        }
+        
+        const submitData = await submitResp.json();
+        const eventId = submitData.event_id;
+        
+        if (!eventId) throw new Error('Sem event_id');
+        
+        // 5. Stream result
+        const audioUrl = await streamResult(tunnelUrl, eventId);
+        
+        // 6. Show result
+        setProgress('Baixando audio gerado...');
+        
+        if (generatedBlobUrl) URL.revokeObjectURL(generatedBlobUrl);
+        
+        const audioResp = await fetch(audioUrl);
+        const blob = await audioResp.blob();
+        generatedBlobUrl = URL.createObjectURL(blob);
+        
+        resultAudio.src = generatedBlobUrl;
+        showResult();
+        
+    } catch (e) {
+        showError(e.message);
+    } finally {
+        btnGenerate.disabled = false;
+        hideProgress();
+    }
+}
+
+// ---- UI Helpers ----
+function setProgress(text) {
+    progressBar.style.width = '100%';
+    progressText.textContent = text;
+}
+
+function showProgress(text) {
+    progressContainer.classList.add('visible');
+    if (text) setProgress(text);
+}
+
+function hideProgress() {
+    progressContainer.classList.remove('visible');
+    progressBar.style.width = '0%';
+}
+
+function showError(msg) {
+    errorMsg.textContent = msg;
+    errorMsg.classList.add('visible');
+}
+
+function hideError() {
+    errorMsg.classList.remove('visible');
+}
+
+function showResult() {
+    resultContainer.classList.add('visible');
+}
+
+function hideResult() {
+    resultContainer.classList.remove('visible');
+}
+
+// ---- Download ----
+btnDownload.addEventListener('click', () => {
+    if (!generatedBlobUrl) return;
+    const a = document.createElement('a');
+    a.href = generatedBlobUrl;
+    a.download = 'omnivoice_gerado.wav';
+    a.click();
+});
+
+// ---- Init ----
+btnGenerate.addEventListener('click', generate);
+
+// Auto-check status
+checkStatus();
+setInterval(checkStatus, 30000); // verifica a cada 30s
+
+</script>
+
+</body>
+</html>

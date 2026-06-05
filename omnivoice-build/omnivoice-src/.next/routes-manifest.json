@@ -1,0 +1,419 @@
+{
+  "version": 3,
+  "pages404": true,
+  "appType": "app",
+  "caseSensitive": false,
+  "basePath": "",
+  "redirects": [
+    {
+      "source": "/:path+/",
+      "destination": "/:path+",
+      "internal": true,
+      "priority": true,
+      "statusCode": 308,
+      "regex": "^(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))/$"
+    }
+  ],
+  "headers": [],
+  "rewrites": {
+    "beforeFiles": [],
+    "afterFiles": [],
+    "fallback": []
+  },
+  "dynamicRoutes": [
+    {
+      "page": "/api/tracks/[id]",
+      "regex": "^/api/tracks/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/tracks/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/variations/[id]",
+      "regex": "^/api/variations/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/variations/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/voices/[id]",
+      "regex": "^/api/voices/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/voices/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/voices/[id]/variations",
+      "regex": "^/api/voices/([^/]+?)/variations(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/voices/(?<nxtPid>[^/]+?)/variations(?:/)?$"
+    }
+  ],
+  "staticRoutes": [
+    {
+      "page": "/",
+      "regex": "^/(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/(?:/)?$"
+    },
+    {
+      "page": "/_global-error",
+      "regex": "^/_global\\-error(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_global\\-error(?:/)?$"
+    },
+    {
+      "page": "/_not-found",
+      "regex": "^/_not\\-found(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_not\\-found(?:/)?$"
+    },
+    {
+      "page": "/admin",
+      "regex": "^/admin(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/admin(?:/)?$"
+    },
+    {
+      "page": "/admin/login",
+      "regex": "^/admin/login(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/admin/login(?:/)?$"
+    },
+    {
+      "page": "/api",
+      "regex": "^/api(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api(?:/)?$"
+    },
+    {
+      "page": "/api/admin/rename-category",
+      "regex": "^/api/admin/rename\\-category(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/admin/rename\\-category(?:/)?$"
+    },
+    {
+      "page": "/api/admin/settings",
+      "regex": "^/api/admin/settings(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/admin/settings(?:/)?$"
+    },
+    {
+      "page": "/api/admin/tracks",
+      "regex": "^/api/admin/tracks(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/admin/tracks(?:/)?$"
+    },
+    {
+      "page": "/api/admin/users",
+      "regex": "^/api/admin/users(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/admin/users(?:/)?$"
+    },
+    {
+      "page": "/api/admin/voices",
+      "regex": "^/api/admin/voices(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/admin/voices(?:/)?$"
+    },
+    {
+      "page": "/api/admin/voices/bulk-upload",
+      "regex": "^/api/admin/voices/bulk\\-upload(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/admin/voices/bulk\\-upload(?:/)?$"
+    },
+    {
+      "page": "/api/asr-validate",
+      "regex": "^/api/asr\\-validate(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/asr\\-validate(?:/)?$"
+    },
+    {
+      "page": "/api/auth",
+      "regex": "^/api/auth(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/auth(?:/)?$"
+    },
+    {
+      "page": "/api/auth/google",
+      "regex": "^/api/auth/google(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/auth/google(?:/)?$"
+    },
+    {
+      "page": "/api/auth/verify",
+      "regex": "^/api/auth/verify(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/auth/verify(?:/)?$"
+    },
+    {
+      "page": "/api/batch-upload-tracks",
+      "regex": "^/api/batch\\-upload\\-tracks(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/batch\\-upload\\-tracks(?:/)?$"
+    },
+    {
+      "page": "/api/categories",
+      "regex": "^/api/categories(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/categories(?:/)?$"
+    },
+    {
+      "page": "/api/clean-instructs",
+      "regex": "^/api/clean\\-instructs(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/clean\\-instructs(?:/)?$"
+    },
+    {
+      "page": "/api/cleanup",
+      "regex": "^/api/cleanup(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/cleanup(?:/)?$"
+    },
+    {
+      "page": "/api/diagnose",
+      "regex": "^/api/diagnose(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/diagnose(?:/)?$"
+    },
+    {
+      "page": "/api/free-download",
+      "regex": "^/api/free\\-download(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/free\\-download(?:/)?$"
+    },
+    {
+      "page": "/api/g2p-phonemize",
+      "regex": "^/api/g2p\\-phonemize(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/g2p\\-phonemize(?:/)?$"
+    },
+    {
+      "page": "/api/generate",
+      "regex": "^/api/generate(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/generate(?:/)?$"
+    },
+    {
+      "page": "/api/generate-config",
+      "regex": "^/api/generate\\-config(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/generate\\-config(?:/)?$"
+    },
+    {
+      "page": "/api/generate-token",
+      "regex": "^/api/generate\\-token(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/generate\\-token(?:/)?$"
+    },
+    {
+      "page": "/api/gpu-stats",
+      "regex": "^/api/gpu\\-stats(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/gpu\\-stats(?:/)?$"
+    },
+    {
+      "page": "/api/health",
+      "regex": "^/api/health(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/health(?:/)?$"
+    },
+    {
+      "page": "/api/maintenance",
+      "regex": "^/api/maintenance(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/maintenance(?:/)?$"
+    },
+    {
+      "page": "/api/omnivoice-generate",
+      "regex": "^/api/omnivoice\\-generate(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/omnivoice\\-generate(?:/)?$"
+    },
+    {
+      "page": "/api/omnivoice-token",
+      "regex": "^/api/omnivoice\\-token(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/omnivoice\\-token(?:/)?$"
+    },
+    {
+      "page": "/api/optimize-pronunciation",
+      "regex": "^/api/optimize\\-pronunciation(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/optimize\\-pronunciation(?:/)?$"
+    },
+    {
+      "page": "/api/payment/create",
+      "regex": "^/api/payment/create(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/payment/create(?:/)?$"
+    },
+    {
+      "page": "/api/payment/download",
+      "regex": "^/api/payment/download(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/payment/download(?:/)?$"
+    },
+    {
+      "page": "/api/payment/qrcode",
+      "regex": "^/api/payment/qrcode(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/payment/qrcode(?:/)?$"
+    },
+    {
+      "page": "/api/payment/status",
+      "regex": "^/api/payment/status(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/payment/status(?:/)?$"
+    },
+    {
+      "page": "/api/payment/webhook",
+      "regex": "^/api/payment/webhook(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/payment/webhook(?:/)?$"
+    },
+    {
+      "page": "/api/php-generate",
+      "regex": "^/api/php\\-generate(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/php\\-generate(?:/)?$"
+    },
+    {
+      "page": "/api/proxy-audio",
+      "regex": "^/api/proxy\\-audio(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/proxy\\-audio(?:/)?$"
+    },
+    {
+      "page": "/api/queue/complete",
+      "regex": "^/api/queue/complete(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/queue/complete(?:/)?$"
+    },
+    {
+      "page": "/api/queue/join",
+      "regex": "^/api/queue/join(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/queue/join(?:/)?$"
+    },
+    {
+      "page": "/api/send-audio-email",
+      "regex": "^/api/send\\-audio\\-email(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/send\\-audio\\-email(?:/)?$"
+    },
+    {
+      "page": "/api/server-config",
+      "regex": "^/api/server\\-config(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/server\\-config(?:/)?$"
+    },
+    {
+      "page": "/api/settings",
+      "regex": "^/api/settings(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/settings(?:/)?$"
+    },
+    {
+      "page": "/api/setup-sessions",
+      "regex": "^/api/setup\\-sessions(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/setup\\-sessions(?:/)?$"
+    },
+    {
+      "page": "/api/status",
+      "regex": "^/api/status(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/status(?:/)?$"
+    },
+    {
+      "page": "/api/track-categories",
+      "regex": "^/api/track\\-categories(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/track\\-categories(?:/)?$"
+    },
+    {
+      "page": "/api/tracks",
+      "regex": "^/api/tracks(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/tracks(?:/)?$"
+    },
+    {
+      "page": "/api/tunnel-generate",
+      "regex": "^/api/tunnel\\-generate(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/tunnel\\-generate(?:/)?$"
+    },
+    {
+      "page": "/api/upload-chunk",
+      "regex": "^/api/upload\\-chunk(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/upload\\-chunk(?:/)?$"
+    },
+    {
+      "page": "/api/upload-token",
+      "regex": "^/api/upload\\-token(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/upload\\-token(?:/)?$"
+    },
+    {
+      "page": "/api/upload-track",
+      "regex": "^/api/upload\\-track(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/upload\\-track(?:/)?$"
+    },
+    {
+      "page": "/api/upload-voice",
+      "regex": "^/api/upload\\-voice(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/upload\\-voice(?:/)?$"
+    },
+    {
+      "page": "/api/upload-watermark",
+      "regex": "^/api/upload\\-watermark(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/upload\\-watermark(?:/)?$"
+    },
+    {
+      "page": "/api/voice-categories",
+      "regex": "^/api/voice\\-categories(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/voice\\-categories(?:/)?$"
+    },
+    {
+      "page": "/api/voices",
+      "regex": "^/api/voices(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/voices(?:/)?$"
+    },
+    {
+      "page": "/login",
+      "regex": "^/login(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/login(?:/)?$"
+    }
+  ],
+  "dataRoutes": [],
+  "rsc": {
+    "header": "rsc",
+    "varyHeader": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch",
+    "prefetchHeader": "next-router-prefetch",
+    "didPostponeHeader": "x-nextjs-postponed",
+    "contentTypeHeader": "text/x-component",
+    "suffix": ".rsc",
+    "prefetchSegmentHeader": "next-router-segment-prefetch",
+    "prefetchSegmentSuffix": ".segment.rsc",
+    "prefetchSegmentDirSuffix": ".segments",
+    "clientParamParsing": false,
+    "dynamicRSCPrerender": false
+  },
+  "rewriteHeaders": {
+    "pathHeader": "x-nextjs-rewritten-path",
+    "queryHeader": "x-nextjs-rewritten-query"
+  }
+}

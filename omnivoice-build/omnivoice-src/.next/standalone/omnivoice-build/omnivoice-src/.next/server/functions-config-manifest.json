@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "functions": {
+    "/api/admin/voices/bulk-upload": {
+      "maxDuration": 120
+    },
+    "/api/generate": {
+      "maxDuration": 300
+    },
+    "/api/omnivoice-generate": {
+      "maxDuration": 300
+    },
+    "/api/payment/create": {
+      "maxDuration": 30
+    },
+    "/api/php-generate": {
+      "maxDuration": 60
+    },
+    "/api/proxy-audio": {},
+    "/api/tunnel-generate": {
+      "maxDuration": 300
+    },
+    "/api/upload-chunk": {
+      "maxDuration": 60
+    },
+    "/api/upload-track": {
+      "maxDuration": 60
+    },
+    "/api/upload-voice": {
+      "maxDuration": 60
+    },
+    "/api/upload-watermark": {
+      "maxDuration": 60
+    }
+  }
+}

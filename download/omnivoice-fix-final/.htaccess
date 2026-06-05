@@ -1,0 +1,32 @@
+# Omnivoice - CORS e Seguranca (SEGURO para HostGator)
+# SEM php_value (usa .user.ini no lugar)
+# SEM <Directory> (proibido em .htaccess)
+
+<IfModule mod_headers.c>
+  Header set Access-Control-Allow-Origin "*"
+  Header set Access-Control-Allow-Methods "GET, POST, OPTIONS, DELETE"
+  Header set Access-Control-Allow-Headers "Content-Type, X-Requested-With, Authorization, X-Upload-Token, X-Generate-Token"
+</IfModule>
+
+# Permitir acesso aos arquivos de audio
+<FilesMatch "\.(wav|mp3|ogg|flac|m4a|webm)$">
+  Order allow,deny
+  Allow from all
+</FilesMatch>
+
+# Proteger arquivos sensiveis contra acesso direto
+<FilesMatch "^(config\.php|uploads\.log|tunnel-config\.ini)$">
+  Order deny,allow
+  Deny from all
+</FilesMatch>
+
+# Bloquear acesso a arquivos de dados/sistema
+<FilesMatch "\.(ini|log|sh|bat|ps1|env)$">
+  Require all denied
+</FilesMatch>
+
+# Bloquear PHP dentro da pasta de audios
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^audios/.*\.php$ - [F,L]
+</IfModule>

@@ -412,7 +412,8 @@ async def native_generate(request):
 
             # Roda a geração pesada fora da thread principal para não congelar o servidor Starlette
             loop = asyncio.get_event_loop()
-            audio_data = await loop.run_in_executor(None, lambda: model.generate(**kwargs))
+            audio_list = await loop.run_in_executor(None, lambda: model.generate(**kwargs))
+            audio_data = audio_list[0]  # Modelo retorna lista de arrays, pegar o primeiro
 
             # Remove o arquivo temporário apenas se veio do fluxo tradicional por upload
             if voice_mode not in ["clone_fast", "clone_fast "] and os.path.exists(tmp_ref_path):
@@ -423,8 +424,13 @@ async def native_generate(request):
 
             # Exporta o array numérico bruto para um arquivo WAV de 24Khz em Base64
             import io, soundfile as sf, base64
+            import numpy as np
             wav_io = io.BytesIO()
-            sf.write(wav_io, audio_data, SAMPLE_RATE, format='WAV', subtype='PCM_16')
+            if hasattr(audio_data, "cpu"):
+                audio_data = audio_data.cpu().numpy()
+            # Mantém o áudio em float32 estável e plano. O soundfile converte nativamente para PCM_16 sem distorcer o som
+            audio_float32 = np.asarray(audio_data, dtype=np.float32).flatten()
+            sf.write(wav_io, audio_float32, SAMPLE_RATE, format='WAV', subtype='PCM_16')
             b64_audio = base64.b64encode(wav_io.getvalue()).decode("utf-8")
 
             _post_generate_cleanup()

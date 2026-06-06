@@ -303,11 +303,6 @@ async def native_generate(request):
         speaker_id = body.get("speaker_id", "")   
         ref_audio_url = body.get("ref_audio_url", "")
         ref_text = body.get("ref_text", "")
-        language = body.get("language", "Auto")
-        denoise = body.get("denoise", True) == True
-        postprocess_output = body.get("postprocess_output", True) == True
-        preprocess_prompt = body.get("preprocess_prompt", True) == True
-        instruct = body.get("instruct", "")
         
         guidance_scale = float(body.get("guidance_scale", 1.5)) 
         num_step = int(body.get("num_step", 32))
@@ -411,18 +406,9 @@ async def native_generate(request):
                 "num_step": num_step,
                 "speed": speed,
                 "guidance_scale": guidance_scale,
-                "denoise": denoise,
-                "postprocess_output": postprocess_output,
-                "preprocess_prompt": preprocess_prompt,
                 "ref_audio": tmp_ref_path,
+                "ref_text": ref_text
             }
-            # So envia ref_text se tiver texto REAL (evita model falando fallback)
-            if ref_text and ref_text.strip():
-                kwargs["ref_text"] = ref_text.strip()
-            if instruct and instruct.strip():
-                kwargs["instruct"] = instruct.strip()
-            if language and language.lower() != "auto":
-                kwargs["language"] = language
 
             # Roda a geração pesada fora da thread principal para não congelar o servidor Starlette
             loop = asyncio.get_event_loop()

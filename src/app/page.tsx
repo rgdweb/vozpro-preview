@@ -723,7 +723,7 @@ export default function VozProClient() {
   const [showDuckingSettings, setShowDuckingSettings] = useState(false)
   const [speed, setSpeed] = useState(1.0)
   const [numStep, setNumStep] = useState(32)
-  const [guidanceScale, setGuidanceScale] = useState(1.5)
+  const [guidanceScale, setGuidanceScale] = useState(2.0)
   const [denoise, setDenoise] = useState(true)
   const [postprocessOutput, setPostprocessOutput] = useState(true)
   const [preprocessPrompt, setPreprocessPrompt] = useState(true)

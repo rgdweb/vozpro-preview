@@ -13,8 +13,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { db } from '@/lib/db'
 
-const MAX_CONCURRENT_GENERATIONS = 1
-const PROCESSING_TIMEOUT_MS = 10 * 60 * 1000 // 10 minutos
+const MAX_CONCURRENT_GENERATIONS = 3
+const PROCESSING_TIMEOUT_MS = 180000 // 3 minutos
 
 // POST /api/queue/complete - Marcar geração como completa/falha
 export async function POST(req: NextRequest) {

@@ -11,19 +11,20 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(cuid())
-  name          String   // nome do usuario
-  email         String   @unique // login
-  password      String   @default("") // hash SHA-256 da senha (vazio para Google OAuth)
-  role          String   @default("user") // "admin" ou "user"
-  active        Boolean  @default(true)
-  googleId      String   @unique @default("") // Google OAuth sub
-  freeDownloads Int      @default(5) // downloads gratuitos restantes
-  paymentExempt Boolean  @default(false) // true = isento de pagamento (download livre)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  sessions      Session[]
-  payments      Payment[]
+  id              String            @id @default(cuid())
+  name            String            // nome do usuario
+  email           String            @unique // login
+  password        String            @default("") // hash SHA-256 da senha (vazio para Google OAuth)
+  role            String            @default("user") // "admin" ou "user"
+  active          Boolean           @default(true)
+  googleId        String            @unique @default("") // Google OAuth sub
+  freeDownloads   Int               @default(5) // downloads gratuitos restantes
+  paymentExempt   Boolean           @default(false) // true = isento de pagamento (download livre)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  sessions        Session[]
+  payments        Payment[]
+  generationQueue GenerationQueue[]
 }
 
 model Voice {
@@ -46,7 +47,7 @@ model Voice {
 model VoiceVariation {
   id                String   @id @default(cuid())
   voiceId           String
-  label             String   // e.g. "Neutra", "Animada", "Empresarial", "Dramática", "Sussurrada"
+  label             String   // e.g. "Neutra", "Animada", "Empresarial", "Dramatica", "Sussurrada"
   emoji             String   @default("") // e.g. "😊", "🎉", "💼", "🎭", "🤫"
   refAudioPath      String   @default("") // path on HF Space server (temporary, for Gradio FileData)
   refAudioServerUrl String   @default("") // permanent URL on PHP hosting (for re-upload to HF)
@@ -54,6 +55,7 @@ model VoiceVariation {
   refAudioName      String   @default("") // original filename (user-friendly)
   refText           String   @default("") // transcription of reference audio
   instruct          String   @default("") // optional instruct for fine-tuning (must use supported values only)
+  defaultSpeed      Float    @default(1.0) // speed automatico baseado na analise F0 (vozes graves=1.3/1.4, agudas=1.0)
   order             Int      @default(0)
   active            Boolean  @default(true)
   voice             Voice    @relation(fields: [voiceId], references: [id], onDelete: Cascade)
@@ -63,7 +65,7 @@ model VoiceVariation {
 
 model Track {
   id          String   @id @default(cuid())
-  name        String   // e.g. "Corporativo", "Eletrônica", "Acústica"
+  name        String   // e.g. "Corporativo", "Eletronica", "Acustica"
   description String   @default("")
   emoji       String   @default("")
   category    String   @default("")
@@ -78,11 +80,11 @@ model Track {
 model Session {
   id         String   @id @default(cuid())
   userId     String
-  tokenHash  String   // hash SHA-256 do token da sessão
+  tokenHash  String   // hash SHA-256 do token da sessao
   deviceInfo String   @default("") // User-Agent do dispositivo
   ipAddress  String   @default("") // IP do dispositivo
   createdAt  DateTime @default(now())
-  expiresAt  DateTime // quando a sessão expira
+  expiresAt  DateTime // quando a sessao expira
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
@@ -115,14 +117,31 @@ model Payment {
 }
 
 model GenerationQueue {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   userId      String
-  status      String   @default("waiting") // waiting, processing, completed, failed
-  position    Int      @default(0)
-  createdAt   DateTime @default(now())
+  status      String    @default("waiting") // waiting, processing, completed, failed
+  position    Int       @default(0)
+  createdAt   DateTime  @default(now())
   startedAt   DateTime?
   completedAt DateTime?
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
   @@index([status])
   @@index([createdAt])
+}
+
+
+// ============================================================
+// LOCUTORES OFICIAIS (Banco de Embeddings Pré-Computados)
+// ============================================================
+model Speaker {
+  id          String  @id @default(uuid())
+  name        String  // Nome artístico (ex: "Locutor Varejo Impacto")
+  avatarUrl   String? // Foto do locutor para o painel
+  speakerFile String  @unique  // Nome do arquivo .wav (ex: "aline_dias_locucao_calma.wav") — unico por variacao
+  refAudioUrl String  @default("")  // URL real do arquivo no servidor (ex: "http://147.15.77.137/audios/ref/6a179b4e3fc9d_xxx.wav")
+  isActive    Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

@@ -110,8 +110,9 @@ def main():
     )
     executar_comando(
         f"sudo PORT=3001 PM2_HOME={PM2_HOME} pm2 start {ORACLE_PROJECT_DIR}/.next/standalone/server.js --name omnivoice",
-        "Iniciando PM2"
+        "Iniciando PM2 (porta 3001 - vozpro.cvmnews.com.br)"
     )
+
 
     # 7) Verificar status
     executar_comando(

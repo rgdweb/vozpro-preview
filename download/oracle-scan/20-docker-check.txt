@@ -1,3 +1,0 @@
-CONTAINER ID   IMAGE       COMMAND                  CREATED      STATUS                PORTS                                         NAMES
-5dca1ff3cc34   tecos-app   "docker-entrypoint.s…"   5 days ago   Up 2 days (healthy)   0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp   tecos-app
----END---

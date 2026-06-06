@@ -1,4 +1,0 @@
-total 12
-drwxr-xr-x 3 ubuntu ubuntu 4096 Jun  1 23:48 .
-drwxr-xr-x 3 ubuntu ubuntu 4096 Jun  3 21:21 ..
-drwxr-xr-x 2 ubuntu ubuntu 4096 Jun  1 23:48 20260602000000_add_default_speed

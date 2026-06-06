@@ -1,7 +1,5 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-node_modules
+# ============ DEPENDENCIES ============
+node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -10,78 +8,93 @@ node_modules
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
-
-# next.js
-/.next/
+# ============ NEXT.JS ============
+.next/
 /out/
-
-# production
 /build
+*.tsbuildinfo
 
-# misc
+# ============ ENV ============
+.env
+.env.local
+.env.production
+.env.governance
+
+# ============ MISC ============
 .DS_Store
 *.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# env files
-.env
-.env*
-!.env.example
-
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-# Logs
 *.log
+--timeout
 
-# Local dev files
-local-dev-*
-.claude
-.z-ai-config
-
-# Internal / dev
-/skills/
-test
-prompt
-worklog.md
-
-# Database (local only, not for production)
-db/
-
-# Uploaded files (now in Vercel Blob, not local)
-public/uploads/
-
-# Build artifacts and temp files
+# ============ BUILD / TEMP ============
 tmp/
 upload/
-
-# OmniVoice source (too large for git)
-OmniVoice/
-
-# Dev scripts not needed for Vercel
-audio-server.js
-spawner.js
-keep-alive.sh
-Caddyfile
-dev*.log
-server*.log
-keep-alive*.log
-spawner*.log
-audio-server*.log
-server-alive.log
-backups/
 *.db
 *.sqlite
 *.sqlite3
-download/omnivoice-backup-20260523-183242-full.tar.gz
+
+# ============ SKILLS (internal) ============
+/skills/
+
+# ============ JUNK / OLD FILES ============
+debug.txt
+omnivoice-triton.json
+admin_page_temp.tsx
+client_page_temp.tsx
+client_page.tsx
+page_fixed.tsx
+page_oracle.tsx
+generate_route.ts
+generate_route_temp.ts
+generate_doc.py
+backup.sh
+backup_server.py
+deploy_default_speed.py
+deploy_default_speed2.py
+deploy_oracle.py
+deploy_php.py
+deploy_route.py
+check-cols.js
+check-db.mjs
+check-tables.js
+check_oracle.py
+check_oracle2.py
+check_oracle_audio.py
+check_vozpro.py
+ssh_test.py
+final_test.py
+fix_title.py
+download_files.py
+run_migration.py
+run_migration2.py
+scan_b1.py
+scan_b2.py
+scan_b3.py
+scan_oracle.py
+worklog.md
+worklog-fix-admin.md
+
+# ============ OLD DIRECTORIES (not for production) ============
+/download/
+/omnivoice-build/
+/omnivoice-server/
+/oracle-nextjs/
+/oracle-php/
+/php/
+/php-server/
+/local-server/
+/vozpro-preview/
+/Omnivoice/
+/docs/
+
+# ============ BACKUP FILES ============
+*.bak.*
+*.backup*
+*.temp
+*-backup-*
+
+# ============ VERCEL ============
+.vercel
+vercel.json
+
+bun.lock

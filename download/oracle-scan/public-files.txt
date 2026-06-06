@@ -1,4 +1,0 @@
-/home/ubuntu/omnivoice/public/logo.jpg
-/home/ubuntu/omnivoice/public/logo.svg
-/home/ubuntu/omnivoice/public/og-image.jpg
-/home/ubuntu/omnivoice/public/robots.txt

@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict oF7FxjyXF7NS7f2E7XafeMIWQmGUsa9yJjAV7qNM2Nl0MdLhGkLYwDFcbaHARUg
+\restrict Nfagn7GaH9GKcbHVDmcdxINe0eTZzHFrvnrzWvwdWYy94EhDXurNOu8Wr1wQ04Q
 
 -- Dumped from database version 16.14 (Ubuntu 16.14-0ubuntu0.24.04.1)
 -- Dumped by pg_dump version 16.14 (Ubuntu 16.14-0ubuntu0.24.04.1)
@@ -18,6 +18,41 @@ SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
 
+ALTER TABLE IF EXISTS ONLY public."VoiceVariation" DROP CONSTRAINT IF EXISTS "VoiceVariation_voiceId_fkey";
+ALTER TABLE IF EXISTS ONLY public."Session" DROP CONSTRAINT IF EXISTS "Session_userId_fkey";
+ALTER TABLE IF EXISTS ONLY public."Payment" DROP CONSTRAINT IF EXISTS "Payment_userId_fkey";
+ALTER TABLE IF EXISTS ONLY public."GenerationQueue" DROP CONSTRAINT IF EXISTS "GenerationQueue_userId_fkey";
+DROP INDEX IF EXISTS public."User_googleId_key";
+DROP INDEX IF EXISTS public."User_email_key";
+DROP INDEX IF EXISTS public."SystemSetting_key_key";
+DROP INDEX IF EXISTS public."Speaker_speakerFile_key";
+DROP INDEX IF EXISTS public."Session_userId_idx";
+DROP INDEX IF EXISTS public."Session_tokenHash_idx";
+DROP INDEX IF EXISTS public."Payment_userId_idx";
+DROP INDEX IF EXISTS public."Payment_status_idx";
+DROP INDEX IF EXISTS public."Payment_externalRef_key";
+DROP INDEX IF EXISTS public."Payment_externalRef_idx";
+DROP INDEX IF EXISTS public."GenerationQueue_userId_idx";
+DROP INDEX IF EXISTS public."GenerationQueue_status_idx";
+DROP INDEX IF EXISTS public."GenerationQueue_createdAt_idx";
+ALTER TABLE IF EXISTS ONLY public."Voice" DROP CONSTRAINT IF EXISTS "Voice_pkey";
+ALTER TABLE IF EXISTS ONLY public."VoiceVariation" DROP CONSTRAINT IF EXISTS "VoiceVariation_pkey";
+ALTER TABLE IF EXISTS ONLY public."User" DROP CONSTRAINT IF EXISTS "User_pkey";
+ALTER TABLE IF EXISTS ONLY public."Track" DROP CONSTRAINT IF EXISTS "Track_pkey";
+ALTER TABLE IF EXISTS ONLY public."SystemSetting" DROP CONSTRAINT IF EXISTS "SystemSetting_pkey";
+ALTER TABLE IF EXISTS ONLY public."Speaker" DROP CONSTRAINT IF EXISTS "Speaker_pkey";
+ALTER TABLE IF EXISTS ONLY public."Session" DROP CONSTRAINT IF EXISTS "Session_pkey";
+ALTER TABLE IF EXISTS ONLY public."Payment" DROP CONSTRAINT IF EXISTS "Payment_pkey";
+ALTER TABLE IF EXISTS ONLY public."GenerationQueue" DROP CONSTRAINT IF EXISTS "GenerationQueue_pkey";
+DROP TABLE IF EXISTS public."VoiceVariation";
+DROP TABLE IF EXISTS public."Voice";
+DROP TABLE IF EXISTS public."User";
+DROP TABLE IF EXISTS public."Track";
+DROP TABLE IF EXISTS public."SystemSetting";
+DROP TABLE IF EXISTS public."Speaker";
+DROP TABLE IF EXISTS public."Session";
+DROP TABLE IF EXISTS public."Payment";
+DROP TABLE IF EXISTS public."GenerationQueue";
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -204,8 +239,8 @@ ALTER TABLE public."VoiceVariation" OWNER TO omnivoice;
 --
 
 COPY public."GenerationQueue" (id, "userId", status, "position", "createdAt", "startedAt", "completedAt") FROM stdin;
-cmq1l1t4m00038uq5bcquavyx	cmplln2dv0000jy04c6kicu46	failed	0	2026-06-05 23:56:13.367	2026-06-05 23:56:13.366	2026-06-06 00:04:29.278
-cmq1lexvf00058uq5izwfln60	cmplzhonw0000jl04d4s86byx	processing	0	2026-06-06 00:06:26.043	2026-06-06 00:06:26.042	\N
+cmq2ne4vu00058upy5aietb7x	cmplln2dv0000jy04c6kicu46	failed	0	2026-06-06 17:49:33.883	2026-06-06 17:49:33.882	2026-06-06 18:35:51.544
+cmq2p1xvy00078upy3g2g8hvq	cmplln2dv0000jy04c6kicu46	processing	0	2026-06-06 18:36:04.174	2026-06-06 18:36:04.173	\N
 \.
 
 
@@ -245,8 +280,10 @@ cmpzdxh0000018u1yc6rals55	cmplnkvu90000l204lqgf6kw4	ab5b8fac60bc03b96b661b79b4da
 cmq02dbi000018uin5eo56jyx	cmplln2dv0000jy04c6kicu46	2dbaf58c8ef4a449a5151f48cc6f53373d22f6cbf2e9fb4483ed95b505753203	Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36	177.36.178.11	2026-06-04 22:25:31.512	2026-06-05 22:25:31.511
 cmq02dh1900038uinlmhs64le	cmplln2dv0000jy04c6kicu46	5319156f6135892ab2db3a40d47468b5b2f3c1c15e989bb71f33a74df1004d0d	Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36	177.36.178.11	2026-06-04 22:25:38.685	2026-06-05 22:25:38.684
 cmq050boj00038uq7fwpkqzl1	cmplln2dv0000jy04c6kicu46	b61df662942c76569773db9dc22ccb71032a6e046834d397499b4235df81de99	Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0	177.36.178.11	2026-06-04 23:39:24.067	2026-06-05 23:39:24.066
-cmq0v4qqj000p8ujw34ietsor	cmplzhonw0000jl04d4s86byx	8e9a9fc7b9263b909c1685fe30a394aaabc938d37230efef308e743c7c7a435e	Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36	45.162.158.2	2026-06-05 11:50:40.219	2026-06-06 11:50:40.216
 cmq1i6a2b00018ui0c4vntp8n	cmplln2dv0000jy04c6kicu46	b9364f5ec1cec037274015a9e2b99c242e168956c2c3e296db57b4754892dcba	Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36	177.36.176.208	2026-06-05 22:35:43.092	2026-06-06 22:35:43.09
+cmq1x7if600018u568ckq04xl	cmplln2dv0000jy04c6kicu46	de3ae53173ba227da878877f92adc05291705c4dab8774c45bd64e071e25ca42	Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36	177.36.176.208	2026-06-06 05:36:34.819	2026-06-07 05:36:34.817
+cmq2e9ohf00038u56lurpd7hl	cmplzhonw0000jl04d4s86byx	7e5b7acee6d2e0865ffa19958fbbbed4c1c91b43ef3919528fd0df37a4435e95	Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36	177.174.246.186	2026-06-06 13:34:09.46	2026-06-07 13:34:09.456
+cmq2mcw5o00018uv98cigy6ph	cmplln2dv0000jy04c6kicu46	6d19b6177fdfbdb73fd8d68596cd756364a38bad19f77cae6682da0731631baf	Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36	177.36.177.197	2026-06-06 17:20:36.301	2026-06-07 17:20:36.299
 \.
 
 
@@ -255,7 +292,7 @@ cmq1i6a2b00018ui0c4vntp8n	cmplln2dv0000jy04c6kicu46	b9364f5ec1cec037274015a9e2b9
 --
 
 COPY public."Speaker" (id, name, "avatarUrl", "speakerFile", "isActive", "createdAt", "updatedAt", "refAudioUrl", "refText") FROM stdin;
-328897b7-705b-45a3-a611-ecd5dfb26809	Aline Dias — Locução Calma	\N	aline_dias_locucao_calma.wav	t	2026-06-05 03:35:29.703	2026-06-05 03:35:29.703	https://api.cvmnews.com.br/audios/ref/6a179b4e3fc9d_1779931982.wav	Bom dia, sua voz esta sendo clonada automaticamente pelo sistema VozPro.
+328897b7-705b-45a3-a611-ecd5dfb26809	Aline Dias — Locução Calma	\N	aline_dias_locucao_calma.wav	t	2026-06-05 03:35:29.703	2026-06-05 03:35:29.703	https://api.cvmnews.com.br/audios/ref/6a179b4e3fc9d_1779931982.wav	
 \.
 
 
@@ -1302,5 +1339,5 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES 
 -- PostgreSQL database dump complete
 --
 
-\unrestrict oF7FxjyXF7NS7f2E7XafeMIWQmGUsa9yJjAV7qNM2Nl0MdLhGkLYwDFcbaHARUg
+\unrestrict Nfagn7GaH9GKcbHVDmcdxINe0eTZzHFrvnrzWvwdWYy94EhDXurNOu8Wr1wQ04Q
 

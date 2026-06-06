@@ -42,7 +42,7 @@ def executar_comando(comando, descricao, check=True):
     except subprocess.CalledProcessError as e:
         print(f"[ERRO CRITICO] Falha em: {descricao}")
         if e.stderr:
-            print(f"  STDERR: {e.stderr.decode('utf-8', errors='replace')[-1000:]}")
+            print(f"  STDERR: {e.stderr[-1000:]}")
         sys.exit(1)
     except subprocess.TimeoutExpired:
         print(f"[TIMEOUT] Comando excedeu 5min: {descricao}")

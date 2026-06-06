@@ -174,7 +174,7 @@ export async function POST(req: NextRequest) {
           speaker_id: speakerFile,
           ref_audio_url: serverUrl || undefined,
           ref_text: refText.trim() || 'texto de referencia para clonagem de voz',
-          guidance_scale: 1.5,
+          guidance_scale: 2.0,
           num_step: numStep ?? 32,
           speed: speed ?? 1.0,
           language: language || 'Auto',
@@ -187,7 +187,7 @@ export async function POST(req: NextRequest) {
           voice_mode: 'clone',
           ref_audio_url: serverUrl,
           ref_text: refText.trim() || 'texto de referencia para clonagem de voz',
-          guidance_scale: 1.5,
+          guidance_scale: 2.0,
           num_step: numStep ?? 32,
           speed: speed ?? 1.0,
           language: language || 'Auto',
@@ -199,7 +199,7 @@ export async function POST(req: NextRequest) {
     debug.log('Payload', 'info',
       isCloneFast
         ? `clone_fast | speaker:${speakerFile} | speed:${payload.speed} | steps:${payload.num_step}`
-        : `clone | cfg:1.5 | speed:${payload.speed} | steps:${payload.num_step} | ref_text:${(payload.ref_text as string).substring(0, 40)}...`)
+        : `clone | cfg:2.0 | speed:${payload.speed} | steps:${payload.num_step} | ref_text:${(payload.ref_text as string).substring(0, 40)}...`)
 
     // Retry (até 3 tentativas)
     const maxRetries = 3

@@ -140,6 +140,9 @@ export async function POST(req: NextRequest) {
       if (speaker?.refAudioUrl) {
         serverUrl = speaker.refAudioUrl
       }
+      if (speaker?.refText) {
+        refText = speaker.refText
+      }
     }
 
     // REMOVER SSML residual
@@ -159,6 +162,7 @@ export async function POST(req: NextRequest) {
           voice_mode: 'clone_fast',
           speaker_id: speakerFile,
           ref_audio_url: serverUrl || undefined,
+          ref_text: refText.trim() || 'texto de referencia para clonagem de voz',
           guidance_scale: 1.5,
           num_step: numStep ?? 32,
           speed: speed ?? 1.0,

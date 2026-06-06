@@ -141,6 +141,7 @@ model Speaker {
   avatarUrl   String? // Foto do locutor para o painel
   speakerFile String  @unique  // Nome do arquivo .wav (ex: "aline_dias_locucao_calma.wav") — unico por variacao
   refAudioUrl String  @default("")  // URL real do arquivo no servidor (ex: "http://147.15.77.137/audios/ref/6a179b4e3fc9d_xxx.wav")
+  refText     String  @default("")  // Transcricao do audio de referencia (ex: "Bom dia, sua voz esta sendo clonada automaticamente.")
   isActive    Boolean @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

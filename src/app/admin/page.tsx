@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch'
 import { Slider } from '@/components/ui/slider'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import {
-  AudioWaveform, LogOut, Plus, Trash2, Edit, Upload, Music, Mic,
+  AudioWaveform, LogOut, Plus, Trash2, Edit, FileText, Upload, Music, Mic, Zap,
   Loader2, RefreshCw, Volume2, FileAudio, CheckCircle2, Settings2,
   FolderOpen, ChevronLeft, FolderPlus, Folder, Play, Pause, Users, UserPlus, Shield,
   UploadCloud, X, Download, VolumeX, CreditCard, Chrome, DollarSign, Tag
@@ -639,7 +639,7 @@ function HealthSection() {
             {healthData.checks?.database && (
               <Card className="bg-white/5 border-white/10">
                 <CardContent className="py-3 px-4">
-                  <p className="text-xs font-medium text-slate-300 mb-2">🗄️ Database (Neon)</p>
+                  <p className="text-xs font-medium text-slate-300 mb-2">🗄️ Database</p>
                   <div className="text-xs space-y-1 text-slate-400">
                     <p>Latência: <span className={Number((healthData.checks.database as Record<string, unknown>).latencia_ms) > 500 ? 'text-red-400' : 'text-emerald-400'}>{(healthData.checks.database as Record<string, unknown>).latencia_ms}ms</span></p>
                     <p>Usuários: {(healthData.checks.database as Record<string, unknown>).usuarios}</p>
@@ -684,7 +684,7 @@ function HealthSection() {
                     )}
                     {(healthData.checks.php_server as Record<string, Record<string, unknown>>)?.checks?.processos && (
                       <div>
-                        <p>Gradio TTS: {(healthData.checks.php_server as Record<string, Record<string, unknown>>).checks?.processos?.rodando ? '🟢 Rodando' : '🔴 Parado'}</p>
+                        <p>GPU TTS (Native): {(healthData.checks.php_server as Record<string, Record<string, unknown>>).checks?.processos?.rodando ? '🟢 Rodando' : '🔴 Parado'}</p>
                         <p>Cloudflared: {(healthData.checks.php_server as Record<string, Record<string, unknown>>).checks?.processos?.cloudflared_rodando ? '🟢 Rodando' : '🔴 Parado'}</p>
                       </div>
                     )}
@@ -1084,6 +1084,11 @@ export default function AdminDashboard() {
   // Category management dialog state
   const [trackCategoryDialogOpen, setTrackCategoryDialogOpen] = useState(false)
   const [voiceCategoryDialogOpen, setVoiceCategoryDialogOpen] = useState(false)
+  const [speakerVarIds, setSpeakerVarIds] = useState<Set<string>>(new Set())
+  const [speakersData, setSpeakersData] = useState<Array<{ id: string; name: string; speakerFile: string; refAudioUrl: string; refText: string }>>([])
+  const [editingSpeakerId, setEditingSpeakerId] = useState<string | null>(null)
+  const [speakerRefText, setSpeakerRefText] = useState('')
+  const [convertingSpeakerId, setConvertingSpeakerId] = useState<string | null>(null)
   const [newCatName, setNewCatName] = useState('')
   const [newCatEmoji, setNewCatEmoji] = useState('')
   const [savingCategories, setSavingCategories] = useState(false)
@@ -1158,7 +1163,7 @@ export default function AdminDashboard() {
   }, [])
 
   // Settings state
-  const [enableVoiceUpload, setEnableVoiceUpload] = useState(false)
+  const [enableVoiceFileText, Upload, setEnableVoiceUpload] = useState(false)
   const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [watermarkPath, setWatermarkPath] = useState('')
   const [watermarkVolume, setWatermarkVolume] = useState(0.08)
@@ -1206,6 +1211,15 @@ export default function AdminDashboard() {
       }
       if (trackCatRes.ok) setTrackCategories(await trackCatRes.json())
       if (voiceCatRes.ok) setVoiceCategories(await voiceCatRes.json())
+      // Fetch Locutores Oficiais para marcar variacoes
+      try {
+        const speakersRes = await fetch('/api/admin/speakers')
+        if (speakersRes.ok) {
+          const spData = await speakersRes.json()
+          setSpeakersData(spData || [])
+          setSpeakerVarIds(new Set((spData || []).map((s: { speakerFile: string }) => s.speakerFile)))
+        }
+      } catch {}
       if (managedCatRes.ok) {
         const managedData = await managedCatRes.json()
         setManagedTrackCategories(managedData.tracks || [])
@@ -1383,6 +1397,76 @@ export default function AdminDashboard() {
     }
   }
 
+  const slugify = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+
+  // Salvar refText do Locutor Oficial
+  const handleSaveSpeakerRefText = async (speakerId: string) => {
+    try {
+      const res = await fetch('/api/admin/speakers/ref-text', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ speakerId, refText: speakerRefText }),
+      })
+      if (res.ok) {
+        toast.success('Texto de referência salvo!')
+        setEditingSpeakerId(null)
+        const speakersRes = await fetch('/api/admin/speakers')
+        if (speakersRes.ok) {
+          const sp = await speakersRes.json()
+          setSpeakersData(sp || [])
+        }
+      }
+    } catch (err) {
+      toast.error('Erro ao salvar')
+    }
+  }
+
+  // Converter VARIACAO em Locutor Oficial (clone_fast) — 1 clique
+  const handleToggleSpeaker = async (variation: VoiceVariation, voiceName: string) => {
+    const speakerFileKey = slugify(voiceName) + '_' + slugify(variation.label) + '.wav'
+    const isCurrentlySpeaker = speakerVarIds.has(speakerFileKey)
+    const action = isCurrentlySpeaker ? false : true
+
+    setConvertingSpeakerId(variation.id)
+    try {
+      const res = await fetch('/api/admin/speakers/convert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ variationId: variation.id, enable: action }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        toast.error(data.error || 'Erro ao converter locutor')
+        return
+      }
+
+      // Toggle local state by speakerFile
+      setSpeakerVarIds(prev => {
+        const next = new Set(prev)
+        if (action && data.speakerFile) {
+          next.add(data.speakerFile)
+        }
+        return next
+      })
+
+      toast.success(data.message || (action ? 'Locutor Oficial ativado!' : 'Locutor Oficial removido'))
+
+      // Refetch speakers to keep UI in sync
+      if (!action) {
+        const speakersRes = await fetch('/api/admin/speakers')
+        if (speakersRes.ok) {
+          const sp = await speakersRes.json()
+          setSpeakersData(sp || [])
+          setSpeakerVarIds(new Set((sp || []).map((s: { speakerFile: string }) => s.speakerFile)))
+        }
+      }
+    } catch {
+      toast.error('Erro de comunicacao com o servidor')
+    } finally {
+      setConvertingSpeakerId(null)
+    }
+  }
   const handleToggleVoice = async (voice: Voice) => {
     try {
       await fetch(`/api/voices/${voice.id}`, {
@@ -3035,6 +3119,7 @@ export default function AdminDashboard() {
                             </div>
                             <div className="flex items-center gap-1">
                               <Switch checked={voice.active} onCheckedChange={() => handleToggleVoice(voice)} />
+
                               <Button variant="ghost" size="icon" onClick={() => { setEditingVoiceId(voice.id); setVoiceForm({ name: voice.name, description: voice.description, gender: voice.gender, age: voice.age, accent: voice.accent, pitch: voice.pitch, category: voice.category || '' }); setVoiceDialogOpen(true) }} className="text-slate-400 hover:text-white"><Edit className="w-4 h-4" /></Button>
                               <Button variant="ghost" size="icon" onClick={() => handleDeleteVoice(voice.id)} className="text-slate-400 hover:text-red-400"><Trash2 className="w-4 h-4" /></Button>
                             </div>
@@ -3078,6 +3163,30 @@ export default function AdminDashboard() {
                                       <Button variant="ghost" size="sm" onClick={() => document.getElementById(`quick-audio-${selectedVoiceCategory}-${v.id}`)?.click()} className={`h-7 px-2 text-xs gap-1 ${(v.refAudioPath || v.refAudioServerUrl) ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30' : 'text-amber-400 hover:text-amber-300 hover:bg-amber-900/30'}`}><Upload className="w-3 h-3" />{(v.refAudioPath || v.refAudioServerUrl) ? 'Update' : 'Add'}</Button>
                                       <Button variant="ghost" size="sm" onClick={() => handleEditVariationWithAudio(v)} className="h-7 px-2 text-xs text-slate-400 hover:text-white hover:bg-slate-700 gap-1"><Edit className="w-3 h-3" />Editar</Button>
                                       <Switch checked={v.active} onCheckedChange={() => handleToggleVariation(v)} className="scale-75" />
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        disabled={convertingSpeakerId === v.id || !v.refAudioServerUrl}
+                                        onClick={() => handleToggleSpeaker(v, voice.name)}
+                                        className={`h-7 w-7 ${speakerVarIds.has(slugify(voice.name) + '_' + slugify(v.label) + '.wav') ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30' : 'text-amber-400/70 hover:text-amber-300 hover:bg-amber-900/30'}`}
+                                        title={speakerVarIds.has(slugify(voice.name) + '_' + slugify(v.label) + '.wav') ? 'Desativar Clonagem Rapida' : 'Ativar Clonagem Rapida (Locutor Oficial)'}
+                                      >
+                                        {convertingSpeakerId === v.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                                      </Button>
+                                      {(() => {
+                                        const sf = slugify(voice.name) + '_' + slugify(v.label) + '.wav'
+                                        const sp = speakersData.find((s: { speakerFile: string }) => s.speakerFile === sf)
+                                        if (!sp) return null
+                                        return (
+                                          <button
+                                            onClick={() => { setEditingSpeakerId(sp.id); setSpeakerRefText(sp.refText || '') }}
+                                            className={`h-7 w-7 rounded flex items-center justify-center shrink-0 ${sp.refText ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30' : 'text-amber-400/70 hover:text-amber-300 hover:bg-amber-900/30'}`}
+                                            title={sp.refText ? 'Texto ref: ' + sp.refText.substring(0, 50) : 'Sem texto de referencia (clique para adicionar)'}
+                                          >
+                                            <FileText className="w-3 h-3" />
+                                          </button>
+                                        )
+                                      })()}
                                       <Button variant="ghost" size="icon" onClick={() => handleDeleteVariation(v.id)} className="text-slate-500 hover:text-red-400 h-7 w-7"><Trash2 className="w-3 h-3" /></Button>
                                     </div>
                                   </div>
@@ -3131,6 +3240,7 @@ export default function AdminDashboard() {
                                   <a href={toProxyAudioUrl(dv.refAudioServerUrl)} download={dv.refAudioName || undefined} target="_blank" rel="noopener noreferrer" className="h-8 w-8 rounded-full flex items-center justify-center text-blue-400 hover:text-blue-300 hover:bg-blue-900/30 transition-colors" title={`Baixar áudio: ${dv.label}`}><Download className="w-3.5 h-3.5" /></a>
                                 ) : null })()}
                                 <Switch checked={voice.active} onCheckedChange={() => handleToggleVoice(voice)} className="scale-75" />
+
                                 <Button variant="ghost" size="icon" onClick={() => { setEditingVoiceId(voice.id); setVoiceForm({ name: voice.name, description: voice.description, gender: voice.gender, age: voice.age, accent: voice.accent, pitch: voice.pitch, category: voice.category || '' }); setVoiceDialogOpen(true) }} className="text-slate-400 hover:text-white h-8 w-8"><Edit className="w-3.5 h-3.5" /></Button>
                                 <Button variant="ghost" size="icon" onClick={() => handleDeleteVoice(voice.id)} className="text-slate-400 hover:text-red-400 h-8 w-8"><Trash2 className="w-3.5 h-3.5" /></Button>
                               </div>
@@ -4067,7 +4177,26 @@ export default function AdminDashboard() {
             <HealthSection />
           </TabsContent>
         </Tabs>
-      </main>
+                    {/* Dialog: Editar refText do Locutor Oficial */}
+              {editingSpeakerId && (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setEditingSpeakerId(null)}>
+                  <div className="bg-slate-800 rounded-xl p-6 max-w-lg w-full mx-4 border border-slate-600" onClick={e => e.stopPropagation()}>
+                    <h3 className="text-lg font-semibold text-white mb-2">Texto de Referencia do Locutor</h3>
+                    <p className="text-sm text-slate-400 mb-4">Cole a transcricao exata do que o locutor fala no audio de referencia. Isso melhora drasticamente a qualidade da clonagem.</p>
+                    <textarea
+                      className="w-full h-40 bg-slate-900 border border-slate-600 rounded-lg p-3 text-white text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-500"
+                      placeholder="Ex: Bom dia senhores, bem-vindos ao programa matinal da nossa radio..."
+                      value={speakerRefText}
+                      onChange={e => setSpeakerRefText(e.target.value)}
+                    />
+                    <div className="flex gap-2 mt-4 justify-end">
+                      <button onClick={() => setEditingSpeakerId(null)} className="px-4 py-2 text-sm text-slate-400 hover:text-white rounded-lg hover:bg-slate-700">Cancelar</button>
+                      <button onClick={() => handleSaveSpeakerRefText(editingSpeakerId)} className="px-4 py-2 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-500">Salvar</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+</main>
 
       {/* Track Category Management Dialog */}
       <Dialog open={trackCategoryDialogOpen} onOpenChange={setTrackCategoryDialogOpen}>

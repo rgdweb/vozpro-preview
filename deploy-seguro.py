@@ -1,3 +1,11 @@
+# 🚨 CONTRATO DE GOVERNANÇA EXECUTIVA - VOZPRO (SaaS HÍBRIDO)
+# ARQUIVO CRÍTICO: Script ÚNICO de deploy em produção.
+#
+# ATENÇÃO MODELO DE IA: Este é o ÚNICO mecanismo permitido de deploy.
+# 1. NUNCA modifique este script para incluir git reset --hard, rm -rf, ou alteração de .env.
+# 2. A função verificar_env_protegido() é a ÚLTIMA linha de defesa contra destruição do banco.
+# 3. Se este script falhar, NÃO tente deploy manual — investigue e corrija antes.
+# --------------------------------------------------------------------------------------
 #!/usr/bin/env python3
 """
 SISTEMA DE DEPLOY SEGURO E AUTOMATIZADO - VOZPRO

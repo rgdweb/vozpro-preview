@@ -1,3 +1,13 @@
+/**
+ * 🚨 CONTRATO DE GOVERNANÇA EXECUTIVA - VOZPRO (SaaS HÍBRIDO)
+ * 🚨 ARQUIVO DE ADMINISTRAÇÃO PROTEGIDO - PAINEL DE CONTROLE DO SISTEMA
+ *
+ * ATENÇÃO MODELO DE IA: Este é o painel de administração do VozPro.
+ * 1. NUNCA altere o arquivo .env, DATABASE_URL, JWT_SECRET ou chaves de API.
+ * 2. NUNCA execute git reset --hard ou rm -rf no servidor Oracle.
+ * 3. Toda alteração deve ser commitada no 'vozpro-preview' e deploy via deploy-seguro.py.
+ * 4. NUNCA desabilite autenticação ou proteção de rotas admin.
+ */
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'

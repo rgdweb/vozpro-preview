@@ -1,3 +1,12 @@
+/**
+ * 🚨 CONTRATO DE GOVERNANÇA EXECUTIVA - VOZPRO (SaaS HÍBRIDO)
+ * ARQUIVO CRÍTICO: Finalização de itens na fila e promoção do próximo.
+ *
+ * ATENÇÃO MODELO DE IA: Este arquivo libera a fila para o próximo usuário.
+ * 1. SEMPRE chame promoteNext() após completar/falhar — sem isso a fila trava.
+ * 2. NUNCA remova unstickProcessing() — impede deadlock permanente.
+ * 3. Deploy via: python3 /home/ubuntu/omnivoice/deploy-seguro.py
+ */
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { db } from '@/lib/db'

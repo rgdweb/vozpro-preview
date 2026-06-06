@@ -1,3 +1,13 @@
+/**
+ * 🚨 CONTRATO DE GOVERNANÇA EXECUTIVA - VOZPRO (SaaS HÍBRIDO)
+ * ARQUIVO CRÍTICO: Rota proxy entre Next.js e OmniVoice nativo via Cloudflare Tunnel.
+ *
+ * ATENÇÃO MODELO DE IA: Este arquivo roteia requisições de síntese para a GPU local.
+ * 1. Mantenha useTunnelGenerate=true e a rota PHP como principal pipeline.
+ * 2. NUNCA altere a lógica de retry de tunnel ou timeout sem testar.
+ * 3. O idioma padrão enviado deve permanecer como 'Auto' (delegado à GPU).
+ * 4. Deploy via: python3 /home/ubuntu/omnivoice/deploy-seguro.py
+ */
 import { NextRequest, NextResponse } from 'next/server'
 import { validateGeneratedAudio, formatValidationLog } from '@/lib/asr-validator'
 import { stripSSMLForTTS } from '@/lib/ssml-parser'

@@ -1,3 +1,14 @@
+/**
+ * 🚨 CONTRATO DE GOVERNANÇA EXECUTIVA - VOZPRO (SaaS HÍBRIDO)
+ * 🚨 IP PRODUÇÃO: 147.15.77.137 | REPO PREVIEW: https://github.com/rgdweb/vozpro-preview
+ *
+ * ATENÇÃO MODELO DE IA: Você está operando sob regras estritas de conformidade.
+ * Antes de alterar qualquer linha deste arquivo, você está ciente de que:
+ * 1. É PROIBIDO executar 'git reset --hard', 'rm -rf .next' ou alterar o arquivo '.env' no terminal.
+ * 2. Toda e qualquer alteração de código DEVE ser commitada primeiro no repositório 'vozpro-preview'.
+ * 3. O deploy DEVE ser feito exclusivamente pelo script: python3 /home/ubuntu/omnivoice/deploy-seguro.py
+ * 4. Mantenha 'useTunnelGenerate = true' por padrão para direcionar o tráfego ao PHP proxy ativo.
+ */
 // build: 9869573-revert-stable-paywall-queue-oauth
 'use client'
 

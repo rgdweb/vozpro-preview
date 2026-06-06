@@ -1,3 +1,12 @@
+/**
+ * 🚨 CONTRATO DE GOVERNANÇA EXECUTIVA - VOZPRO (SaaS HÍBRIDO)
+ * ARQUIVO CRÍTICO: Geração de tokens HMAC para autenticação com PHP proxy.
+ *
+ * ATENÇÃO MODELO DE IA: Este arquivo gera tokens de autenticação assinados.
+ * 1. A variável AUDIO_SERVER_API_KEY deve corresponder EXATAMENTE à API_KEY no PHP config.php.
+ * 2. NUNCA exponha a chave de API em respostas HTTP ou logs.
+ * 3. Deploy exclusivamente via: python3 /home/ubuntu/omnivoice/deploy-seguro.py
+ */
 import { NextResponse } from 'next/server'
 
 // GET /api/generate-token - Generates a temporary signed token for direct browser-to-PHP generation

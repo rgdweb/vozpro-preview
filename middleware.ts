@@ -1,3 +1,13 @@
+/**
+ * 🚨 CONTRATO DE GOVERNANÇA EXECUTIVA - VOZPRO (SaaS HÍBRIDO)
+ * ARQUIVO CRÍTICO: Middleware de autenticação e proteção de rotas.
+ *
+ * ATENÇÃO MODELO DE IA: Este arquivo protege rotas privadas do sistema.
+ * 1. NUNCA desabilite a proteção da rota /admin.
+ * 2. NUNCA exponha rotas de API administrativas sem autenticação.
+ * 3. Mantenha JWT verification ativo.
+ * 4. Deploy via: python3 /home/ubuntu/omnivoice/deploy-seguro.py
+ */
 import { NextRequest, NextResponse } from 'next/server'
 
 // Rotas que requerem autenticação

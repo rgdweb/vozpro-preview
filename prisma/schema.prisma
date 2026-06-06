@@ -1,3 +1,11 @@
+// 🚨 CONTRATO DE GOVERNANÇA EXECUTIVA - VOZPRO (SaaS HÍBRIDO)
+// ARQUIVO CRÍTICO: Schema do banco de dados PostgreSQL.
+//
+// ATENÇÃO MODELO DE IA: Este arquivo define toda a estrutura do banco.
+// 1. NUNCA rode 'prisma migrate reset' ou 'prisma db push --force-reset' em produção.
+// 2. Use SEMPRE 'prisma migrate deploy' para aplicar migrações seguras.
+// 3. NUNCA altere colunas sem criar uma migração versionada.
+// 4. Deploy via: python3 /home/ubuntu/omnivoice/deploy-seguro.py
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 

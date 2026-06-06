@@ -1163,7 +1163,7 @@ export default function AdminDashboard() {
   }, [])
 
   // Settings state
-  const [enableVoiceFileText, Upload, setEnableVoiceUpload] = useState(false)
+  const [enableVoiceUpload, setEnableVoiceUpload] = useState(false)
   const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [watermarkPath, setWatermarkPath] = useState('')
   const [watermarkVolume, setWatermarkVolume] = useState(0.08)

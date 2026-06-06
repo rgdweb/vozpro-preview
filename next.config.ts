@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  output: 'standalone',
   experimental: {
     serverActions: {
       bodySizeLimit: '50mb',

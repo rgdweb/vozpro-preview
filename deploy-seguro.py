@@ -1,11 +1,14 @@
-# 🚨 CONTRATO DE GOVERNANÇA EXECUTIVA - VOZPRO (SaaS HÍBRIDO)
-# ARQUIVO CRÍTICO: Script ÚNICO de deploy em produção.
-#
-# ATENÇÃO MODELO DE IA: Este é o ÚNICO mecanismo permitido de deploy.
-# 1. NUNCA modifique este script para incluir git reset --hard, rm -rf, ou alteração de .env.
-# 2. A função verificar_env_protegido() é a ÚLTIMA linha de defesa contra destruição do banco.
-# 3. Se este script falhar, NÃO tente deploy manual — investigue e corrija antes.
-# --------------------------------------------------------------------------------------
+# 🚨 CONTRATO DE GOVERNANCA EXECUTIVA - VOZPRO (SaaS Hibrido)
+# 🚨 PROIBICOES ABSOLUTAS (13 erros ja cometidos que derrubaram o sistema):
+#   1. NUNCA git reset --hard | 2. NUNCA altere git remote | 3. NUNCA rm -rf
+#   4. NUNCA push syntax errors | 5. NUNCA commit .env real | 6. NUNCA temp no root
+#   7. NUNCA scripts deploy alternativos | 8. NUNCA quebre next.config | 9. queue: 3x, 3min
+#   10. NUNCA remova AUDIO_SERVER_API_KEY | 11. NUNCA desalinhe tokens .env/config.php
+#   12. NUNCA pm2 restart sozinho (faz rebuild) | 13. NUNCA git checkout -- .env
+# 🚨 REGRA UNICA DE DEPLOY: python3 /home/ubuntu/omnivoice/deploy-seguro.py
+# 🚨 REGISTRO COMPLETO: REGRAS-ERROS-PROIBIDOS.md (leia ANTES de alterar qualquer coisa)
+# 🚨 IP: 147.15.77.137 | Repo: rgdweb/vozpro-preview | PM2: PM2_HOME=/root/.pm2
+
 #!/usr/bin/env python3
 """
 SISTEMA DE DEPLOY SEGURO E AUTOMATIZADO - VOZPRO
@@ -100,10 +103,14 @@ def main():
         "Copiando arquivos static para standalone"
     )
 
-    # 6) Restart PM2 (como root, com PM2_HOME correto)
+    # 6) Stop + Start PM2 (restart NAO recarrega .env no standalone - Erro 12)
     executar_comando(
-        f"sudo PM2_HOME={PM2_HOME} pm2 restart omnivoice",
-        "Reiniciando PM2"
+        f"sudo PM2_HOME={PM2_HOME} pm2 stop omnivoice || true",
+        "Parando PM2"
+    )
+    executar_comando(
+        f"sudo PM2_HOME={PM2_HOME} pm2 start {ORACLE_PROJECT_DIR}/.next/standalone/server.js --name omnivoice",
+        "Iniciando PM2"
     )
 
     # 7) Verificar status

@@ -109,7 +109,7 @@ def main():
         "Parando PM2"
     )
     executar_comando(
-        f"sudo PM2_HOME={PM2_HOME} pm2 start {ORACLE_PROJECT_DIR}/.next/standalone/server.js --name omnivoice",
+        f"sudo PORT=3001 PM2_HOME={PM2_HOME} pm2 start {ORACLE_PROJECT_DIR}/.next/standalone/server.js --name omnivoice",
         "Iniciando PM2"
     )
 

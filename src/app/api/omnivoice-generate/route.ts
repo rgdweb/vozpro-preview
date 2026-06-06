@@ -8,11 +8,11 @@ import { trimAudioBuffer } from '@/lib/audio-trimmer'
 
 export const dynamic = 'force-dynamic' // Nunca cachar esta rota no Vercel
 
-const HOSTGATOR_BASE = 'https://sorteiomax.com.br/omnivoice'
+const HOSTGATOR_BASE = process.env.AUDIO_SERVER_URL
 
 async function getTunnelUrl(debug: ReturnType<typeof createDebug>): Promise<string> {
   try {
-    const res = await fetch(`${HOSTGATOR_BASE}/get_tunnel.php`, { cache: 'no-store', signal: AbortSignal.timeout(10000) })
+    const res = await fetch(`${HOSTGATOR_BASE}/get_tunnel.php`, { signal: AbortSignal.timeout(10000) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     if (data.status !== 'online' || !data.tunnelUrl) {
@@ -480,7 +480,7 @@ export async function GET() {
   let effectiveUrl = ''
 
   try {
-    const res = await fetch(`${HOSTGATOR_BASE}/get_tunnel.php`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+    const res = await fetch(`${HOSTGATOR_BASE}/get_tunnel.php`, { signal: AbortSignal.timeout(8000) })
     if (res.ok) {
       const data = await res.json()
       if (data.status === 'online' && data.tunnelUrl) {

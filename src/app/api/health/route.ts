@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
 const AUDIO_SERVER_URL = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
-const AUDIO_SERVER_API_KEY = process.env.AUDIO_SERVER_API_KEY || 'vozpro_2024_a8f7d9e2b4c1m6n3p5q0r9s2t8u1'
+const AUDIO_SERVER_API_KEY = process.env.AUDIO_SERVER_API_KEY || 'omnivoice_api_key_2026_secure'
 
 // GET /api/health — Diagnóstico completo do sistema
 export async function GET() {
@@ -46,7 +46,7 @@ export async function GET() {
     const stuck = await db.generationQueue.count({
       where: {
         status: 'processing',
-        startedAt: { lt: new Date(Date.now() - 10 * 60 * 1000) },
+        startedAt: { lt: new Date(Date.now() - 3 * 60 * 1000) },
       },
     })
 
@@ -64,7 +64,7 @@ export async function GET() {
       await db.generationQueue.updateMany({
         where: {
           status: 'processing',
-          startedAt: { lt: new Date(Date.now() - 10 * 60 * 1000) },
+          startedAt: { lt: new Date(Date.now() - 3 * 60 * 1000) },
         },
         data: { status: 'failed', completedAt: new Date() },
       })

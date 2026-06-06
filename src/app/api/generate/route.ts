@@ -19,7 +19,7 @@ import { stripSSMLForTTS } from '@/lib/ssml-parser'
 
 export const maxDuration = 300
 
-const TUNNEL_API = process.env.AUDIO_SERVER_URL || 'https://api.sorteiomax.com.br'
+const TUNNEL_API = process.env.AUDIO_SERVER_URL
 
 function createDebug() {
   const steps: { time: string; step: string; status: string; detail?: string; duration?: number }[] = []

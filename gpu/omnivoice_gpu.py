@@ -302,95 +302,88 @@ async def native_generate(request):
         voice_mode = body.get("voice_mode", "clone") 
         speaker_id = body.get("speaker_id", "")   
         ref_audio_url = body.get("ref_audio_url", "")
+        ref_audio_base64 = body.get("ref_audio_base64", "")
         ref_text = body.get("ref_text", "")
         
-        guidance_scale = float(body.get("guidance_scale", 1.5)) 
+        guidance_scale = float(body.get("guidance_scale", 2.0))
         num_step = int(body.get("num_step", 32))
         speed = float(body.get("speed", 1.0))
 
         if not text:
             return JSONResponse({"error": "Texto para geracao vazio"}, status_code=400)
 
-        # Garante que a pasta local existe no seu Windows
-        os.makedirs("embeddings", exist_ok=True)
+        # -------------------------------------------------------------------------
+        # SISTEMA DE RAIO V5 - CACHE MODULAR EM DISCO POR SUBPASTAS DE LOCUTOR
+        # -------------------------------------------------------------------------
+        base_embeddings_dir = "embeddings"
+        os.makedirs(base_embeddings_dir, exist_ok=True)
+        ref_audio_path = ""
+        is_clone_fast = voice_mode in ("clone_fast", "clone_fast  ")
 
-        # =========================================================================
-        # FLUXO 1: CLONAGEM RÁPIDA COM AUTOCURA (LOCUTORES OFICIAIS DO BANCO)
-        # =========================================================================
-        if voice_mode in ["clone_fast", "clone_fast "]:
-            if not speaker_id:
-                return JSONResponse({"error": "speaker_id e obrigatorio para o modo clone_fast"}, status_code=400)
-            
-            tmp_ref_path = os.path.join("embeddings", speaker_id)
-            force_redownload = False
+        # Limpa o identificador do locutor para criar um nome de pasta valido no Windows
+        speaker_clean = "".join([c for c in str(speaker_id) if c.isalnum() or c in ('_', '-')]).strip() if speaker_id else ""
 
-            # AUTOCURA: validar arquivo local — se corrompido, remover e forcar redownload
-            if os.path.exists(tmp_ref_path):
-                try:
-                    import soundfile as sf
-                    info = sf.info(tmp_ref_path)
-                    if info.frames < 100:
-                        raise ValueError(f"Arquivo muito curto ({info.frames} frames)")
-                except Exception as e:
-                    print(f"[AUTOCURA] Arquivo '{speaker_id}' invalido/corrompido ({e}). Removendo...")
-                    try: os.remove(tmp_ref_path)
-                    except: pass
-                    force_redownload = True
+        # PASSO 1: CHECAGEM DO CACHE MODULAR NO SSD (VOZES OFICIAIS)
+        if is_clone_fast and speaker_clean:
+            # Cria a pasta exclusiva do locutor dentro de embeddings/
+            speaker_dir = os.path.join(base_embeddings_dir, speaker_clean)
+            os.makedirs(speaker_dir, exist_ok=True)
+            
+            # Identifica a referencia unica pelo tamanho do Base64 ou URL para gerar o nome do arquivo .wav
+            import hashlib
+            ref_identifier = ""
+            if ref_audio_base64:
+                ref_identifier = hashlib.md5(str(ref_audio_base64).encode('utf-8')).hexdigest()
+            elif ref_audio_url:
+                ref_identifier = hashlib.md5(str(ref_audio_url).encode('utf-8')).hexdigest()
+                
+            if ref_identifier:
+                nome_wav_referencia = f"ref_{ref_identifier}.wav"
+                caminho_completo_cache = os.path.join(speaker_dir, nome_wav_referencia)
+                
+                # Se o arquivo dessa referencia ja existe no SSD do locutor, ATIVA O RAIO INSTANTANEO
+                if os.path.exists(caminho_completo_cache):
+                    print(f"[SISTEMA RAIO] Referencia '{nome_wav_referencia}' lida do SSD na pasta '{speaker_clean}'! Latencia zero.")
+                    ref_audio_path = caminho_completo_cache
 
-            # Download com validacao — se nao existe ou foi marcado para redownload
-            if (not os.path.exists(tmp_ref_path) or force_redownload) and ref_audio_url:
-                print(f"[GPU] Baixando Locutor '{speaker_id}' de: {ref_audio_url}")
-                import urllib.request
-                try:
-                    opener = urllib.request.build_opener()
-                    opener.addheaders = [('User-agent', 'Mozilla/5.0')]
-                    urllib.request.install_opener(opener)
-                    urllib.request.urlretrieve(ref_audio_url, tmp_ref_path)
-                    # Validar download
-                    import soundfile as sf
-                    info = sf.info(tmp_ref_path)
-                    print(f"[GPU] Download OK: {info.duration:.1f}s | {info.samplerate}Hz | {info.channels}ch")
-                except Exception as dl_err:
-                    print(f"[GPU] Falha no download: {dl_err}")
-                    if os.path.exists(tmp_ref_path):
-                        try: os.remove(tmp_ref_path)
-                        except: pass
-                    return JSONResponse({"error": f"Falha ao baixar '{speaker_id}': {dl_err}"}, status_code=502)
-            
-            if not os.path.exists(tmp_ref_path):
-                return JSONResponse({"error": f"Arquivo de referencia '{speaker_id}' nao encontrado e URL indisponivel"}, status_code=404)
-            
-            # Se ref_text vazio, NAO usa fallback — o modelo funciona sem ref_text
-            if not ref_text:
-                ref_text = ""
-
-        # =========================================================================
-        # FLUXO 2: CLONAGEM TRADICIONAL COM AUTOCURA (UPLOAD DE ÁUDIO PELO CLIENTE)
-        # =========================================================================
-        else:
-            if not ref_audio_url or not ref_text:
-                return JSONResponse({"error": "Faltando ref_audio_url ou ref_text para clone normal"}, status_code=400)
-            
-            import urllib.request
-            tmp_dir = tempfile.gettempdir()
-            tmp_ref_path = os.path.join(tmp_dir, f"ref_{int(time.time())}.wav")
-            
-            print(f"[Native] Baixando audio de referencia temporario: {ref_audio_url[:80]}")
+        # PASSO 2: CONTINGENCIA - DECODIFICACAO DO PAYLOAD SE NAO ESTIVER NO CACHE DO SSD
+        if not ref_audio_path:
             try:
-                opener = urllib.request.build_opener()
-                opener.addheaders = [('User-agent', 'Mozilla/5.0')]
-                urllib.request.install_opener(opener)
-                urllib.request.urlretrieve(ref_audio_url, tmp_ref_path)
-                # Validar download
-                import soundfile as sf
-                info = sf.info(tmp_ref_path)
-                print(f"[Native] Download OK: {info.duration:.1f}s | {info.samplerate}Hz | {info.channels}ch")
-            except Exception as dl_err:
-                print(f"[Native] Falha no download do ref audio: {dl_err}")
-                if os.path.exists(tmp_ref_path):
-                    try: os.remove(tmp_ref_path)
-                    except: pass
-                return JSONResponse({"error": f"Falha ao baixar audio de referencia: {dl_err}"}, status_code=502)
+                audio_data = None
+                
+                # Prioridade Maxima: Le os dados puros enviados em Base64 do payload da nuvem
+                if ref_audio_base64 and str(ref_audio_base64).strip():
+                    b64 = str(ref_audio_base64).strip()
+                    if ',' in b64 and b64.startswith('data:'):
+                        b64 = b64.split(',', 1)[1]
+                    audio_data = base64.b64decode(b64)
+                    print(f"[Native] Decodificando dados em Base64 recebidos do payload: {len(audio_data)} bytes.")
+                
+                # Fallback secundario: busca a URL da internet caso o Base64 venha nulo
+                elif ref_audio_url and str(ref_audio_url).strip():
+                    import urllib.request, ssl
+                    req = urllib.request.Request(ref_audio_url, headers={'User-Agent': 'OmniVoice/1.0'})
+                    ctx = ssl.create_default_context()
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
+                        audio_data = resp.read()
+                    print(f"[Native] Fallback: Baixando audio de referencia da internet...")
+
+                if audio_data:
+                    # Se for locutor oficial (clone_fast), salva na subpasta dele permanentemente para cache futuro
+                    if is_clone_fast and speaker_clean and ref_identifier:
+                        ref_audio_path = os.path.join(base_embeddings_dir, speaker_clean, f"ref_{ref_identifier}.wav")
+                        with open(ref_audio_path, "wb") as f:
+                            f.write(audio_data)
+                        print(f"[Cache-Gravado] Nova referencia salva no SSD: {speaker_clean}/ref_{ref_identifier}.wav")
+                    else:
+                        # Se for upload comum e temporario de cliente, joga no diretório temp do Windows
+                        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                            f.write(audio_data)
+                            ref_audio_path = f.name
+            except Exception as e:
+                print(f"[Erro Processamento Audio] Falha ao processar referencia: {e}")
 
         # =========================================================================
         # EXECUÇÃO DO MODELO OMNIVOICE NA GPU (RTX 3060 12GB)
@@ -406,7 +399,7 @@ async def native_generate(request):
                 "num_step": num_step,
                 "speed": speed,
                 "guidance_scale": guidance_scale,
-                "ref_audio": tmp_ref_path,
+                "ref_audio": ref_audio_path,
                 "ref_text": ref_text
             }
 
@@ -415,12 +408,10 @@ async def native_generate(request):
             audio_list = await loop.run_in_executor(None, lambda: model.generate(**kwargs))
             audio_data = audio_list[0]  # Modelo retorna lista de arrays, pegar o primeiro
 
-            # Remove o arquivo temporário apenas se veio do fluxo tradicional por upload
-            if voice_mode not in ["clone_fast", "clone_fast "] and os.path.exists(tmp_ref_path):
-                try: 
-                    os.remove(tmp_ref_path)
-                except: 
-                    pass
+            # Remove o arquivo temporario APENAS se NAO estiver na pasta de cache embeddings/
+            if ref_audio_path and "embeddings" not in ref_audio_path and os.path.exists(ref_audio_path):
+                try: os.unlink(ref_audio_path)
+                except: pass
 
             # Exporta o array numérico bruto para um arquivo WAV de 24Khz em Base64
             import io, soundfile as sf, base64

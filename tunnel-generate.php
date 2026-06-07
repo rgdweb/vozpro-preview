@@ -94,11 +94,8 @@ if (empty($tunnelUrl)) {
 // PRIORIDADE: snake_case (campos nativos GPU) > camelCase (Next.js legado)
 $voiceMode = $input['voice_mode'] ?? ($input['voiceMode'] ?? 'clone');
 
-// Comando leve original do historico que nao quebra o contexto:
+// Texto puro: repassa exatamente o que o usuario digitou (OmniVoice processa nativamente)
 $userText = trim($input['text'] ?? '');
-$userText = preg_replace('/R\$\s*/i', '', $userText);
-$userText = str_replace(',', ' e ', $userText);
-$userText = str_replace('%', ' por cento', $userText);
 
 // Download e conversao em Base64 no PHP (GPU nao sai da rede)
 $refUrl = $input['ref_audio_url'] ?? ($input['referenceAudioUrl'] ?? '');

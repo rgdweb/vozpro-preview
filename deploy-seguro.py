@@ -83,11 +83,11 @@ def main():
     # 2) Verificar .env DEPOIS do pull (garantia dupla)
     verificar_env_protegido()
 
-    # 3) Gerar Prisma client
+    # 3) Gerar Prisma client (check=True — se falhar, deploy aborta)
     executar_comando(
         f"cd {ORACLE_PROJECT_DIR} && sudo npx prisma generate",
         "Gerando Prisma client",
-        check=False  # prisma generate pode dar warnings
+        check=True
     )
 
     # 4) Build Next.js (com standalone)

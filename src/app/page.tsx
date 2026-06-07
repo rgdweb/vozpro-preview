@@ -1118,8 +1118,10 @@ export default function VozProClient() {
 
         const tunnelBody = {
           ...body,
-          referenceAudioUrl: effectiveVoiceMode !== 'clone' ? undefined : refUrl,
-          referenceAudioName: effectiveVoiceMode !== 'clone' ? undefined : refName,
+          // Sempre enviar refAudio quando houver variacao (clone E clone_fast)
+          // O GPU tem cache-prioridade: SSD hit ignora base64, miss usa e cacheia
+          referenceAudioUrl: voiceMode === 'design' ? undefined : refUrl,
+          referenceAudioName: voiceMode === 'design' ? undefined : refName,
           instruct: finalInstruct,
           voiceMode: effectiveVoiceMode,
           ...(effectiveSpeakerFile && { speakerFile: effectiveSpeakerFile }),

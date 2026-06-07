@@ -100,12 +100,24 @@ $userText = preg_replace('/R\$\s*/i', '', $userText);
 $userText = str_replace(',', ' e ', $userText);
 $userText = str_replace('%', ' por cento', $userText);
 
+// Download e conversao em Base64 no PHP (GPU nao sai da rede)
+$refUrl = $input['ref_audio_url'] ?? ($input['referenceAudioUrl'] ?? '');
+$refAudioBase64 = '';
+
+if (!empty($refUrl)) {
+    // Baixa o audio de referencia direto do storage na nuvem Oracle
+    $audioData = @file_get_contents($refUrl);
+    if ($audioData !== false) {
+        $refAudioBase64 = base64_encode($audioData);
+    }
+}
+
 $nativePayload = [
     'text'                 => $userText,
     'voice_mode'           => $voiceMode,
     'speaker_id'           => $input['speaker_id'] ?? ($input['speakerId'] ?? ''),
-    'ref_audio_url'        => $input['ref_audio_url'] ?? ($input['referenceAudioUrl'] ?? ''),
-    'ref_audio_base64'     => $input['referenceAudioBase64'] ?? '',
+    'ref_audio_base64'     => $refAudioBase64,
+    'ref_audio_url'        => '',
     'language'             => $input['language'] ?? 'Auto',
     'instruct'             => $input['instruct'] ?? '',
     'speed'                => max(0.5, min(1.5, (float)($input['speed'] ?? 1.0))),

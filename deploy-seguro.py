@@ -84,16 +84,25 @@ def main():
     verificar_env_protegido()
 
     # 2.5) Sincronizar PHP do repo para /var/www/omnivoice/ (nginx root)
-    executar_comando(
-        f"cd {ORACLE_PROJECT_DIR} && for f in tunnel-generate.php config.php; do "
-        f"[ -f ""] && sudo cp "" /var/www/omnivoice/ 2>/dev/null; done && "
-        f"echo '[OK] PHP sync concluido'",
-        "Sincronizando arquivos PHP para nginx root"
-    )
+    print("[Deploy-Seguro] Sincronizando arquivos PHP para nginx root...")
+    for php_file in ["tunnel-generate.php", "config.php"]:
+        php_src = os.path.join(ORACLE_PROJECT_DIR, php_file)
+        php_dst = "/var/www/omnivoice/" + php_file
+        if os.path.exists(php_src):
+            cp_result = subprocess.run(
+                ["sudo", "cp", php_src, php_dst],
+                capture_output=True, text=True, timeout=30
+            )
+            if cp_result.returncode == 0:
+                print(f"  [OK] {php_file} sincronizado")
+            else:
+                print(f"  [AVISO] {php_file}: {cp_result.stderr.strip()[:200]}")
+        else:
+            print(f"  [--] {php_file} nao encontrado no repo (pulando)")
 
     # 3) Gerar Prisma client (check=True — se falhar, deploy aborta)
     executar_comando(
-        f"cd {ORACLE_PROJECT_DIR} && sudo npx prisma generate",
+        f"cd {ORACLE_PROJECT_DIR} && sudo npx prisma generate 2>&1",
         "Gerando Prisma client",
         check=True
     )

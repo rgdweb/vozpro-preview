@@ -115,7 +115,7 @@ if (!empty($refUrl)) {
 $nativePayload = [
     'text'                 => $userText,
     'voice_mode'           => $voiceMode,
-    'speaker_id'           => $input['speaker_id'] ?? ($input['speakerId'] ?? ''),
+    'speaker_id'           => $input['speaker_id'] ?? ($input['speakerId'] ?? ($input['speakerFile'] ?? '')),
     'ref_audio_base64'     => $refAudioBase64,
     'ref_audio_url'        => '',
     'language'             => $input['language'] ?? 'Auto',

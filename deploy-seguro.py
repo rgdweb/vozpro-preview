@@ -83,6 +83,14 @@ def main():
     # 2) Verificar .env DEPOIS do pull (garantia dupla)
     verificar_env_protegido()
 
+    # 2.5) Sincronizar PHP do repo para /var/www/omnivoice/ (nginx root)
+    executar_comando(
+        f"cd {ORACLE_PROJECT_DIR} && for f in tunnel-generate.php config.php; do "
+        f"[ -f ""] && sudo cp "" /var/www/omnivoice/ 2>/dev/null; done && "
+        f"echo '[OK] PHP sync concluido'",
+        "Sincronizando arquivos PHP para nginx root"
+    )
+
     # 3) Gerar Prisma client (check=True — se falhar, deploy aborta)
     executar_comando(
         f"cd {ORACLE_PROJECT_DIR} && sudo npx prisma generate",

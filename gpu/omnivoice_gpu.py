@@ -1,6 +1,19 @@
 """
 omnivoice_gpu.py - Servidor NATIVO OmniVoice (sem Gradio)
 Tudo em Python: carrega modelo, expoe API REST, gerencia GPU.
+
+Servidor independente — sem dependencia do Gradio para API.
+A interface web fica no Vercel, esse arquivo SO gerencia o modelo.
+
+Padrao 100% alinhado ao HF Space: https://huggingface.co/spaces/k2-fsa/OmniVoice
+- Usa OmniVoiceGenerationConfig
+- Usa model.create_voice_clone_prompt()
+- language "Auto" -> None
+- Audio: (audio[0] * 32767).astype(np.int16)
+
+Sistema de Raio: Cache de locutores oficiais em embeddings/ para latencia zero.
+
+USO: python omnivoice_gpu.py --ip 0.0.0.0 --port 7860
 """
 
 import sys
@@ -8,7 +21,7 @@ import os
 import subprocess
 
 # Auto-instalar dependencias (se ja tiver, ignora silenciosamente)
-for _pkg in ["uvicorn", "starlette", "soundfile"]:
+for _pkg in ["uvicorn", "starlette", "soundfile", "numpy"]:
     try:
         __import__(_pkg)
     except ImportError:
@@ -26,6 +39,7 @@ import asyncio
 import argparse
 from typing import Optional
 
+import numpy as np
 import torch
 from starlette.applications import Starlette
 from starlette.routing import Route
@@ -36,10 +50,9 @@ from starlette.middleware.cors import CORSMiddleware
 # ============================================================
 # KOKORO FALLBACK CONFIG
 # ============================================================
-KOKORO_URL = os.environ.get("KOKORO_URL", "")  # Ex: http://localhost:7861
-KOKORO_ENABLED = False  # Sera ativado automaticamente se KOKORO_URL estiver configurada
-KOKORO_VRAM_THRESHOLD = 60  # % de VRAM acima do qual ativa Kokoro como fallback
-_queue_depth = 0  # Contador de requisicoes simultaneas (simples)
+KOKORO_URL = os.environ.get("KOKORO_URL", "")
+KOKORO_VRAM_THRESHOLD = 60
+_queue_depth = 0
 _queue_lock = threading.Lock()
 
 # ============================================================
@@ -122,7 +135,7 @@ SAMPLE_RATE = 24000
 
 def load_model():
     """Carrega o modelo OmniVoice na GPU."""
-    global _model
+    global _model, SAMPLE_RATE
 
     if _model is not None:
         return _model
@@ -134,19 +147,19 @@ def load_model():
 
     _model = OmniVoice.from_pretrained(
         "k2-fsa/OmniVoice",
-        device_map="cuda:0",
+        device_map="cuda",
         dtype=torch.float16,
-        max_memory={0: "10GiB"}
+        load_asr=True,
     )
 
+    SAMPLE_RATE = _model.sampling_rate
     elapsed = time.time() - start
-    print(f"[OmniVoice] Modelo carregado em {elapsed:.1f}s")
+    print(f"[OmniVoice] Modelo carregado em {elapsed:.1f}s (sample_rate={SAMPLE_RATE})")
     return _model
 
 
 def _pre_generate_cleanup():
     """Cleanup antes de gerar se VRAM estiver alta."""
-    global _gen_counter
     if not torch.cuda.is_available():
         return
 
@@ -181,14 +194,69 @@ def _post_generate_cleanup():
 
     _, reserv, pct = _get_vram()
     print(f"[GPU] Apos geracao #{count}: {reserv:.2f}GB ({pct:.0f}%)")
+
+
+# ============================================================
+# ENDPOINTS BASICOS
+# ============================================================
+
+async def index(request):
+    """Rota raiz — info basica."""
+    return JSONResponse({
+        "service": "OmniVoice Native Server",
+        "model_loaded": _model is not None,
+        "gpu": _gpu_name if torch.cuda.is_available() else None,
+        "endpoints": {
+            "health": "GET /health",
+            "status": "GET /api/maint/status",
+            "cleanup": "POST /api/maint/cleanup",
+            "generate": "POST /api/native-generate",
+        },
+    })
+
+
+async def health(request):
+    """Health check simples."""
+    return JSONResponse({"status": "ok", "model_loaded": _model is not None})
+
+
+async def maint_status(request):
+    """VRAM da GPU e info."""
+    _gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    alloc, reserv, pct = _get_vram()
+    return JSONResponse({
+        "cuda": torch.cuda.is_available(),
+        "gpu": _gpu_name if torch.cuda.is_available() else None,
+        "vram_total_gb": round(_gpu_total, 1) if torch.cuda.is_available() else 0,
+        "vram_alloc_gb": round(alloc, 2),
+        "vram_reserved_gb": round(reserv, 2),
+        "vram_free_gb": round((_gpu_total - reserv), 2) if torch.cuda.is_available() else 0,
+        "vram_percent": round(pct, 1),
+        "gen_counter": _gen_counter,
+        "auto_cleanup": "active",
+    })
+
+
+async def maint_cleanup(request):
+    """Forcar deep cleanup de GPU."""
+    _deep_cleanup("API")
+    alloc, reserv, pct = _get_vram()
+    return JSONResponse({
+        "status": "ok",
+        "vram_alloc_gb": round(alloc, 2),
+        "vram_reserved_gb": round(reserv, 2),
+        "vram_percent": round(pct, 1),
+    })
+
+
 # ============================================================
 # ROUTER: Decide OmniVoice vs Kokoro baseado na carga
 # ============================================================
 
 def _should_use_kokoro(voice_mode, has_ref_audio):
     """Decide se deve rotear para Kokoro em vez de OmniVoice."""
-    global KOKORO_ENABLED
-
     if not KOKORO_URL:
         return False
 
@@ -242,7 +310,7 @@ async def smart_generate(request):
         body = await request.json()
 
         voice_mode = body.get("voice_mode", "auto")
-        has_ref_audio = bool(body.get("ref_audio_url") or body.get("ref_audio") or body.get("speaker_id"))
+        has_ref_audio = bool(body.get("ref_audio_url") or body.get("ref_audio_base64") or body.get("speaker_id"))
 
         use_kokoro = _should_use_kokoro(voice_mode, has_ref_audio)
 
@@ -289,182 +357,303 @@ async def router_status(request):
 
 
 # ============================================================
-# ENDPOINT PRINCIPAL DE GERAÇÃO (À PROVA DE FALHAS DINÂMICO)
+# ENDPOINT PRINCIPAL: native_generate (PADRAO HF SPACE + SISTEMA RAIO)
 # ============================================================
 
 async def native_generate(request):
-    global _model
+    """Endpoint nativo: JSON -> OmniVoice.generate() -> WAV base64.
+
+    Fluxo:
+    1. Smart-Format: reformatar ritmo do texto com pausas ocultas
+    2. Cache PRIORITARIO: checa SSD antes de qualquer download/decode
+    3. Contingencia: decodifica base64 do payload PHP ou baixa URL
+    4. Carrega WAV em numpy array
+    5. create_voice_clone_prompt() (padrao HF Space)
+    6. model.generate() -> WAV base64
+    """
+    import urllib.request
+    import ssl
+    import re
+    import soundfile as _sf
+
     try:
         body = await request.json()
-        
-        # Captura estritamente os dados oficiais enviados pelo ecossistema Oracle Cloud
-        text = body.get("text", "")
-        voice_mode = body.get("voice_mode", "clone") 
-        speaker_id = body.get("speaker_id", "")   
+
+        # --- Captura de parametros ---
+        text_raw = body.get("text", "")
+        if not text_raw or not text_raw.strip():
+            return JSONResponse({"status": "error", "error": "Texto obrigatorio"})
+
+        voice_mode = body.get("voice_mode", "clone")
+        language = body.get("language", "Auto")
+
+        # Garante fallbacks numericos seguros
+        speed = body.get("speed", None)
+        speed = 1.0 if speed is None else float(speed)
+
+        num_step = body.get("num_step", None)
+        num_step = 32 if num_step is None else int(num_step)
+
+        guidance_scale = body.get("guidance_scale", None)
+        guidance_scale = 2.0 if guidance_scale is None else float(guidance_scale)
+
+        denoise = body.get("denoise", None)
+        denoise = True if denoise is None else (denoise == True)
+
+        postprocess_output = body.get("postprocess_output", None)
+        postprocess_output = True if postprocess_output is None else (postprocess_output == True)
+
+        preprocess_prompt = body.get("preprocess_prompt", True) == True
+        duration = body.get("duration", None)
+        instruct = body.get("instruct", "")
+        ref_text = body.get("ref_text", "")
         ref_audio_url = body.get("ref_audio_url", "")
         ref_audio_base64 = body.get("ref_audio_base64", "")
-        ref_text = body.get("ref_text", "")
-        
-        guidance_scale = float(body.get("guidance_scale", 2.0))
-        num_step = int(body.get("num_step", 32))
-        speed = float(body.get("speed", 1.0))
+        speaker_id = body.get("speaker_id", "")
 
-        if not text:
-            return JSONResponse({"error": "Texto para geracao vazio"}, status_code=400)
+        # --- Smart-Format: ritmo com pausas ocultas ---
+        texto_limpo = text_raw.strip()
+        texto_com_pausas = re.sub(r'([.!?])\s*', r'\1\n\n', texto_limpo)
+        texto_com_pausas = texto_com_pausas.strip()
+        text = texto_com_pausas + ". "
+        print(f"[Smart-Format] Texto original reformatado com pausas ocultas com sucesso!")
 
-        # -------------------------------------------------------------------------
-        # SISTEMA DE RAIO V5 - CACHE MODULAR EM DISCO POR SUBPASTAS DE LOCUTOR
-        # -------------------------------------------------------------------------
-        base_embeddings_dir = "embeddings"
-        os.makedirs(base_embeddings_dir, exist_ok=True)
+        if _model is None:
+            return JSONResponse({"status": "error", "error": "Modelo nao carregado ainda"}, status_code=503)
+
+        # ================================================================
+        # SISTEMA DE CACHE PRIORITARIO (SSD PRIMEIRO, DEPOIS DECODE)
+        # ================================================================
+        os.makedirs("embeddings", exist_ok=True)
         ref_audio_path = ""
-        is_clone_fast = voice_mode in ("clone_fast", "clone_fast  ")
+        is_clone_fast = voice_mode in ("clone_fast", "clone_fast ")
 
-        # Limpa o identificador do locutor para criar um nome de pasta valido no Windows
-        speaker_clean = "".join([c for c in str(speaker_id) if c.isalnum() or c in ('_', '-')]).strip() if speaker_id else ""
+        # PASSO 1: CHECAGEM DO CACHE NO SSD (LOCUTORES OFICIAIS)
+        if is_clone_fast and speaker_id and str(speaker_id).strip():
+            nome_arquivo_locutor = str(speaker_id).strip()
+            if not nome_arquivo_locutor.endswith(".wav"):
+                nome_arquivo_locutor += ".wav"
+            caminho_cache = os.path.join("embeddings", nome_arquivo_locutor)
 
-        # PASSO 1: CHECAGEM DO CACHE MODULAR NO SSD (VOZES OFICIAIS)
-        if is_clone_fast and speaker_clean:
-            # Cria a pasta exclusiva do locutor dentro de embeddings/
-            speaker_dir = os.path.join(base_embeddings_dir, speaker_clean)
-            os.makedirs(speaker_dir, exist_ok=True)
-            
-            # Identifica a referencia unica pelo tamanho do Base64 ou URL para gerar o nome do arquivo .wav
-            import hashlib
-            ref_identifier = ""
-            if ref_audio_base64:
-                ref_identifier = hashlib.md5(str(ref_audio_base64).encode('utf-8')).hexdigest()
-            elif ref_audio_url:
-                ref_identifier = hashlib.md5(str(ref_audio_url).encode('utf-8')).hexdigest()
-                
-            if ref_identifier:
-                nome_wav_referencia = f"ref_{ref_identifier}.wav"
-                caminho_completo_cache = os.path.join(speaker_dir, nome_wav_referencia)
-                
-                # Se o arquivo dessa referencia ja existe no SSD do locutor, ATIVA O RAIO INSTANTANEO
-                if os.path.exists(caminho_completo_cache):
-                    print(f"[SISTEMA RAIO] Referencia '{nome_wav_referencia}' lida do SSD na pasta '{speaker_clean}'! Latencia zero.")
-                    ref_audio_path = caminho_completo_cache
+            # Se o arquivo ja existe localmente, ATIVA O MODO RAIO
+            if os.path.exists(caminho_cache):
+                print(f"[SISTEMA RAIO] Locutor '{nome_arquivo_locutor}' lido do SSD! Latencia zero.")
+                ref_audio_path = caminho_cache
 
-        # PASSO 2: CONTINGENCIA - DECODIFICACAO DO PAYLOAD SE NAO ESTIVER NO CACHE DO SSD
+        # PASSO 2: CONTINGENCIA — DECODIFICAÇÃO DO PAYLOAD SE NÃO ESTIVER NO CACHE
         if not ref_audio_path:
             try:
                 audio_data = None
-                
-                # Prioridade Maxima: Le os dados puros enviados em Base64 do payload da nuvem
+
+                # Prioridade Maxima: Base64 puro enviado pelo PHP da Oracle Cloud
                 if ref_audio_base64 and str(ref_audio_base64).strip():
                     b64 = str(ref_audio_base64).strip()
                     if ',' in b64 and b64.startswith('data:'):
                         b64 = b64.split(',', 1)[1]
                     audio_data = base64.b64decode(b64)
-                    print(f"[Native] Decodificando dados em Base64 recebidos do payload: {len(audio_data)} bytes.")
-                
-                # Fallback secundario: busca a URL da internet caso o Base64 venha nulo
+                    print(f"[Native] Decodificando payload Base64: {len(audio_data)} bytes prontos.")
+
+                # Fallback secundario: baixa da URL caso Base64 venha em branco
                 elif ref_audio_url and str(ref_audio_url).strip():
-                    import urllib.request, ssl
                     req = urllib.request.Request(ref_audio_url, headers={'User-Agent': 'OmniVoice/1.0'})
                     ctx = ssl.create_default_context()
                     ctx.check_hostname = False
                     ctx.verify_mode = ssl.CERT_NONE
                     with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
                         audio_data = resp.read()
-                    print(f"[Native] Fallback: Baixando audio de referencia da internet...")
+                    print(f"[Native] Fallback: Baixando ref_audio_url da internet...")
 
                 if audio_data:
-                    # Se for locutor oficial (clone_fast), salva na subpasta dele permanentemente para cache futuro
-                    if is_clone_fast and speaker_clean and ref_identifier:
-                        ref_audio_path = os.path.join(base_embeddings_dir, speaker_clean, f"ref_{ref_identifier}.wav")
+                    # Se for locutor oficial (clone_fast), salva permanentemente no SSD
+                    if is_clone_fast and speaker_id and str(speaker_id).strip():
+                        nome_arquivo_locutor = str(speaker_id).strip()
+                        if not nome_arquivo_locutor.endswith(".wav"):
+                            nome_arquivo_locutor += ".wav"
+                        ref_audio_path = os.path.join("embeddings", nome_arquivo_locutor)
                         with open(ref_audio_path, "wb") as f:
                             f.write(audio_data)
-                        print(f"[Cache-Gravado] Nova referencia salva no SSD: {speaker_clean}/ref_{ref_identifier}.wav")
+                        print(f"[Cache-Salvo] Locutor '{nome_arquivo_locutor}' armazenado no SSD.")
                     else:
-                        # Se for upload comum e temporario de cliente, joga no diretório temp do Windows
+                        # Upload temporario de cliente — joga no temp do Windows
                         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                             f.write(audio_data)
                             ref_audio_path = f.name
             except Exception as e:
-                print(f"[Erro Processamento Audio] Falha ao processar referencia: {e}")
+                print(f"[Erro Audio] Falha ao processar referencia: {e}")
 
-        # =========================================================================
-        # EXECUÇÃO DO MODELO OMNIVOICE NA GPU (RTX 3060 12GB)
-        # =========================================================================
-        with _queue_lock:
-            _pre_generate_cleanup()
-            model = load_model()
+        # ================================================================
+        # CARREGAR WAV EM NUMPY ARRAY (para create_voice_clone_prompt)
+        # ================================================================
+        if not ref_audio_path or not os.path.exists(ref_audio_path):
+            return JSONResponse({"status": "error", "error": "Audio de referencia nao encontrado"}, status_code=400)
 
-            print(f"[Native] Processando síntese ({voice_mode}) | CFG: {guidance_scale} | Steps: {num_step}")
-            
-            kwargs = {
-                "text": text.strip(),
-                "num_step": num_step,
-                "speed": speed,
-                "guidance_scale": guidance_scale,
-                "ref_audio": ref_audio_path,
-                "ref_text": ref_text
-            }
+        try:
+            info = _sf.info(ref_audio_path)
+            ref_audio_array, ref_sr = _sf.read(ref_audio_path)
+            print(f"[Native] Ref audio carregado: {info.duration:.1f}s {ref_sr}Hz {_sf.info(ref_audio_path).channels}ch")
 
-            # Roda a geração pesada fora da thread principal para não congelar o servidor Starlette
-            loop = asyncio.get_event_loop()
-            audio_list = await loop.run_in_executor(None, lambda: model.generate(**kwargs))
-            audio_data = audio_list[0]  # Modelo retorna lista de arrays, pegar o primeiro
+            # Se stereo, pegar primeiro canal
+            if len(ref_audio_array.shape) > 1:
+                ref_audio_array = ref_audio_array[:, 0]
 
-            # Remove o arquivo temporario APENAS se NAO estiver na pasta de cache embeddings/
-            if ref_audio_path and "embeddings" not in ref_audio_path and os.path.exists(ref_audio_path):
-                try: os.unlink(ref_audio_path)
-                except: pass
+            # Resampling se necessario (converte para float32 para resampling seguro)
+            if ref_sr != SAMPLE_RATE:
+                import torchaudio
+                tensor_audio = torch.from_numpy(ref_audio_array.astype(np.float32)).unsqueeze(0)
+                if ref_sr != SAMPLE_RATE:
+                    resampler = torchaudio.transforms.Resample(orig_freq=ref_sr, new_freq=SAMPLE_RATE)
+                    tensor_audio = resampler(tensor_audio)
+                ref_audio_array = tensor_audio.squeeze(0).numpy()
+                print(f"[Native] Resampling: {ref_sr} -> {SAMPLE_RATE}")
+        except Exception as e:
+            print(f"[Native] Erro ao carregar audio de referencia: {e}")
+            return JSONResponse({"status": "error", "error": f"Falha ao carregar audio: {e}"}, status_code=500)
 
-            # Exporta o array numérico bruto para um arquivo WAV de 24Khz em Base64
-            import io, soundfile as sf, base64
-            import numpy as np
-            wav_io = io.BytesIO()
-            if hasattr(audio_data, "cpu"):
-                audio_data = audio_data.cpu().numpy()
-            # Mantém o áudio em float32 estável e plano. O soundfile converte nativamente para PCM_16 sem distorcer o som
-            audio_float32 = np.asarray(audio_data, dtype=np.float32).flatten()
-            sf.write(wav_io, audio_float32, SAMPLE_RATE, format='WAV', subtype='PCM_16')
-            b64_audio = base64.b64encode(wav_io.getvalue()).decode("utf-8")
+        # ================================================================
+        # MONTAR KWARGS — PADRAO HF SPACE
+        # ================================================================
 
-            _post_generate_cleanup()
+        # 1) OmniVoiceGenerationConfig (com fallback se nao existir)
+        try:
+            from omnivoice import OmniVoiceGenerationConfig
+
+            gen_config = OmniVoiceGenerationConfig(
+                num_step=int(num_step or 32),
+                guidance_scale=float(guidance_scale) if guidance_scale is not None else 2.0,
+                denoise=bool(denoise) if denoise is not None else True,
+                preprocess_prompt=bool(preprocess_prompt),
+                postprocess_output=bool(postprocess_output) if postprocess_output is not None else True,
+            )
+        except ImportError:
+            gen_config = None
+
+        # 2) Language: "Auto" -> None (PADRAO HF Space)
+        lang = language if (language and language != "Auto") else None
+
+        # 3) Montar kw dict
+        if gen_config is not None:
+            kw = dict(
+                text=text.strip(),
+                language=lang,
+                generation_config=gen_config,
+            )
+        else:
+            # Fallback sem OmniVoiceGenerationConfig
+            kw = dict(
+                text=text.strip(),
+                num_step=int(num_step or 32),
+                guidance_scale=float(guidance_scale) if guidance_scale is not None else 2.0,
+            )
+            if lang is not None:
+                kw["language"] = lang
+
+        # Speed: so passa se diferente de 1.0
+        if speed is not None and float(speed) != 1.0:
+            kw["speed"] = float(speed)
+
+        # Duration: so passa se > 0
+        if duration is not None:
+            try:
+                d = float(duration)
+                if d > 0:
+                    kw["duration"] = d
+            except (ValueError, TypeError):
+                pass
+
+        # Instruct
+        if instruct and instruct.strip():
+            kw["instruct"] = instruct.strip()
+
+        # 4) Voice clone prompt — PADRAO HF SPACE: create_voice_clone_prompt()
+        try:
+            # ref_text vazio -> None (modelo faz ASR automatico com load_asr=True)
+            _ref_text = ref_text.strip() if ref_text and ref_text.strip() else None
+
+            voice_clone_prompt = _model.create_voice_clone_prompt(
+                ref_audio=ref_audio_array,
+                ref_text=_ref_text,
+            )
+            kw["voice_clone_prompt"] = voice_clone_prompt
+            print(f"[Native] voice_clone_prompt criado (padrao HF Space) ref_text={'sim' if _ref_text else 'ASR-auto'}")
+        except AttributeError:
+            print(f"[Native] create_voice_clone_prompt nao disponivel, usando ref_audio/ref_text direto")
+            kw["ref_audio"] = ref_audio_path
+            if ref_text and ref_text.strip():
+                kw["ref_text"] = ref_text.strip()
+        except Exception as e:
+            print(f"[Native] Erro create_voice_clone_prompt ({e}), usando ref_audio/ref_text direto")
+            kw["ref_audio"] = ref_audio_path
+            if ref_text and ref_text.strip():
+                kw["ref_text"] = ref_text.strip()
+
+        # ================================================================
+        # GERAR AUDIO
+        # ================================================================
+        _pre_generate_cleanup()
+
+        print(f"[Native] Gerando: mode={voice_mode} lang={lang or 'Auto'} cfg={guidance_scale} steps={num_step} text=\"{text[:60]}...\"")
+        start = time.time()
+
+        loop = asyncio.get_event_loop()
+        audio_list = await loop.run_in_executor(
+            None, lambda: _model.generate(**kw)
+        )
+
+        elapsed = time.time() - start
+
+        # ================================================================
+        # CONVERTER AUDIO — PADRAO HF SPACE: (audio[0] * 32767).astype(np.int16)
+        # ================================================================
+        raw_audio = audio_list[0]
+        if hasattr(raw_audio, "cpu"):
+            raw_audio = raw_audio.cpu().numpy()
+
+        waveform_int16 = (raw_audio * 32767).astype(np.int16)
+
+        audio_duration = len(waveform_int16) / SAMPLE_RATE
+        rtf = elapsed / audio_duration if audio_duration > 0 else 0
+        print(f"[Native] OK: {elapsed:.2f}s (duracao={audio_duration:.1f}s, RTF={rtf:.3f})")
+
+        _post_generate_cleanup()
+
+        # Converter int16 array para WAV bytes
+        buf = io.BytesIO()
+        _sf.write(buf, waveform_int16, SAMPLE_RATE, format='WAV', subtype='PCM_16')
+        wav_bytes = buf.getvalue()
+
+        # Limpeza: so deleta se NAO estiver na pasta embeddings/
+        if ref_audio_path and "embeddings" not in ref_audio_path and os.path.exists(ref_audio_path):
+            try:
+                os.unlink(ref_audio_path)
+                print("[Native] Arquivo temporario comum limpo com sucesso.")
+            except Exception as clean_err:
+                print(f"[Native] Aviso na limpeza temporaria: {clean_err}")
 
         return JSONResponse({
-            "status": "success",
-            "audio_base64": b64_audio
+            "status": "ok",
+            "audio_base64": base64.b64encode(wav_bytes).decode('ascii'),
+            "audio_size": len(wav_bytes),
+            "duration": round(audio_duration, 2),
+            "generation_time": round(elapsed, 2),
+            "rtf": round(rtf, 4),
         })
 
     except Exception as e:
-        print(f"[Native] Erro critico na geracao: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
 
 
 # ============================================================
 # APP STARLETTE (servidor puro, sem Gradio)
 # ============================================================
 
-async def index(request):
-    return JSONResponse({
-        "service": "OmniVoice Native Server",
-        "model_loaded": _model is not None,
-        "gpu": _gpu_name if torch.cuda.is_available() else None,
-        "endpoints": {
-            "health": "GET /health",
-            "status": "GET /api/maint/status",
-            "cleanup": "POST /api/maint/cleanup",
-            "generate": "POST /api/native-generate",
-        },
-    })
-
-
-async def health(request):
-    """Health check simples."""
-    return JSONResponse({"status": "ok", "model_loaded": _model is not None})
-
-
 app = Starlette(
     routes=[
         Route("/", index, methods=["GET"]),
         Route("/health", health, methods=["GET"]),
-        Route("/api/maint/status", index, methods=["GET"]),  # Aponta para index temporariamente
-        Route("/api/maint/cleanup", health, methods=["POST"]),  # Aponta para health temporariamente
+        Route("/api/maint/status", maint_status, methods=["GET"]),
+        Route("/api/maint/cleanup", maint_cleanup, methods=["POST"]),
         Route("/api/native-generate", native_generate, methods=["POST"]),
         Route("/api/smart-generate", smart_generate, methods=["POST"]),
         Route("/api/router/status", router_status, methods=["GET"]),
@@ -473,7 +662,6 @@ app = Starlette(
         Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]),
     ],
 )
-
 
 
 # ============================================================

@@ -26,7 +26,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   AudioWaveform, Sparkles, Loader2, Download, Play, Pause, Square,
   Volume2, Music, Mic, ChevronRight, Settings2, Globe, Bug, Copy, ChevronDown,
-  Upload, CheckCircle2, FolderOpen, ChevronLeft, Folder, Mail
+  Upload, CheckCircle2, FolderOpen, ChevronLeft, Folder, Mail, Zap
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Label } from '@/components/ui/label'
@@ -766,6 +766,13 @@ export default function VozProClient() {
   const [uploadedVoiceFile, setUploadedVoiceFile] = useState<File | null>(null)
   const [uploadedVoiceUrl, setUploadedVoiceUrl] = useState<string | null>(null)
 
+  // Locutores Oficiais (Raio V5 — cache SSD)
+  const [officialSpeakers, setOfficialSpeakers] = useState<Array<{ id: string; name: string; speakerFile: string; refAudioUrl: string; refText: string; avatarUrl?: string | null }>>([])
+  // Set rapido: speakerFile → true (para lookup O(1) nas variacoes)
+  const officialFiles = new Set(officialSpeakers.map(s => s.speakerFile))
+  // Funcao slugify igualzinha ao admin page (para mapear voice+variation → speakerFile)
+  const slugify = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+
   // Payment dialog state
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false)
   const [freeDownloads, setFreeDownloads] = useState(0)
@@ -809,6 +816,10 @@ export default function VozProClient() {
           fetch('/api/track-categories'),
           fetch('/api/voice-categories'),
         ])
+        // Carregar Locutores Oficiais (Raio V5 — cache SSD)
+        fetch('/api/speakers').then(res => res.json()).then(data => {
+          if (Array.isArray(data)) setOfficialSpeakers(data)
+        }).catch(() => {})
         // Carregar downloads grátis do usuário (não bloqueante)
         fetch('/api/free-download').then(res => res.json()).then(data => {
           if (typeof data.freeDownloads === 'number') setFreeDownloads(data.freeDownloads)
@@ -1077,7 +1088,6 @@ export default function VozProClient() {
       if (useTunnelGenerate) {
         // ===== TUNNEL: Browser -> Oracle HTTPS -> GPU local (nativo, sem Vercel no meio) =====
         // SSL (Let's Encrypt) em api.cvmnews.com.br — zero mixed content, zero Vercel.
-        console.log(`[F5-TTS] Gerando via tunnel (Oracle HTTPS)... modo: ${voiceMode}`)
 
         // Determinar instruct baseado no modo
         let finalInstruct = instructStr
@@ -1095,13 +1105,27 @@ export default function VozProClient() {
           refName = uploadedVoiceFile?.name || 'uploaded_voice.wav'
         }
 
+        // Locutor Oficial (Raio V5): se a variacao selecionada é oficial, forçar clone_fast
+        let effectiveVoiceMode = voiceMode
+        let effectiveSpeakerFile = ''
+        if (voiceMode === 'clone' && selectedVoice && selectedVariation) {
+          const candidateFile = `${slugify(selectedVoice.name)}_${slugify(selectedVariation.label)}.wav`
+          if (officialFiles.has(candidateFile)) {
+            effectiveVoiceMode = 'clone_fast'
+            effectiveSpeakerFile = candidateFile
+          }
+        }
+
         const tunnelBody = {
           ...body,
-          referenceAudioUrl: voiceMode !== 'clone' ? undefined : refUrl,
-          referenceAudioName: voiceMode !== 'clone' ? undefined : refName,
+          referenceAudioUrl: effectiveVoiceMode !== 'clone' ? undefined : refUrl,
+          referenceAudioName: effectiveVoiceMode !== 'clone' ? undefined : refName,
           instruct: finalInstruct,
-          voiceMode,
+          voiceMode: effectiveVoiceMode,
+          ...(effectiveSpeakerFile && { speakerFile: effectiveSpeakerFile }),
         }
+
+        console.log(`[F5-TTS] Gerando via tunnel... modo: ${effectiveVoiceMode}${effectiveSpeakerFile ? ` (clone_fast: ${effectiveSpeakerFile})` : ''}`)
 
         // Obter token HMAC para autenticacao com o PHP
         const tokenRes = await fetch('/api/generate-token')
@@ -1769,6 +1793,7 @@ export default function VozProClient() {
                                     const varAudioUrl = toProxyAudioUrl(v.refAudioServerUrl || v.refAudioPath || '')
                                     const isVarSelected = selectedVariationId === v.id
                                     const isInactive = v.active === false || !v.hasAudio
+                                    const isOfficial = !isInactive && officialFiles.has(`${slugify(voice.name)}_${slugify(v.label)}.wav`)
                                     return (
                                       <button
                                         key={v.id}
@@ -1776,11 +1801,15 @@ export default function VozProClient() {
                                         className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all duration-200 ${
                                           isInactive
                                             ? 'border-slate-800 bg-slate-900/30 text-slate-600 opacity-50 cursor-default'
+                                            : isOfficial && isVarSelected
+                                              ? 'border-emerald-500 bg-emerald-500/15 text-emerald-200 shadow-sm shadow-emerald-500/10'
+                                            : isOfficial
+                                              ? 'border-amber-500/60 bg-amber-500/10 text-amber-200'
                                             : isVarSelected
                                               ? 'border-violet-500 bg-violet-500/20 text-violet-200'
                                               : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'
                                         }`}
-                                        title={isInactive ? 'Variação desativada / sem áudio' : v.label}
+                                        title={isInactive ? 'Variação desativada / sem áudio' : isOfficial ? `Locutor Oficial (cache SSD) — ${v.label}` : v.label}
                                       >
                                         <VoicePreviewButton
                                           audioUrl={isInactive ? '' : varAudioUrl}
@@ -1791,8 +1820,9 @@ export default function VozProClient() {
                                         />
                                         <span className="flex-shrink-0">{v.emoji || '🎙️'}</span>
                                         <span className="truncate">{v.label}</span>
+                                        {isOfficial && <Zap className={`w-3 h-3 ml-auto flex-shrink-0 ${isVarSelected ? 'text-emerald-400' : 'text-amber-400'}`} />}
                                         {isInactive && <span className="text-[10px] text-slate-600 ml-auto flex-shrink-0">off</span>}
-                                        {!isInactive && isVarSelected && <CheckCircle2 className="w-3.5 h-3.5 text-violet-400 ml-auto flex-shrink-0" />}
+                                        {!isInactive && !isOfficial && isVarSelected && <CheckCircle2 className="w-3.5 h-3.5 text-violet-400 ml-auto flex-shrink-0" />}
                                       </button>
                                     )
                                   })}
@@ -1854,8 +1884,10 @@ export default function VozProClient() {
                         <div className="flex flex-wrap gap-2">
                           {selectedVoice.variations.map((v) => {
                             const varAudioUrl = toProxyAudioUrl(v.refAudioServerUrl || v.refAudioPath || '')
+                            const isVarSelected = selectedVariationId === v.id
+                            const isOfficial = officialFiles.has(`${slugify(selectedVoice.name)}_${slugify(v.label)}.wav`)
                             return (
-                              <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all duration-300 flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
+                              <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all duration-300 flex items-center gap-1.5 ${isOfficial && isVarSelected ? 'border-emerald-500 bg-emerald-500/15 text-emerald-200' : isOfficial ? 'border-amber-500/60 bg-amber-500/10 text-amber-200' : isVarSelected ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
                                 <VoicePreviewButton
                                   audioUrl={varAudioUrl}
                                   voiceId={v.id}
@@ -1865,6 +1897,7 @@ export default function VozProClient() {
                                 />
                                 <span>{v.emoji || '🎙️'}</span>
                                 <span>{v.label}</span>
+                                {isOfficial && <Zap className={`w-3 h-3 ${isVarSelected ? 'text-emerald-400' : 'text-amber-400'}`} />}
                               </button>
                             )
                           })}
@@ -1902,8 +1935,10 @@ export default function VozProClient() {
                         <div className="flex flex-wrap gap-2">
                           {selectedVoice.variations.map((v) => {
                             const varAudioUrl = toProxyAudioUrl(v.refAudioServerUrl || v.refAudioPath || '')
+                            const isVarSelected = selectedVariationId === v.id
+                            const isOfficial = officialFiles.has(`${slugify(selectedVoice.name)}_${slugify(v.label)}.wav`)
                             return (
-                              <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all duration-300 flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
+                              <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all duration-300 flex items-center gap-1.5 ${isOfficial && isVarSelected ? 'border-emerald-500 bg-emerald-500/15 text-emerald-200' : isOfficial ? 'border-amber-500/60 bg-amber-500/10 text-amber-200' : isVarSelected ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
                                 <VoicePreviewButton
                                   audioUrl={varAudioUrl}
                                   voiceId={v.id}
@@ -1913,6 +1948,7 @@ export default function VozProClient() {
                                 />
                                 <span>{v.emoji || '🎙️'}</span>
                                 <span>{v.label}</span>
+                                {isOfficial && <Zap className={`w-3 h-3 ${isVarSelected ? 'text-emerald-400' : 'text-amber-400'}`} />}
                               </button>
                             )
                           })}

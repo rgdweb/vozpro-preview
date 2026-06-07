@@ -105,8 +105,24 @@ $refUrl = $input['ref_audio_url'] ?? ($input['referenceAudioUrl'] ?? '');
 $refAudioBase64 = '';
 
 if (!empty($refUrl)) {
-    // Baixa o audio de referencia direto do storage na nuvem Oracle
-    $audioData = @file_get_contents($refUrl);
+    $audioData = false;
+
+    // Otimizacao: se o arquivo esta no proprio servidor Oracle, ler direto do SSD
+    // Evita HTTPS loopback (saida -> Let's Encrypt -> nginx -> volta) para arquivos locais
+    if (strpos($refUrl, '://cvmnews.com.br') !== false || strpos($refUrl, '://sorteiomax.com.br') !== false) {
+        $nomeArquivo = basename(parse_url($refUrl, PHP_URL_PATH));
+        $caminhoFisico = '/var/www/omnivoice/audios/ref/' . $nomeArquivo;
+        if (file_exists($caminhoFisico)) {
+            $audioData = file_get_contents($caminhoFisico);
+            error_log("[Filesystem-Hit] Audio lido direto do SSD local: {$nomeArquivo}");
+        }
+    }
+
+    // Fallback: baixar via HTTP se nao for local ou nao encontrado no disco
+    if ($audioData === false) {
+        $audioData = @file_get_contents($refUrl);
+    }
+
     if ($audioData !== false) {
         $refAudioBase64 = base64_encode($audioData);
     }

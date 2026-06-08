@@ -1,5 +1,5 @@
 <?php
-// tunnel-generate.php - Proxy PHP para geracao nativa OmniVoice (sem Gradio, sem Vercel)
+// tunnel-generate.php - Proxy PHP para geracao nativa OmniVoice
 // Browser -> Oracle PHP -> Tunnel -> GPU PC (native-generate) -> Browser
 
 set_time_limit(0);
@@ -57,10 +57,6 @@ if (!$input) {
     exit;
 }
 
-// === TEMP DEBUG: log raw input payload (investigacao) ===
-file_put_contents('/tmp/tunnel-debug.log', date('Y-m-d H:i:s') . ' | RAW_INPUT: ' . $rawInput . "\n", FILE_APPEND);
-file_put_contents('/tmp/tunnel-debug.log', date('Y-m-d H:i:s') . ' | voice_mode=' . ($input['voice_mode'] ?? 'NULL') . ' | voiceMode=' . ($input['voiceMode'] ?? 'NULL') . ' | speaker_id=' . ($input['speaker_id'] ?? 'NULL') . ' | speakerId=' . ($input['speakerId'] ?? 'NULL') . "\n", FILE_APPEND);
-
 // ===================== DESCOBRIR TUNNEL URL =====================
 $tunnelUrl = '';
 
@@ -95,8 +91,14 @@ if (empty($tunnelUrl)) {
 }
 
 // ===================== MONTAR PAYLOAD PRO NATIVE-GENERATE =====================
-// PRIORIDADE: snake_case (campos nativos GPU) > camelCase (Next.js legado)
-// Em clone_fast, o Next.js envia voice_mode + speaker_id diretamente (sem spread do body legado)
+// PARAMETROS BLOQUEADOS no Oracle (camada de seguranca):
+//   num_step=16          -> ALUCINA (bloqueado em 32)
+//   guidance_scale=1.5   -> ALUCINA (bloqueado em 2.0)
+//   denoise=false         -> chiado
+//   postprocess_output=false -> chiado
+// O PHP IGNORA o que vem do frontend nestes params.
+// So speed e permitido variar (0.5-1.5).
+
 $voiceMode = $input['voice_mode'] ?? ($input['voiceMode'] ?? 'clone');
 
 $nativePayload = [
@@ -104,23 +106,18 @@ $nativePayload = [
     'voice_mode'           => $voiceMode,
     'speaker_id'           => $input['speaker_id'] ?? ($input['speakerId'] ?? ''),
     'ref_audio_url'        => $input['ref_audio_url'] ?? ($input['referenceAudioUrl'] ?? ''),
-    'ref_audio_base64'     => $input['referenceAudioBase64'] ?? '',
+    'ref_audio_base64'     => $input['ref_audio_base64'] ?? ($input['referenceAudioBase64'] ?? ''),
     'language'             => $input['language'] ?? 'Auto',
     'instruct'             => $input['instruct'] ?? '',
     'speed'                => max(0.5, min(1.5, (float)($input['speed'] ?? 1.0))),
-    'num_step'             => (int)($input['num_step'] ?? ($input['numStep'] ?? 32)),
-    'guidance_scale'       => (float)($input['guidance_scale'] ?? ($input['guidanceScale'] ?? 1.5)),
     'ref_text'             => $input['ref_text'] ?? ($input['refText'] ?? ''),
-    'denoise'              => $input['denoise'] ?? true,
-    'postprocess_output'   => $input['postprocessOutput'] ?? true,
-    'preprocess_prompt'    => $input['preprocessPrompt'] ?? true,
+    // BLOQUEADOS - hardcoded, ignoram o que vem do frontend
+    'num_step'             => 32,
+    'guidance_scale'       => 2.0,
+    'denoise'              => true,
+    'postprocess_output'   => true,
+    'preprocess_prompt'    => true,
 ];
-
-// Duração alvo: só envia se definido (> 0)
-$targetDuration = $input['targetDuration'] ?? null;
-if ($targetDuration !== null && $targetDuration > 0) {
-    $nativePayload['duration'] = (float)$targetDuration;
-}
 
 // ===================== CHAMAR NATIVE-GENERATE =====================
 $nativeUrl = rtrim($tunnelUrl, '/') . '/api/native-generate';

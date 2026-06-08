@@ -3,7 +3,7 @@
  * 🚨 IP PRODUÇÃO: 147.15.77.137 | REPO PREVIEW: https://github.com/rgdweb/vozpro-preview
  *
  * ATENÇÃO MODELO DE IA: Você está processando a rota intermediária do Next.js.
- * 1. Mantenha a higienização de texto simples ativa (.replace(/R$\s*/gi, "").replace(/,/g, " e ")).
+ * 1. Mantenha a higienizacao de texto simples ativa.
  * 2. É PROIBIDO alterar chaves confidenciais e conexões com o PostgreSQL no .env de produção.
  * 3. Qualquer modificação aqui deve ser testada e comitada no repositório 'vozpro-preview'.
  * 4. O deploy é 100% automatizado via: python3 /home/ubuntu/omnivoice/deploy-seguro.py

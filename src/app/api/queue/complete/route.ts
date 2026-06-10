@@ -1,20 +1,176 @@
-/** 🚨 CONTRATO DE GOVERNANCA EXECUTIVA - VOZPRO (SaaS Hibrido)
- * 🚨 PROIBICOES ABSOLUTAS (13 erros ja cometidos que derrubaram o sistema):
- *   1. NUNCA git reset --hard | 2. NUNCA altere git remote | 3. NUNCA rm -rf
- *   4. NUNCA push syntax errors | 5. NUNCA commit .env real | 6. NUNCA temp no root
- *   7. NUNCA scripts deploy alternativos | 8. NUNCA quebre next.config | 9. queue: 3x, 3min
- *   10. NUNCA remova AUDIO_SERVER_API_KEY | 11. NUNCA desalinhe tokens .env/config.php
- *   12. NUNCA pm2 restart sozinho (faz rebuild) | 13. NUNCA git checkout -- .env
- * 🚨 REGRA UNICA DE DEPLOY: python3 /home/ubuntu/omnivoice/deploy-seguro.py
- * 🚨 REGISTRO COMPLETO: REGRAS-ERROS-PROIBIDOS.md (leia ANTES de alterar qualquer coisa)
- * 🚨 IP: 147.15.77.137 | Repo: rgdweb/vozpro-preview | PM2: PM2_HOME=/root/.pm2
+/**
+ * 🚨 CONTRATO DE GOVERNANÇA EXECUTIVA - VOZPRO (SaaS HÍBRIDO)
+ * ARQUIVO CRÍTICO: Finalização de itens na fila e promoção do próximo.
+ *
+ * ⚡ SISTEMA PREMIUM DE FILA INTELIGENTE v2.0
+ * - Health check REAL na GPU (não só timeout cego)
+ * - 1 minuto de timeout absoluto
+ * - SEMPRE chame promoteNext() após completar/falhar — sem isso a fila trava.
+ * - Deploy via: python3 /home/ubuntu/omnivoice/deploy-seguro.py
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { db } from '@/lib/db'
 
-const MAX_CONCURRENT_GENERATIONS = 3
-const PROCESSING_TIMEOUT_MS = 180000 // 3 minutos
+const MAX_CONCURRENT_GENERATIONS = 1
+const PROCESSING_TIMEOUT_MS = 1 * 60 * 1000 // 1 minuto — consistente com join
+const GPU_HEALTH_CHECK_MS = 5000 // 5 segundos timeout para health check
+const TUNNEL_API = process.env.AUDIO_SERVER_URL || 'https://api.sorteiomax.com.br'
+
+// ============================================================
+// 🏥 HEALTH CHECK INTELIGENTE — verifica GPU REALMENTE está viva
+// ============================================================
+interface GPUHealthResult {
+  gpuOnline: boolean
+  tunnelAlive: boolean
+  tunnelUrl: string | null
+  responseTime: number
+  error: string | null
+}
+
+async function checkGPUHealth(): Promise<GPUHealthResult> {
+  const startTime = Date.now()
+  const result: GPUHealthResult = {
+    gpuOnline: false,
+    tunnelAlive: false,
+    tunnelUrl: null,
+    responseTime: 0,
+    error: null,
+  }
+
+  try {
+    const tunnelRes = await fetch(`${TUNNEL_API}/get_tunnel.php`, {
+      signal: AbortSignal.timeout(GPU_HEALTH_CHECK_MS),
+    })
+
+    if (!tunnelRes.ok) {
+      result.error = `get_tunnel.php retornou HTTP ${tunnelRes.status}`
+      return result
+    }
+
+    const tunnelData = await tunnelRes.json()
+
+    if (tunnelData.status !== 'online' || !tunnelData.tunnelUrl) {
+      result.error = tunnelData.message || 'GPU reportou status offline'
+      return result
+    }
+
+    result.gpuOnline = true
+    result.tunnelUrl = tunnelData.tunnelUrl
+
+    // Verificar se o túnel responde
+    const gpuPing = await fetch(`${tunnelData.tunnelUrl}/`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(GPU_HEALTH_CHECK_MS),
+    }).catch(() => null)
+
+    if (gpuPing) {
+      result.tunnelAlive = true
+    } else {
+      result.error = `Túnel ${tunnelData.tunnelUrl.substring(0, 40)}... não responde`
+    }
+
+    result.responseTime = Date.now() - startTime
+    return result
+
+  } catch (err) {
+    result.error = err instanceof Error ? err.message : String(err)
+    return result
+  }
+}
+
+// ============================================================
+// 🔧 UNSTICK INTELIGENTE — só libera se GPU realmente tá morta
+// ============================================================
+async function unstickProcessing(): Promise<{ released: number; reason: string }> {
+  try {
+    const stuckItems = await db.generationQueue.findMany({
+      where: {
+        status: 'processing',
+        startedAt: { lt: new Date(Date.now() - PROCESSING_TIMEOUT_MS) },
+      },
+      select: { id: true, startedAt: true },
+    })
+
+    if (stuckItems.length === 0) {
+      return { released: 0, reason: 'no_stuck_items' }
+    }
+
+    const health = await checkGPUHealth()
+    const elapsedMs = Date.now() - stuckItems[0].startedAt.getTime()
+    const elapsedMin = (elapsedMs / 60000).toFixed(1)
+
+    console.log(`[Queue Premium Complete] ${stuckItems.length} item(s) há ${elapsedMin}min | GPU: ${health.gpuOnline ? 'ONLINE' : 'OFFLINE'} | Túnel: ${health.tunnelAlive ? 'VIVO' : 'MORTO'}`)
+
+    // Se GPU tá online E túnel vivo E < 3min = mantém
+    if (health.gpuOnline && health.tunnelAlive && elapsedMs < 3 * 60 * 1000) {
+      console.log(`[Queue Premium Complete] GPU online + túnel vivo + < 3min → MANTÉM`)
+      return { released: 0, reason: 'gpu_alive_keep_processing' }
+    }
+
+    // Libera por timeout ou GPU offline
+    const reasonStr = health.gpuOnline ? `timeout_${elapsedMin}min` : 'gpu_offline'
+    console.log(`[Queue Premium Complete] Liberando ${stuckItems.length} item(s) | Motivo: ${reasonStr}`)
+
+    const result = await db.generationQueue.updateMany({
+      where: {
+        status: 'processing',
+        startedAt: { lt: new Date(Date.now() - PROCESSING_TIMEOUT_MS) },
+      },
+      data: {
+        status: 'failed',
+        completedAt: new Date(),
+      },
+    })
+
+    return { released: result.count, reason: reasonStr }
+
+  } catch (err) {
+    console.error(`[Queue Premium Complete] Erro unstick:`, err)
+    return { released: 0, reason: 'error' }
+  }
+}
+
+// Promover o próximo waiting para processing
+async function promoteNext() {
+  try {
+    const currentProcessing = await db.generationQueue.count({
+      where: { status: 'processing' },
+    })
+
+    if (currentProcessing >= MAX_CONCURRENT_GENERATIONS) return
+
+    const nextWaiting = await db.generationQueue.findFirst({
+      where: { status: 'waiting' },
+      orderBy: { createdAt: 'asc' },
+    })
+
+    if (nextWaiting) {
+      await db.generationQueue.update({
+        where: { id: nextWaiting.id },
+        data: {
+          status: 'processing',
+          startedAt: new Date(),
+        },
+      })
+      console.log('[Queue Premium Complete] 🚀 Promoted next:', nextWaiting.id)
+    }
+  } catch (err) {
+    console.error('[Queue Premium Complete] Erro promoteNext:', err)
+  }
+}
+
+// Limpar itens antigos
+async function cleanupOldItems() {
+  try {
+    await db.generationQueue.deleteMany({
+      where: {
+        status: { in: ['completed', 'failed'] },
+        completedAt: { lt: new Date(Date.now() - 5 * 60 * 1000) },
+      },
+    })
+  } catch {}
+}
 
 // POST /api/queue/complete - Marcar geração como completa/falha
 export async function POST(req: NextRequest) {
@@ -47,88 +203,20 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    // SEMPRE promover o próximo da fila (independentemente de sucesso/falha)
+    // SEMPRE promover o próximo da fila
     await promoteNext()
 
-    // Limpar itens antigos (completed/failed > 5 min)
+    // Limpar itens antigos
     await cleanupOldItems()
 
     return NextResponse.json({ ok: true })
   } catch (error) {
-    console.error('[Queue] Complete error:', error)
+    console.error('[Queue Premium Complete] Complete error:', error)
     return NextResponse.json({ error: 'Erro ao atualizar fila' }, { status: 500 })
   }
 }
 
-// Função auxiliar: promover o próximo waiting para processing
-async function promoteNext() {
-  const currentProcessing = await db.generationQueue.count({
-    where: { status: 'processing' },
-  })
-
-  if (currentProcessing >= MAX_CONCURRENT_GENERATIONS) return
-
-  const nextWaiting = await db.generationQueue.findFirst({
-    where: { status: 'waiting' },
-    orderBy: { createdAt: 'asc' },
-  })
-
-  if (nextWaiting) {
-    await db.generationQueue.update({
-      where: { id: nextWaiting.id },
-      data: {
-        status: 'processing',
-        startedAt: new Date(),
-      },
-    })
-    console.log('[Queue] Promoted next:', nextWaiting.id)
-  }
-}
-
-// Função auxiliar: limpar itens antigos
-async function cleanupOldItems() {
-  try {
-    await db.generationQueue.deleteMany({
-      where: {
-        status: { in: ['completed', 'failed'] },
-        completedAt: { lt: new Date(Date.now() - 5 * 60 * 1000) },
-      },
-    })
-  } catch {}
-}
-
-// Função auxiliar: detectar e desbloquear itens presos em "processing"
-// Itens processing há mais de PROCESSING_TIMEOUT_MS são marcados como failed
-async function unstickProcessing() {
-  try {
-    const stuckItems = await db.generationQueue.findMany({
-      where: {
-        status: 'processing',
-        startedAt: { lt: new Date(Date.now() - PROCESSING_TIMEOUT_MS) },
-      },
-    })
-
-    if (stuckItems.length > 0) {
-      console.log(`[Queue] Found ${stuckItems.length} stuck processing items, marking as failed`)
-      await db.generationQueue.updateMany({
-        where: {
-          status: 'processing',
-          startedAt: { lt: new Date(Date.now() - PROCESSING_TIMEOUT_MS) },
-        },
-        data: {
-          status: 'failed',
-          completedAt: new Date(),
-        },
-      })
-    }
-
-    return stuckItems.length
-  } catch {
-    return 0
-  }
-}
-
-// GET /api/queue/complete?health=true - Health check + limpar presos
+// GET /api/queue/complete?health=true - Health check premium + limpar presos
 export async function GET(req: NextRequest) {
   try {
     const session = await getSession()
@@ -136,17 +224,21 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
     }
 
-    // Detectar e limpar itens presos
-    const unstuckCount = await unstickProcessing()
+    // Detectar e limpar itens presos COM health check inteligente
+    const { released, reason } = await unstickProcessing()
 
     // Se desbloqueou algo, tentar promover
-    if (unstuckCount > 0) {
+    if (released > 0) {
       await promoteNext()
     }
 
-    return NextResponse.json({ ok: true, unstuckCount })
+    return NextResponse.json({
+      ok: true,
+      released,
+      reason,
+    })
   } catch (error) {
-    console.error('[Queue] Health check error:', error)
+    console.error('[Queue Premium Complete] Health check error:', error)
     return NextResponse.json({ error: 'Erro ao verificar fila' }, { status: 500 })
   }
 }

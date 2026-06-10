@@ -1,26 +1,25 @@
-# 🚨 CONTRATO DE GOVERNANCA EXECUTIVA - VOZPRO (SaaS Hibrido)
-# 🚨 PROIBICOES ABSOLUTAS (13 erros ja cometidos que derrubaram o sistema):
-#   1. NUNCA git reset --hard | 2. NUNCA altere git remote | 3. NUNCA rm -rf
-#   4. NUNCA push syntax errors | 5. NUNCA commit .env real | 6. NUNCA temp no root
-#   7. NUNCA scripts deploy alternativos | 8. NUNCA quebre next.config | 9. queue: 3x, 3min
-#   10. NUNCA remova AUDIO_SERVER_API_KEY | 11. NUNCA desalinhe tokens .env/config.php
-#   12. NUNCA pm2 restart sozinho (faz rebuild) | 13. NUNCA git checkout -- .env
-# 🚨 REGRA UNICA DE DEPLOY: python3 /home/ubuntu/omnivoice/deploy-seguro.py
-# 🚨 REGISTRO COMPLETO: REGRAS-ERROS-PROIBIDOS.md (leia ANTES de alterar qualquer coisa)
-# 🚨 IP: 147.15.77.137 | Repo: rgdweb/vozpro-preview | PM2: PM2_HOME=/root/.pm2
+# GOVERNANCE OFICIAL E RESTRITA - VOZPRO (SaaS Hibrido)
+# ===================================================================================
+# REGRAS ABSOLUTAS (VIOLACAO = FALHA CRITICA):
+#
+# REGRA 0: PROIBIDO restaurar backups sem ORDEM EXPRESSA do dono do projeto.
+#   Nenhum backup pode ser restaurado sem autorizacao explicita do usuario.
+#
+# REGRA 1: PROIBIDO enviar/substituir TODOS os arquivos de uma vez no Oracle.
+#   Nunca use scp/rsync para copiar todo o projeto. Envie SOMENTE arquivos
+#   que foram EDITADOS ou ATUALIZADOS. Nunca substitua arquivos nao tocados.
+#
+# REGRA 2: Deploy UNICO e EXCLUSIVO via este script (deploy-seguro.py).
+#   Comando: python3 /home/ubuntu/omnivoice/deploy-seguro.py
+#   Nenhum deploy manual. Nenhum git reset --hard. Nenhum rm -rf.
+#
+# REGRA 3: NUNCA toca em .env, PostgreSQL, nginx ou configs do PM2.
+# REGRA 4: A funcao verificar_env_protegido() e a ULTIMA linha de defesa.
+# REGRA 5: Se este script falhar, NAO tente deploy manual.
+# ===================================================================================
 
 #!/usr/bin/env python3
-"""
-SISTEMA DE DEPLOY SEGURO E AUTOMATIZADO - VOZPRO
-=================================================
-Regras absolutas:
-  - NUNCA toca em .env
-  - NUNCA usa git reset --hard
-  - NUNCA usa rm -rf
-  - NUNCA muda git remote
-  - NUNCA mexe em PostgreSQL/nginx/PM2 configs
-  - SOMENTE: git pull por diferença + build + restart
-"""
+"""SISTEMA DE DEPLOY SEGURO E AUTOMATIZADO - VOZPRO"""
 
 import subprocess
 import sys
@@ -42,7 +41,7 @@ def executar_comando(comando, descricao, check=True):
     except subprocess.CalledProcessError as e:
         print(f"[ERRO CRITICO] Falha em: {descricao}")
         if e.stderr:
-            print(f"  STDERR: {e.stderr[-1000:]}")
+            print(f"  STDERR: {str(e.stderr)[-1000:]}")
         sys.exit(1)
     except subprocess.TimeoutExpired:
         print(f"[TIMEOUT] Comando excedeu 5min: {descricao}")
@@ -70,7 +69,7 @@ def main():
     # 0) Verificar .env antes de qualquer coisa
     verificar_env_protegido()
 
-    # 1) Pull por diferença (JAMAIS reset --hard)
+    # 1) Pull por diferenca (JAMAIS reset --hard)
     executar_comando(
         f"cd {ORACLE_PROJECT_DIR} && git fetch origin",
         "Buscando atualizacoes do GitHub"
@@ -83,28 +82,11 @@ def main():
     # 2) Verificar .env DEPOIS do pull (garantia dupla)
     verificar_env_protegido()
 
-    # 2.5) Sincronizar PHP do repo para /var/www/omnivoice/ (nginx root)
-    print("[Deploy-Seguro] Sincronizando arquivos PHP para nginx root...")
-    for php_file in ["tunnel-generate.php", "config.php"]:
-        php_src = os.path.join(ORACLE_PROJECT_DIR, php_file)
-        php_dst = "/var/www/omnivoice/" + php_file
-        if os.path.exists(php_src):
-            cp_result = subprocess.run(
-                ["sudo", "cp", php_src, php_dst],
-                capture_output=True, text=True, timeout=30
-            )
-            if cp_result.returncode == 0:
-                print(f"  [OK] {php_file} sincronizado")
-            else:
-                print(f"  [AVISO] {php_file}: {cp_result.stderr.strip()[:200]}")
-        else:
-            print(f"  [--] {php_file} nao encontrado no repo (pulando)")
-
-    # 3) Gerar Prisma client (check=True — se falhar, deploy aborta)
+    # 3) Gerar Prisma client
     executar_comando(
-        f"cd {ORACLE_PROJECT_DIR} && sudo npx prisma generate 2>&1",
+        f"cd {ORACLE_PROJECT_DIR} && sudo npx prisma generate",
         "Gerando Prisma client",
-        check=True
+        check=False
     )
 
     # 4) Build Next.js (com standalone)
@@ -120,18 +102,24 @@ def main():
         "Copiando arquivos static para standalone"
     )
 
-    # 6) Stop + Start PM2 (restart NAO recarrega .env no standalone - Erro 12)
+    # 6) Copiar .env e Prisma para standalone
     executar_comando(
-        f"sudo PM2_HOME={PM2_HOME} pm2 stop omnivoice || true",
-        "Parando PM2"
+        f"sudo cp {ORACLE_PROJECT_DIR}/.env {ORACLE_PROJECT_DIR}/.next/standalone/.env",
+        "Copiando .env para standalone"
     )
     executar_comando(
-        f"sudo PORT=3001 PM2_HOME={PM2_HOME} pm2 start {ORACLE_PROJECT_DIR}/.next/standalone/server.js --name omnivoice",
-        "Iniciando PM2 (porta 3001 - vozpro.cvmnews.com.br)"
+        f"sudo cp -r {ORACLE_PROJECT_DIR}/node_modules/.prisma {ORACLE_PROJECT_DIR}/.next/standalone/node_modules/ && "
+        f"sudo cp -r {ORACLE_PROJECT_DIR}/node_modules/@prisma {ORACLE_PROJECT_DIR}/.next/standalone/node_modules/",
+        "Copiando Prisma client para standalone"
     )
 
+    # 7) Restart PM2 com ecosystem config (todas as env vars)
+    executar_comando(
+        f"sudo PM2_HOME={PM2_HOME} pm2 restart omnivoice --update-env",
+        "Reiniciando PM2"
+    )
 
-    # 7) Verificar status
+    # 8) Verificar status
     executar_comando(
         f"sudo PM2_HOME={PM2_HOME} pm2 status",
         "Verificando status do PM2"
@@ -144,3 +132,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

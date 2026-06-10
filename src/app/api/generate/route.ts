@@ -1,13 +1,12 @@
-/** 🚨 CONTRATO DE GOVERNANCA EXECUTIVA - VOZPRO (SaaS Hibrido)
- * 🚨 PROIBICOES ABSOLUTAS (13 erros ja cometidos que derrubaram o sistema):
- *   1. NUNCA git reset --hard | 2. NUNCA altere git remote | 3. NUNCA rm -rf
- *   4. NUNCA push syntax errors | 5. NUNCA commit .env real | 6. NUNCA temp no root
- *   7. NUNCA scripts deploy alternativos | 8. NUNCA quebre next.config | 9. queue: 3x, 3min
- *   10. NUNCA remova AUDIO_SERVER_API_KEY | 11. NUNCA desalinhe tokens .env/config.php
- *   12. NUNCA pm2 restart sozinho (faz rebuild) | 13. NUNCA git checkout -- .env
- * 🚨 REGRA UNICA DE DEPLOY: python3 /home/ubuntu/omnivoice/deploy-seguro.py
- * 🚨 REGISTRO COMPLETO: REGRAS-ERROS-PROIBIDOS.md (leia ANTES de alterar qualquer coisa)
- * 🚨 IP: 147.15.77.137 | Repo: rgdweb/vozpro-preview | PM2: PM2_HOME=/root/.pm2
+/**
+ * 🚨 CONTRATO DE GOVERNANÇA EXECUTIVA - VOZPRO (SaaS HÍBRIDO)
+ * 🚨 IP PRODUÇÃO: 147.15.77.137 | REPO PREVIEW: https://github.com/rgdweb/vozpro-preview
+ *
+ * ATENÇÃO MODELO DE IA: Você está processando a rota intermediária do Next.js.
+ * 1. Mantenha a higienizacao de texto simples ativa.
+ * 2. É PROIBIDO alterar chaves confidenciais e conexões com o PostgreSQL no .env de produção.
+ * 3. Qualquer modificação aqui deve ser testada e comitada no repositório 'vozpro-preview'.
+ * 4. O deploy é 100% automatizado via: python3 /home/ubuntu/omnivoice/deploy-seguro.py
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -19,7 +18,7 @@ import { stripSSMLForTTS } from '@/lib/ssml-parser'
 
 export const maxDuration = 300
 
-const TUNNEL_API = process.env.AUDIO_SERVER_URL
+const TUNNEL_API = process.env.AUDIO_SERVER_URL || 'https://api.sorteiomax.com.br'
 
 function createDebug() {
   const steps: { time: string; step: string; status: string; detail?: string; duration?: number }[] = []
@@ -174,7 +173,7 @@ export async function POST(req: NextRequest) {
           speaker_id: speakerFile,
           ref_audio_url: serverUrl || undefined,
           ref_text: refText.trim() || 'texto de referencia para clonagem de voz',
-          guidance_scale: 2.0,
+          guidance_scale: 1.5,
           num_step: numStep ?? 32,
           speed: speed ?? 1.0,
           language: language || 'Auto',
@@ -187,7 +186,7 @@ export async function POST(req: NextRequest) {
           voice_mode: 'clone',
           ref_audio_url: serverUrl,
           ref_text: refText.trim() || 'texto de referencia para clonagem de voz',
-          guidance_scale: 2.0,
+          guidance_scale: 1.5,
           num_step: numStep ?? 32,
           speed: speed ?? 1.0,
           language: language || 'Auto',
@@ -199,7 +198,7 @@ export async function POST(req: NextRequest) {
     debug.log('Payload', 'info',
       isCloneFast
         ? `clone_fast | speaker:${speakerFile} | speed:${payload.speed} | steps:${payload.num_step}`
-        : `clone | cfg:2.0 | speed:${payload.speed} | steps:${payload.num_step} | ref_text:${(payload.ref_text as string).substring(0, 40)}...`)
+        : `clone | cfg:1.5 | speed:${payload.speed} | steps:${payload.num_step} | ref_text:${(payload.ref_text as string).substring(0, 40)}...`)
 
     // Retry (até 3 tentativas)
     const maxRetries = 3

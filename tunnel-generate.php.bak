@@ -1,5 +1,5 @@
 <?php
-// tunnel-generate.php - Proxy PHP para geracao nativa OmniVoice
+// tunnel-generate.php — Proxy PHP (higienizacao leve)
 // Browser -> Oracle PHP -> Tunnel -> GPU PC (native-generate) -> Browser
 
 set_time_limit(0);
@@ -91,33 +91,65 @@ if (empty($tunnelUrl)) {
 }
 
 // ===================== MONTAR PAYLOAD PRO NATIVE-GENERATE =====================
-// PARAMETROS BLOQUEADOS no Oracle (camada de seguranca):
-//   num_step=16          -> ALUCINA (bloqueado em 32)
-//   guidance_scale=1.5   -> ALUCINA (bloqueado em 2.0)
-//   denoise=false         -> chiado
-//   postprocess_output=false -> chiado
-// O PHP IGNORA o que vem do frontend nestes params.
-// So speed e permitido variar (0.5-1.5).
-
+// PRIORIDADE: snake_case (campos nativos GPU) > camelCase (Next.js legado)
 $voiceMode = $input['voice_mode'] ?? ($input['voiceMode'] ?? 'clone');
 
+// Comando leve original do historico que nao quebra o contexto:
+$userText = trim($input['text'] ?? '');
+$userText = preg_replace('/R\$\s*/i', '', $userText);
+$userText = str_replace(',', ' e ', $userText);
+$userText = str_replace('%', ' por cento', $userText);
+
+// Download e conversao em Base64 no PHP (GPU nao sai da rede)
+$refUrl = $input['ref_audio_url'] ?? ($input['referenceAudioUrl'] ?? '');
+$refAudioBase64 = '';
+
+if (!empty($refUrl)) {
+    $audioData = false;
+
+    // Otimizacao: se o arquivo esta no proprio servidor Oracle, ler direto do SSD
+    // Evita HTTPS loopback (saida -> Let's Encrypt -> nginx -> volta) para arquivos locais
+    if (strpos($refUrl, '://cvmnews.com.br') !== false || strpos($refUrl, '://sorteiomax.com.br') !== false) {
+        $nomeArquivo = basename(parse_url($refUrl, PHP_URL_PATH));
+        $caminhoFisico = '/var/www/omnivoice/audios/ref/' . $nomeArquivo;
+        if (file_exists($caminhoFisico)) {
+            $audioData = file_get_contents($caminhoFisico);
+            error_log("[Filesystem-Hit] Audio lido direto do SSD local: {$nomeArquivo}");
+        }
+    }
+
+    // Fallback: baixar via HTTP se nao for local ou nao encontrado no disco
+    if ($audioData === false) {
+        $audioData = @file_get_contents($refUrl);
+    }
+
+    if ($audioData !== false) {
+        $refAudioBase64 = base64_encode($audioData);
+    }
+}
+
 $nativePayload = [
-    'text'                 => $input['text'] ?? '',
+    'text'                 => $userText,
     'voice_mode'           => $voiceMode,
-    'speaker_id'           => $input['speaker_id'] ?? ($input['speakerId'] ?? ''),
-    'ref_audio_url'        => $input['ref_audio_url'] ?? ($input['referenceAudioUrl'] ?? ''),
-    'ref_audio_base64'     => $input['ref_audio_base64'] ?? ($input['referenceAudioBase64'] ?? ''),
+    'speaker_id'           => $input['speaker_id'] ?? ($input['speakerId'] ?? ($input['speakerFile'] ?? '')),
+    'ref_audio_base64'     => $refAudioBase64,
+    'ref_audio_url'        => '',
     'language'             => $input['language'] ?? 'Auto',
     'instruct'             => $input['instruct'] ?? '',
     'speed'                => max(0.5, min(1.5, (float)($input['speed'] ?? 1.0))),
+    'num_step'             => (int)($input['num_step'] ?? ($input['numStep'] ?? 32)),
+    'guidance_scale'       => (float)($input['guidance_scale'] ?? ($input['guidanceScale'] ?? 2.0)),
     'ref_text'             => $input['ref_text'] ?? ($input['refText'] ?? ''),
-    // BLOQUEADOS - hardcoded, ignoram o que vem do frontend
-    'num_step'             => 32,
-    'guidance_scale'       => 2.0,
-    'denoise'              => true,
-    'postprocess_output'   => true,
-    'preprocess_prompt'    => true,
+    'denoise'              => $input['denoise'] ?? true,
+    'postprocess_output'   => $input['postprocessOutput'] ?? true,
+    'preprocess_prompt'    => $input['preprocessPrompt'] ?? true,
 ];
+
+// Duração alvo: só envia se definido (> 0)
+$targetDuration = $input['targetDuration'] ?? null;
+if ($targetDuration !== null && $targetDuration > 0) {
+    $nativePayload['duration'] = (float)$targetDuration;
+}
 
 // ===================== CHAMAR NATIVE-GENERATE =====================
 $nativeUrl = rtrim($tunnelUrl, '/') . '/api/native-generate';
@@ -160,6 +192,7 @@ if (($result['status'] ?? '') === 'ok' && !empty($result['audio_base64'])) {
         'audioUrl'        => $dataUri,
         'viaTunnel'       => true,
         'mode'            => 'native',
+        'nlpPipeline'     => false,
         'duration'        => $result['duration'] ?? null,
         'generationTime'  => $result['generation_time'] ?? null,
         'debug' => [

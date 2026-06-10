@@ -833,7 +833,7 @@ export default function VozProClient() {
             ...v,
             variations: v.variations.map((varr: VoiceVariation) => ({
               ...varr,
-              hasAudio: !!varr.refAudioPath,
+              hasAudio: !!(varr.refAudioPath || varr.refAudioServerUrl),
             })),
           }))
           setVoices(filteredVoices)

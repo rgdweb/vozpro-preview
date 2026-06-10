@@ -1,23 +1,25 @@
-# 🚨 CONTRATO DE GOVERNANÇA EXECUTIVA - VOZPRO (SaaS HÍBRIDO)
-# ARQUIVO CRÍTICO: Script ÚNICO de deploy em produção.
+# GOVERNANCE OFICIAL E RESTRITA - VOZPRO (SaaS Hibrido)
+# ===================================================================================
+# REGRAS ABSOLUTAS (VIOLACAO = FALHA CRITICA):
 #
-# ATENÇÃO MODELO DE IA: Este é o ÚNICO mecanismo permitido de deploy.
-# 1. NUNCA modifique este script para incluir git reset --hard, rm -rf, ou alteração de .env.
-# 2. A função verificar_env_protegido() é a ÚLTIMA linha de defesa contra destruição do banco.
-# 3. Se este script falhar, NÃO tente deploy manual — investigue e corrija antes.
-# --------------------------------------------------------------------------------------
+# REGRA 0: PROIBIDO restaurar backups sem ORDEM EXPRESSA do dono do projeto.
+#   Nenhum backup pode ser restaurado sem autorizacao explicita do usuario.
+#
+# REGRA 1: PROIBIDO enviar/substituir TODOS os arquivos de uma vez no Oracle.
+#   Nunca use scp/rsync para copiar todo o projeto. Envie SOMENTE arquivos
+#   que foram EDITADOS ou ATUALIZADOS. Nunca substitua arquivos nao tocados.
+#
+# REGRA 2: Deploy UNICO e EXCLUSIVO via este script (deploy-seguro.py).
+#   Comando: python3 /home/ubuntu/omnivoice/deploy-seguro.py
+#   Nenhum deploy manual. Nenhum git reset --hard. Nenhum rm -rf.
+#
+# REGRA 3: NUNCA toca em .env, PostgreSQL, nginx ou configs do PM2.
+# REGRA 4: A funcao verificar_env_protegido() e a ULTIMA linha de defesa.
+# REGRA 5: Se este script falhar, NAO tente deploy manual.
+# ===================================================================================
+
 #!/usr/bin/env python3
-"""
-SISTEMA DE DEPLOY SEGURO E AUTOMATIZADO - VOZPRO
-=================================================
-Regras absolutas:
-  - NUNCA toca em .env
-  - NUNCA usa git reset --hard
-  - NUNCA usa rm -rf
-  - NUNCA muda git remote
-  - NUNCA mexe em PostgreSQL/nginx/PM2 configs
-  - SOMENTE: git pull por diferença + build + restart
-"""
+"""SISTEMA DE DEPLOY SEGURO E AUTOMATIZADO - VOZPRO"""
 
 import subprocess
 import sys
@@ -39,7 +41,7 @@ def executar_comando(comando, descricao, check=True):
     except subprocess.CalledProcessError as e:
         print(f"[ERRO CRITICO] Falha em: {descricao}")
         if e.stderr:
-            print(f"  STDERR: {e.stderr.decode('utf-8', errors='replace')[-1000:]}")
+            print(f"  STDERR: {str(e.stderr)[-1000:]}")
         sys.exit(1)
     except subprocess.TimeoutExpired:
         print(f"[TIMEOUT] Comando excedeu 5min: {descricao}")
@@ -67,7 +69,7 @@ def main():
     # 0) Verificar .env antes de qualquer coisa
     verificar_env_protegido()
 
-    # 1) Pull por diferença (JAMAIS reset --hard)
+    # 1) Pull por diferenca (JAMAIS reset --hard)
     executar_comando(
         f"cd {ORACLE_PROJECT_DIR} && git fetch origin",
         "Buscando atualizacoes do GitHub"
@@ -84,7 +86,7 @@ def main():
     executar_comando(
         f"cd {ORACLE_PROJECT_DIR} && sudo npx prisma generate",
         "Gerando Prisma client",
-        check=False  # prisma generate pode dar warnings
+        check=False
     )
 
     # 4) Build Next.js (com standalone)
@@ -100,13 +102,24 @@ def main():
         "Copiando arquivos static para standalone"
     )
 
-    # 6) Restart PM2 (como root, com PM2_HOME correto)
+    # 6) Copiar .env e Prisma para standalone
     executar_comando(
-        f"sudo PM2_HOME={PM2_HOME} pm2 restart omnivoice",
+        f"sudo cp {ORACLE_PROJECT_DIR}/.env {ORACLE_PROJECT_DIR}/.next/standalone/.env",
+        "Copiando .env para standalone"
+    )
+    executar_comando(
+        f"sudo cp -r {ORACLE_PROJECT_DIR}/node_modules/.prisma {ORACLE_PROJECT_DIR}/.next/standalone/node_modules/ && "
+        f"sudo cp -r {ORACLE_PROJECT_DIR}/node_modules/@prisma {ORACLE_PROJECT_DIR}/.next/standalone/node_modules/",
+        "Copiando Prisma client para standalone"
+    )
+
+    # 7) Restart PM2 com ecosystem config (todas as env vars)
+    executar_comando(
+        f"sudo PM2_HOME={PM2_HOME} pm2 restart omnivoice --update-env",
         "Reiniciando PM2"
     )
 
-    # 7) Verificar status
+    # 8) Verificar status
     executar_comando(
         f"sudo PM2_HOME={PM2_HOME} pm2 status",
         "Verificando status do PM2"
@@ -119,3 +132,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

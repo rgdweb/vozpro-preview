@@ -130,57 +130,53 @@ async function checkGPUHealth(): Promise<GPUHealthResult> {
 // ============================================================
 async function unstickProcessing(): Promise<{ released: number; reason: string }> {
   try {
-    const stuckItems = await db.generationQueue.findMany({
-      where: {
-        status: 'processing',
-        startedAt: { lt: new Date(Date.now() - PROCESSING_TIMEOUT_MS) },
-      },
-      select: { id: true, startedAt: true, createdAt: true, userId: true },
+    // Buscar TODOS os itens em processing (sem filtro de tempo)
+    const processingItems = await db.generationQueue.findMany({
+      where: { status: 'processing' },
+      select: { id: true, startedAt: true, createdAt: true },
     })
 
-    if (stuckItems.length === 0) {
-      return { released: 0, reason: 'no_stuck_items' }
+    if (processingItems.length === 0) {
+      return { released: 0, reason: 'no_processing_items' }
     }
 
-    // Verificar saúde da GPU ANTES de decidir se libera
+    // Verificar saúde da GPU em tempo real
     const health = await checkGPUHealth()
-    const elapsedMs = Date.now() - stuckItems[0].startedAt.getTime()
-    const elapsedMin = (elapsedMs / 60000).toFixed(1)
+    const elapsedMs = Date.now() - processingItems[0].startedAt.getTime()
+    const elapsedSec = Math.floor(elapsedMs / 1000)
 
-    console.log(`[Queue Premium] ${stuckItems.length} item(s) há ${elapsedMin}min | GPU: ${health.gpuOnline ? 'ONLINE' : 'OFFLINE'} | Túnel: ${health.tunnelAlive ? 'VIVO' : 'MORTO'} | Último contato: ${getGPUHealthInfo().secondsSinceContact}s atrás`)
+    console.log(`[Queue Premium] ${processingItems.length} processing há ${elapsedSec}s | GPU: ${health.gpuOnline ? 'ONLINE' : 'OFFLINE'} | Túnel: ${health.tunnelAlive ? 'VIVO' : 'MORTO'}`)
 
-    // DECISÃO INTELIGENTE:
-    // Se GPU tá online E túnel tá vivo = item pode estar processando de verdade = NÃO libera (só se passou de 3min)
-    // Se GPU tá offline OU túnel morto = item tá preso = LIBERA IMEDIATAMENTE
-    if (health.gpuOnline && health.tunnelAlive && elapsedMs < 3 * 60 * 1000) {
-      console.log(`[Queue Premium] GPU online + túnel vivo + < 3min → MANTÉM processando (pode ser geração longa)`)
-      return { released: 0, reason: 'gpu_alive_keep_processing' }
+    // LÓGICA INTELIGENTE:
+    // 1. GPU OFFLINE ou túnel MORTO → LIBERA IMEDIATAMENTE (0s de espera)
+    // 2. GPU online E túnel vivo E < 1min → mantém (processamento normal)
+    // 3. GPU online mas > 1min → libera por timeout absoluto
+
+    if (!health.gpuOnline || !health.tunnelAlive) {
+      console.log(`[Queue Premium] ⚡ GPU OFFLINE/túnel morto → LIBERA IMEDIATAMENTE | Motivo: ${health.error}`)
+      const result = await db.generationQueue.updateMany({
+        where: { status: 'processing' },
+        data: { status: 'failed', completedAt: new Date() },
+      })
+      if (result.count > 0) {
+        console.log(`[Queue Premium] ✅ Liberou ${result.count} item(s) preso(s) | gpu_offline`)
+      }
+      return { released: result.count, reason: 'gpu_offline' }
     }
 
-    // Se GPU tá online mas já passou de 3min, libera mesmo assim (geração muito longa = problemática)
-    if (health.gpuOnline && health.tunnelAlive) {
-      console.log(`[Queue Premium] GPU online mas ${elapsedMin}min excedido → LIBERA por timeout absoluto`)
-    } else {
-      console.log(`[Queue Premium] GPU OFFLINE/túnel morto → LIBERA imediatamente | Motivo: ${health.error}`)
+    // GPU tá online = pode estar processando de verdade, só libera se excedeu 1min
+    if (elapsedMs > PROCESSING_TIMEOUT_MS) {
+      console.log(`[Queue Premium] GPU online mas ${elapsedSec}s > 1min → LIBERA por timeout`)
+      const result = await db.generationQueue.updateMany({
+        where: { status: 'processing' },
+        data: { status: 'failed', completedAt: new Date() },
+      })
+      return { released: result.count, reason: 'timeout' }
     }
 
-    // Liberar todos os itens presos
-    const result = await db.generationQueue.updateMany({
-      where: {
-        status: 'processing',
-        startedAt: { lt: new Date(Date.now() - PROCESSING_TIMEOUT_MS) },
-      },
-      data: {
-        status: 'failed',
-        completedAt: new Date(),
-      },
-    })
-
-    if (result.count > 0) {
-      console.log(`[Queue Premium] ✅ Liberou ${result.count} item(s) preso(s) | Motivo: ${health.gpuOnline ? 'timeout_3min' : 'gpu_offline'}`)
-    }
-
-    return { released: result.count, reason: health.gpuOnline ? 'timeout' : 'gpu_offline' }
+    // GPU online + < 1min = processamento normal, manter
+    console.log(`[Queue Premium] GPU online + ${elapsedSec}s < 1min → MANTÉM (processando normal)`)
+    return { released: 0, reason: 'processing_normal' }
 
   } catch (err) {
     console.error(`[Queue Premium] Erro no unstick:`, err)

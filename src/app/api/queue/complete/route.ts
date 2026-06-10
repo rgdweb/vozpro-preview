@@ -102,9 +102,9 @@ async function unstickProcessing(): Promise<{ released: number; reason: string }
 
     console.log(`[Queue Premium Complete] ${stuckItems.length} item(s) há ${elapsedMin}min | GPU: ${health.gpuOnline ? 'ONLINE' : 'OFFLINE'} | Túnel: ${health.tunnelAlive ? 'VIVO' : 'MORTO'}`)
 
-    // Se GPU tá online E túnel vivo E < 3min = mantém
-    if (health.gpuOnline && health.tunnelAlive && elapsedMs < 3 * 60 * 1000) {
-      console.log(`[Queue Premium Complete] GPU online + túnel vivo + < 3min → MANTÉM`)
+    // Se GPU tá online E túnel vivo E < 1.5min = mantém
+    if (health.gpuOnline && health.tunnelAlive && elapsedMs < 1.5 * 60 * 1000) {
+      console.log(`[Queue Premium Complete] GPU online + túnel vivo + < 1.5min → MANTÉM`)
       return { released: 0, reason: 'gpu_alive_keep_processing' }
     }
 

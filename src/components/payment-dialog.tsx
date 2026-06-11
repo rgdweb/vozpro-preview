@@ -147,14 +147,20 @@ export default function PaymentDialog({
   }, [email, audioUrl, format, onEmailSent])
 
   // Ação principal: baixar ou enviar email (sem pagamento - grátis/exempt)
-  const handleFreeAction = useCallback(() => {
+  const handleFreeAction = useCallback(async () => {
     if (deliveryMode === 'email') {
       handleSendEmail()
     } else {
+      // Consumir crédito de download grátis se aplicável
+      if (freeDownloads > 0) {
+        try {
+          await fetch('/api/free-download', { method: 'POST' })
+        } catch { /* não bloquear download */ }
+      }
       onPaymentApproved(format)
       onOpenChange(false)
     }
-  }, [deliveryMode, format, onPaymentApproved, onOpenChange, handleSendEmail])
+  }, [deliveryMode, format, onPaymentApproved, onOpenChange, handleSendEmail, freeDownloads])
 
   // Create payment
   const handleCreatePayment = async () => {

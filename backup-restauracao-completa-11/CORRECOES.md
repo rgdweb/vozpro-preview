@@ -1,154 +1,260 @@
-# Correções Realizadas no Oracle VozPro (12/06/2025)
+# Backup VozPro Oracle - 12/06/2025
+# COMPLETO - 100% funcional - Todas as 7 correções aplicadas
 
-## Resumo
-Estas são TODAS as correções feitas para eliminar estalos/crackling no áudio, ativar email, corrigir idioma e outros ajustes. O sistema está 100% funcional com estas correções aplicadas.
+================================================================================
+COMO RESTAURAR QUANDO DER PAU NO ORACLE
+================================================================================
 
----
+QUANDO DER PAU: baixe esta pasta do GitHub, mande pro Oracle, rode 2 comandos.
 
-## Correção 1: Estalos/Crackling no Áudio (CRÍTICA)
+PASSO 1 - Subir o backup ao Oracle (via SFTP/SCP):
+  scp -r backup-restauracao-completa-11/ ubuntu@api.cvmnews.com.br:/home/ubuntu/backup-restore/
 
-### Arquivo: `/var/www/omnivoice/tunnel-generate.php`
-### Problema: Áudio gerado tinha estalos/crackling/ruidos
-### Causa: O cloudflared comprimia a resposta binária WAV (base64) com gzip/deflate,
-e o PHP curl aceitava essa compressão, corrompendo os dados binários do áudio.
-### Solução: Forçar `CURLOPT_ENCODING => 'identity'` para bloquear qualquer compressão.
+PASSO 2 - SSH no Oracle e rodar:
+  cd /home/ubuntu/backup-restore/backup-restauracao-completa-11
+  chmod +x RESTAURAR.sh
+  ./RESTAURAR.sh
 
-**Trecho crítico adicionado:**
-```php
-// Cabeçalhos
-curl_setopt($ch, CURLOPT_HTTPHEADER, [
-    'Content-Type: application/json',
-    'Accept-Encoding: identity',   // CRITICAL: bloqueia compressao cloudflared!
-]);
+PRONTO. O script faz TUDO: apaga o codigo velho, copia o backup, instala
+dependencias, migra o banco, roda deploy-seguro.py. Site volta no ar.
 
-// Opção cURL
-curl_setopt($ch, CURLOPT_ENCODING, 'identity');  // CRITICAL: nao aceita gzip/deflate na resposta
-```
+================================================================================
+SOBRE O GIT PUSH --FORCE
+================================================================================
 
-**Antes:** `CURLOPT_ENCODING => ''` (aceita qualquer compressão)
-**Depois:** `CURLOPT_ENCODING => 'identity'` (força resposta sem compressão)
+NÃO use --force no repositório do Oracle (vozpro-preview).
+O repositório no GitHub é APENAS para armazenar backups.
+O --force foi necessário só porque o repo local estava vazio (sem commits).
+Se o repo já tiver commits, use push normal:
+  git push origin main
 
----
+NO ORACLE, NUNCA use:
+  git reset --hard        (PERIGO: perde tudo)
+  git push --force        (PERIGO: reescreve histórico)
 
-## Correção 2: Envio de Email Desativado
+NO ORACLE, SEMPRE use:
+  sudo python3 deploy-seguro.py   (SEGURO: pull, build, restart)
 
-### Arquivo: `/home/ubuntu/omnivoice/.env`
-### Problema: A função de enviar áudio por email não funcionava (faltava configuração SMTP)
-### Solução: Adicionar variáveis SMTP ao .env
+================================================================================
+O QUE O SCRIPT RESTAURAR.SH FAZ (PASSO A PASSO)
+================================================================================
 
-**Variáveis adicionadas:**
-```
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=contatorgdweb@gmail.com
-SMTP_PASS=bzgq tcff pfab bsre
-EMAIL_FROM=VozPro <contatorgdweb@gmail.com>
-```
+1. Para o PM2 (via deploy-seguro.py que gerencia isso)
+2. APAGA o código velho: src/, public/, prisma/ do /home/ubuntu/omnivoice/
+3. Copia TODOS os arquivos do backup para os locais corretos
+4. Copia .env (com SMTP Gmail) para /home/ubuntu/omnivoice/.env
+5. Copia tunnel-generate.php para /var/www/omnivoice/ (fix estalos)
+6. Copia deploy-seguro.py para /home/ubuntu/omnivoice/
+7. Roda npm install
+8. Roda npx prisma migrate deploy (cria/atualiza tabelas do banco)
+9. Roda sudo python3 deploy-seguro.py (git pull, next build, copy standalone, pm2 restart)
 
----
+DEPOIS DISSO O SITE ESTÁ 100% NO AR. NÃO PRECISA CONFIGURAR NADA MAIS.
 
-## Correção 3: Opções de Download Ocultas para Usuários Gratuitos
+================================================================================
+O QUE PRECISA PARA FUNCIONAR (PRÉ-REQUISITOS NO ORACLE)
+================================================================================
 
-### Arquivo: `/home/ubuntu/omnivoice/src/components/payment-dialog.tsx`
-### Problema: Usuários gratuitos não viam as opções de download (WAV, MP3, Email)
-### Solução: Modificar `handleDownloadClick` para sempre abrir o PaymentDialog
+Estas coisas JÁ ESTÃO instaladas no Oracle (não precisa reinstalar):
+  - Node.js v20.20.2
+  - npm 10.8.2
+  - PM2 (gerenciador de processos)
+  - Nginx (proxy reverso)
+  - PHP 8.3 com FPM
+  - Certbot (SSL/Let's Encrypt)
+  - PostgreSQL (banco de dados)
+  - cloudflared (túnel)
 
-**Arquivo: `/home/ubuntu/omnivoice/src/app/page.tsx`**
-```tsx
-// ANTES: condição complexa que bypassava o dialog para free users
-// DEPOIS: sempre abre o dialog
-const handleDownloadClick = useCallback(async () => {
-  const url = audioUrl
-  if (!url) return
-  setPaymentDialogOpen(true)
-}, [audioUrl])
-```
+SE o Oracle for formatado do zero, precisaria instalar tudo isso antes.
+Mas para "der pau no site", basta o backup + RESTAURAR.sh.
 
-**Arquivo: `/home/ubuntu/omnivoice/src/components/payment-dialog.tsx`**
-```tsx
-// Adicionado consumo de crédito de download gratuito antes do download:
-const handleFreeAction = useCallback(async () => {
-  if (deliveryMode === 'email') {
-    handleSendEmail()
-  } else {
-    if (freeDownloads > 0) {
-      try { await fetch('/api/free-download', { method: 'POST' }) } catch { }
-    }
-    onPaymentApproved(format)
-    onOpenChange(false)
-  }
-}, [deliveryMode, format, onPaymentApproved, onOpenChange, handleSendEmail, freeDownloads])
-```
+================================================================================
+LISTA COMPLETA DE ARQUIVOS NO BACKUP (161 arquivos)
+================================================================================
 
----
+env/
+  .env                           ← Variáveis de ambiente (SMTP, DATABASE_URL, etc.)
 
-## Correção 4: Código de Idioma Errado (Gerava Áudio em Inglês)
+src/  (130 arquivos - CÓDIGO FONTE COMPLETO)
+  app/page.tsx                   ← Página principal (idioma PT, download dialog, auto-split off)
+  app/layout.tsx                 ← Layout do Next.js
+  app/globals.css                ← Estilos globais
+  app/login/page.tsx             ← Página de login
+  app/admin/page.tsx             ← Painel admin
+  app/admin/layout.tsx           ← Layout admin
+  app/admin/login/page.tsx       ← Login admin
+  app/api/generate/route.ts      ← API de geração (ref_text='', guidance_scale=2.0)
+  app/api/tunnel-generate/route.ts
+  app/api/php-generate/route.ts
+  app/api/omnivoice-generate/route.ts
+  app/api/send-audio-email/route.ts
+  app/api/free-download/route.ts
+  app/api/payment/create/route.ts
+  app/api/payment/download/route.ts
+  app/api/payment/qrcode/route.ts
+  app/api/payment/status/route.ts
+  app/api/payment/webhook/route.ts
+  app/api/voices/route.ts
+  app/api/voices/[id]/route.ts
+  app/api/voices/[id]/variations/route.ts
+  app/api/auth/route.ts
+  app/api/auth/google/route.ts
+  app/api/auth/verify/route.ts
+  app/api/upload-voice/route.ts
+  app/api/upload-track/route.ts
+  app/api/upload-chunk/route.ts
+  app/api/upload-token/route.ts
+  app/api/upload-watermark/route.ts
+  app/api/speakers/route.ts
+  app/api/categories/route.ts
+  app/api/tracks/route.ts
+  app/api/tracks/[id]/route.ts
+  app/api/queue/join/route.ts
+  app/api/queue/complete/route.ts
+  app/api/queue/heartbeat/route.ts
+  app/api/admin/voices/route.ts
+  app/api/admin/voices/bulk-upload/route.ts
+  app/api/admin/speakers/route.ts
+  app/api/admin/speakers/convert/route.ts
+  app/api/admin/speakers/ref-text/route.ts
+  app/api/admin/tracks/route.ts
+  app/api/admin/users/route.ts
+  app/api/admin/settings/route.ts
+  app/api/admin/rename-category/route.ts
+  app/api/generate-token/route.ts
+  app/api/generate-config/route.ts
+  app/api/omnivoice-token/route.ts
+  app/api/server-config/route.ts
+  app/api/settings/route.ts
+  app/api/status/route.ts
+  app/api/health/route.ts
+  app/api/diagnose/route.ts
+  app/api/maintenance/route.ts
+  app/api/cleanup/route.ts
+  app/api/proxy-audio/route.ts
+  app/api/gpu-stats/route.ts
+  app/api/asr-validate/route.ts
+  app/api/g2p-phonemize/route.ts
+  app/api/optimize-pronunciation/route.ts
+  app/api/clean-instructs/route.ts
+  app/api/batch-upload-tracks/route.ts
+  app/api/voice-categories/route.ts
+  app/api/track-categories/route.ts
+  app/api/setup-sessions/route.ts
+  app/api/route.ts
+  components/payment-dialog.tsx    ← Dialog de pagamento/download (free download credit)
+  components/audio-player.tsx
+  components/voice-preview-button.tsx
+  components/ui/ (42 componentes shadcn/ui)
+  hooks/use-toast.ts
+  hooks/use-mobile.ts
+  lib/auth.ts
+  lib/db.ts
+  lib/utils.ts
+  lib/audio-server.ts
+  lib/audio-trimmer.ts
+  lib/audio-concatenator.ts
+  lib/ssml-parser.ts
+  lib/tts-chunker.ts
+  lib/tts-text-preprocessor.ts
+  lib/pronunciation-optimizer.ts
+  lib/asr-validator.ts
 
-### Arquivo: `/home/ubuntu/omnivoice/src/app/page.tsx` (linha ~251)
-### Problema: `'Portuguese'` era enviado como idioma, mas o OmniVoice precisa
-do formato `'Portuguese (pt)'` para extrair o código ISO `pt` corretamente.
-### Solução: Alterar o valor do idioma
+database/prisma/
+  schema.prisma                  ← Schema do banco de dados
+  migrations/
+    20260505171504_init/migration.sql
+    20260510000000_add_user_model/migration.sql
+    20260511000000_add_session_model/migration.sql
+    migration_lock.toml
 
-**Antes:** `{ value: 'Portuguese', label: 'Português' }`
-**Depois:** `{ value: 'Portuguese (pt)', label: 'Português' }`
+php/
+  tunnel-generate.php            ← PHP proxy (CURLOPT_ENCODING identity = fix estalos)
 
----
+nginx/
+  vozpro.cvmnews.com.br          ← Config Nginx do site (proxy → 127.0.0.1:3001)
+  omnivoice                      ← Config Nginx do PHP (api.cvmnews.com.br)
+  teste.cvmnews.com.br           ← Config de teste (referência)
 
-## Correção 5: Texto de Referência Artificial (ref_text)
+pm2/
+  pm2-processes.json             ← Info dos processos PM2 ativos
 
-### Arquivo: `/home/ubuntu/omnivoice/src/app/api/generate/route.ts` (linhas 175, 188)
-### Problema: Quando não havia transcrição, era enviado um texto artificial
-`'texto de referencia para clonagem de voz'` que afetava a qualidade da clonagem.
-### Solução: Enviar string vazia quando não há transcrição
+gpu-server/                      ← Servidor Windows com GPU (NÃO vai no Oracle)
+  omnivoice_api.py               ← API Python de geração (torchaudio 24k→44.1k)
+  start_tunnel.py                ← cloudflared + túnel SSH
+  iniciar.bat                    ← Startup do Windows
+  fix_api.py                     ← Fix urllib
 
-**Antes:** `ref_text: refText.trim() || 'texto de referencia para clonagem de voz'`
-**Depois:** `ref_text: refText.trim() || ''`
+public/
+  logo.jpg
+  logo.svg
+  og-image.jpg
+  robots.txt
 
----
+deploy-seguro.py                 ← SCRIPT DE DEPLOY (NUNCA MODIFICAR)
+package.json                     ← Dependências do projeto
+package-lock.json                ← Versões exatas das dependências
+next.config.ts                   ← Config do Next.js
+tsconfig.json                    ← Config TypeScript
+tailwind.config.ts               ← Config Tailwind CSS
+postcss.config.mjs               ← Config PostCSS
+components.json                  ← Config shadcn/ui
+.gitignore                       ← Arquivos ignorados pelo git
+system-info.txt                  ← Node v20.20.2, npm 10.8.2
+CORRECOES.md                     ← ESTE ARQUIVO
+RESTAURAR.sh                     ← Script de restauração automática
 
-## Correção 6: guidance_scale Fixo em 1.5 (Qualidade Reduzida)
+================================================================================
+CORREÇÕES APLICADAS (7 correções)
+================================================================================
 
-### Arquivo: `/home/ubuntu/omnivoice/src/app/api/generate/route.ts` (linhas 176, 189)
-### Problema: guidance_scale estava fixo em 1.5 ao invés de usar o valor do frontend (default 2.0)
-### Solução: Usar o valor enviado pelo frontend com fallback para 2.0
+1. ESTALOS/CRACKLING NO ÁUDIO (CRÍTICA)
+   Arquivo: tunnel-generate.php
+   O que: CURLOPT_ENCODING => 'identity' (bloqueia compressão gzip do cloudflared)
+   Antes: aceite qualquer compressão → dados binários corrompidos → estalos
+   Depois: força resposta limpa → áudio perfeito
 
-**Antes:** `guidance_scale: 1.5`
-**Depois:** `guidance_scale: (body as Record<string, unknown>).guidanceScale ?? (body as Record<string, unknown>).guidance_scale ?? 2.0`
+2. ENVIO DE EMAIL DESATIVADO
+   Arquivo: .env
+   O que: Adicionou SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_FROM
+   Faltava: sem essas vars a função de enviar áudio por email não funcionava
 
----
+3. OPÇÕES DE DOWNLOAD OCULTAS PARA GRATUITOS
+   Arquivos: page.tsx, payment-dialog.tsx
+   O que: handleDownloadClick agora sempre abre o PaymentDialog (WAV/MP3/Email)
+   Antes: usuários grátis não viam as opções de como baixar
 
-## Correção 7: Auto-Split Desativado
+4. IDIOMA ERRADO (GERAVA ÁUDIO EM INGLÊS)
+   Arquivo: page.tsx
+   O que: 'Portuguese' → 'Portuguese (pt)'
+   Por que: OmniVoice precisa do formato com código ISO entre parênteses
 
-### Arquivo: `/home/ubuntu/omnivoice/src/app/page.tsx`
-### Problema: O auto-split dividia o texto em múltiplos segmentos desnecessariamente
-### Solução: Desativar com `if (true) return` no início da função de auto-split
+5. TEXTO DE REFERÊNCIA ARTIFICIAL
+   Arquivo: generate/route.ts
+   O que: ref_text vazio '' ao invés de texto artificial
+   Antes: 'texto de referencia para clonagem de voz' → qualidade ruim
 
----
+6. GUIDANCE_SCALE FIXO EM 1.5
+   Arquivo: generate/route.ts
+   O que: Agora usa valor do frontend com fallback 2.0
+   Antes: sempre 1.5 → qualidade reduzida na clonagem
 
-## Arquivos Modificados (Lista Completa)
+7. AUTO-SPLIT DESATIVADO
+   Arquivo: page.tsx
+   O que: Desativado com if (true) return
+   Por que: dividia texto desnecessariamente
 
-| # | Arquivo | Correções |
-|---|---------|-----------|
-| 1 | `src/app/page.tsx` | #3 (download dialog), #4 (idioma), #7 (auto-split) |
-| 2 | `src/app/api/generate/route.ts` | #5 (ref_text), #6 (guidance_scale) |
-| 3 | `src/components/payment-dialog.tsx` | #3 (free download credit) |
-| 4 | `.env` | #2 (SMTP) |
-| 5 | `/var/www/omnivoice/tunnel-generate.php` | #1 (CURLOPT_ENCODING identity) |
+================================================================================
+REGRA DE OURO
+================================================================================
 
----
+NO ORACLE:
+  ✅ SEMPRE use: sudo python3 deploy-seguro.py
+  ❌ NUNCA use: git reset --hard, kill manual, npm start manual
 
-## Arquivos do Servidor GPU (Sem Alterações Nestes)
+NO GITHUB (vozpro-preview):
+  ✅ Use: git push origin main (sem --force se já tiver commits)
+  ❌ NUNCA use: git push --force no repo do Oracle
 
-Estes arquivos rodam no servidor Windows com GPU e não foram modificados nesta sessão:
-- `omnivoice_api.py` - API de geração de áudio (torchaudio resample 24k->44.1k, np.clip, guidance_scale=2.0)
-- `start_tunnel.py` - cloudflared + registro do túnel SSH
-- `iniciar.bat` - Script de inicialização do Windows
-- `fix_api.py` - Correção urllib (já aplicada anteriormente)
-
----
-
-## Versão do Sistema no Momento do Backup
-- Node.js: v20.20.2
-- npm: 10.8.2
-- Data: 12/06/2025
-- Status: 100% funcional (geração de áudio OK, downloads OK, email OK, sem estalos)
+Data do backup: 12/06/2025
+Status: 100% funcional

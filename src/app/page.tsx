@@ -248,7 +248,7 @@ function formatDuration(seconds: number): string {
 
 const LANGUAGES = [
   { value: 'Auto', label: 'Auto Detectar' },
-  { value: 'Portuguese', label: 'Português' },
+  { value: 'Portuguese (pt)', label: 'Português' },
   { value: 'English', label: 'Inglês' },
   { value: 'Spanish', label: 'Espanhol' },
   { value: 'French', label: 'Francês' },

@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getAdminSession } from '@/lib/auth'
+// getAdminSession() retorna boolean (true = admin autenticado)
 import { transcribeFromUrl } from '@/lib/asr-transcriber'
 
 const DEFAULT_DELAY_MS = 500
@@ -28,8 +29,8 @@ export const maxDuration = 300
 
 export async function POST(request: NextRequest) {
   // ---- AUTH ----
-  const session = await getAdminSession(request)
-  if (!session.authenticated || session.role !== 'admin') {
+  const isAdmin = await getAdminSession()
+  if (!isAdmin) {
     return NextResponse.json({ error: 'Acesso negado' }, { status: 401 })
   }
 

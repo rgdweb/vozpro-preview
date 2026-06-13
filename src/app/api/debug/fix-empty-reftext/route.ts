@@ -44,7 +44,6 @@ export async function POST(request: NextRequest) {
     active: true,
     OR: [
       { refText: '' },
-      { refText: null as any },
     ],
   }
 

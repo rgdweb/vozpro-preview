@@ -44,8 +44,7 @@ export async function POST(request: NextRequest) {
     active: true,
     OR: [
       { refText: '' },
-      { refText: null },
-      { refText: { contains: '(VAZIO)' } },
+      { refText: null as any },
     ],
   }
 

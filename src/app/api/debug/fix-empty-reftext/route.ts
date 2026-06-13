@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyAdmin } from '@/lib/auth'
+import { getAdminSession } from '@/lib/auth'
 import { transcribeFromUrl } from '@/lib/asr-transcriber'
 
 const DEFAULT_DELAY_MS = 500
@@ -24,11 +24,12 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+export const maxDuration = 300
+
 export async function POST(request: NextRequest) {
   // ---- AUTH ----
-  try {
-    await verifyAdmin(request)
-  } catch {
+  const session = await getAdminSession(request)
+  if (!session.authenticated || session.role !== 'admin') {
     return NextResponse.json({ error: 'Acesso negado' }, { status: 401 })
   }
 

@@ -26,7 +26,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   AudioWaveform, Sparkles, Loader2, Download, Play, Pause, Square,
   Volume2, Music, Mic, ChevronRight, Settings2, Globe, Bug, Copy, ChevronDown,
-  Upload, CheckCircle2, FolderOpen, ChevronLeft, Folder, Mail, Plus, X
+  Upload, CheckCircle2, FolderOpen, ChevronLeft, Folder, Mail, Plus, X, RefreshCw
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Label } from '@/components/ui/label'
@@ -53,6 +53,7 @@ function toProxyAudioUrl(url: string): string {
   }
 }
 import { Users } from 'lucide-react'
+import { masterizeAudio, masterizeVoice } from '@/lib/audio-masterize'
 
 interface TrackControlsProps {
   selectedTrack: { id: string; name: string; audioPath: string; [key: string]: unknown } | null
@@ -757,6 +758,10 @@ export default function VozProClient() {
   const [isMixed, setIsMixed] = useState(false)
   const [audioDuration, setAudioDuration] = useState<number | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
+  const [isMasterizing, setIsMasterizing] = useState(false)
+  const masterizedBufferRef = useRef<AudioBuffer | null>(null)
+  const [previewMasterized, setPreviewMasterized] = useState(true)
+  const [masterizedPreviewUrl, setMasterizedPreviewUrl] = useState<string | null>(null)
   const [mobilePlayerExpanded, setMobilePlayerExpanded] = useState(false)
   const [generatingTime, setGeneratingTime] = useState(0)
 
@@ -772,6 +777,8 @@ export default function VozProClient() {
   const [enableFrontendUpload, setEnableFrontendUpload] = useState(false) // liberado via admin
   const [uploadedVoiceFile, setUploadedVoiceFile] = useState<File | null>(null)
   const [uploadedVoiceUrl, setUploadedVoiceUrl] = useState<string | null>(null)
+  const [uploadedVoiceFilename, setUploadedVoiceFilename] = useState<string | null>(null)
+  const [uploadedVoiceRefText, setUploadedVoiceRefText] = useState<string | null>(null)
 
   // Locutores Oficiais (cache SSD)
   const [officialSpeakers, setOfficialSpeakers] = useState<Array<{ id: string; name: string; speakerFile: string; refAudioUrl: string; refText: string; avatarUrl?: string | null }>>([])
@@ -795,7 +802,7 @@ export default function VozProClient() {
       const searchEnd = Math.min(remaining.length, targetChars + 60)
       let splitPos = -1
       // Prioridade: ! ? . ,
-      for (const punct of ['!', '?', '.', ',']) {
+      for (const punct of ['!', '?', '.']) {
         for (let i = searchEnd; i >= searchStart; i--) {
           if (remaining[i] === punct) {
             splitPos = i + 1
@@ -822,7 +829,7 @@ export default function VozProClient() {
   // Auto-split debounced: quando texto único passa de ~200 chars, divide automaticamente
   useEffect(() => {
     if (multiPartMode || autoSplitDoneRef.current) return
-    if (true) return  // DESATIVADO: texto unico
+    // Auto-split ativo: textos > ~280 chars sao divididos automaticamente
     const timer = setTimeout(() => {
       setAutoSplitting(true)
       setTimeout(() => {
@@ -986,6 +993,17 @@ export default function VozProClient() {
     }
   }, [selectedVoiceId, selectedVoice])
 
+  // Cleanup upload clone ao sair da pagina (fecha aba, navega pra fora)
+  useEffect(() => {
+    const handler = () => {
+      if (uploadedVoiceFilename) {
+        navigator.sendBeacon(`/api/upload-voice?filename=${encodeURIComponent(uploadedVoiceFilename)}&method=DELETE`)
+      }
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [uploadedVoiceFilename])
+
   // Concatenate multiple AudioBuffers into one (with short silence gap)
   async function concatenateAudioBuffers(buffers: AudioBuffer[], gapMs = 400): Promise<string> {
     if (buffers.length === 0) return ''
@@ -1035,6 +1053,79 @@ export default function VozProClient() {
       }, idx * 300)
     })
   }, [segmentResults])
+
+  // Regenerar apenas uma parte (sem refazer todas)
+  const regenerateSegment = useCallback(async (segIdx: number) => {
+    const segText = segments.filter(s => s.text.trim())[segIdx]?.trim()
+    if (!segText) { toast.error('Sem texto nesta parte'); return }
+
+    const isUploaded = voiceMode === 'clone' && uploadedVoiceUrl
+    let refUrl = fixAudioServerUrl(selectedVariation?.refAudioServerUrl || '') || ''
+    if (isUploaded) refUrl = uploadedVoiceUrl
+    const finalInstruct = voiceMode === 'design' ? voiceDesignInstruct : (selectedVariation?.instruct || '')
+
+    const tunnelBody = {
+      text: segText,
+      language,
+      referenceAudioUrl: voiceMode !== 'clone' ? undefined : refUrl,
+      instruct: finalInstruct,
+      voiceMode,
+      refText: uploadedVoiceRefText || selectedVariation?.refText || '',
+      speed,
+    }
+
+    try {
+      toast.info(`Regenerando parte ${segIdx + 1}...`, { duration: 2000 })
+      const tokenRes = await fetch('/api/generate-token')
+      if (!tokenRes.ok) { toast.error('Erro ao obter token'); return }
+      const { token: tunnelToken } = await tokenRes.json()
+      if (!tunnelToken) { toast.error('Servidor nao configurado'); return }
+
+      const oracleApi = process.env.NEXT_PUBLIC_AUDIO_SERVER_URL || 'https://api.cvmnews.com.br'
+      const res = await fetch(`${oracleApi}/tunnel-generate.php`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Generate-Token': tunnelToken },
+        body: JSON.stringify(tunnelBody),
+      })
+
+      if (!res.ok) { toast.error(`Erro do servidor (${res.status})`); return }
+      const data = await res.json()
+      if (data.error) { toast.error(data.error); return }
+      if (!data.audioUrl) { toast.error('Nenhum audio retornado'); return }
+
+      // Atualizar resultado desta parte
+      const newSegResults = [...segmentResults]
+      newSegResults[segIdx] = { text: segText, audioUrl: data.audioUrl }
+      setSegmentResults(newSegResults)
+
+      // Re-concatenar todas as partes
+      if (newSegResults.length > 1) {
+        try {
+          const buffers: AudioBuffer[] = []
+          for (const seg of newSegResults) {
+            const buf = await decodeAudioToBuffer(seg.audioUrl)
+            buffers.push(buf)
+          }
+          const concatWav = await concatenateAudioBuffers(buffers, 500)
+          setAudioUrl(concatWav)
+          setPreviewUrl(concatWav)
+          setMixedAudioUrl(null)
+          toast.success(`Parte ${segIdx + 1} regenerada e audio reconcatenado!`)
+        } catch (concatErr) {
+          console.error('[Regen] Concat failed:', concatErr)
+          setAudioUrl(data.audioUrl)
+          toast.success(`Parte ${segIdx + 1} regenerada! (concatenacao falhou)`)
+        }
+      } else {
+        setAudioUrl(data.audioUrl)
+        setPreviewUrl(data.audioUrl)
+        toast.success(`Parte ${segIdx + 1} regenerada!`)
+      }
+    } catch (err) {
+      console.error('[Regen] Error:', err)
+      toast.error('Erro ao regenerar parte')
+    }
+  }, [segments, segmentResults, voiceMode, uploadedVoiceUrl, selectedVariation, uploadedVoiceRefText, voiceDesignInstruct, language, speed, fixAudioServerUrl])
 
   // Decode a data URI or URL into an AudioBuffer
   async function decodeAudioToBuffer(audioDataUri: string): Promise<AudioBuffer> {
@@ -1101,6 +1192,8 @@ export default function VozProClient() {
     setIsMixed(false)
     setAudioDuration(null)
     setGeneratingTime(0)
+    setMasterizedPreviewUrl(null)
+    masterizedBufferRef.current = null
     setPreviewingVoiceId(null)
     setQueueStatus('')
     setSegmentResults([])
@@ -1251,7 +1344,7 @@ export default function VozProClient() {
         language,
         refAudioUrl: selectedVariation?.refAudioServerUrl || '',
         refAudioPath: selectedVariation?.refAudioPath || '',
-        refText: selectedVariation?.refText || '',  // usa texto preenchido pelo admin; vazio = Whisper auto-transcreve (pode errar)
+        refText: uploadedVoiceRefText || selectedVariation?.refText || '',  // usa transcricao do upload clone ou texto do admin; vazio = Whisper auto-transcreve (pode errar)
         instruct: instructStr,
         refAudioName: selectedVariation?.refAudioName || 'ref_audio.wav',
         speed,
@@ -1793,32 +1886,35 @@ export default function VozProClient() {
     if (!url) return
 
     try {
-      let audioBuffer: AudioBuffer
-
-      if (url.startsWith('data:')) {
-        const byteString = atob(url.split(',')[1])
-        const ab = new ArrayBuffer(byteString.length)
-        const ia = new Uint8Array(ab)
-        for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i)
-        const blob = new Blob([ab], { type: url.split(',')[0].split(':')[1].split(';')[0] })
-        const arrayBuffer = await blob.arrayBuffer()
-        const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
-        audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
-        await audioCtx.close()
-      } else {
-        const response = await fetch(url)
-        const arrayBuffer = await response.arrayBuffer()
-        const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
-        audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
-        await audioCtx.close()
+      let audioBuffer = masterizedBufferRef.current
+      if (!audioBuffer) {
+        const fallbackUrl = cleanMixedUrl || audioUrl
+        if (!fallbackUrl) return
+        if (fallbackUrl.startsWith('data:')) {
+          const byteString = atob(fallbackUrl.split(',')[1])
+          const ab = new ArrayBuffer(byteString.length)
+          const ia = new Uint8Array(ab)
+          for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i)
+          const blob = new Blob([ab], { type: fallbackUrl.split(',')[0].split(':')[1].split(';')[0] })
+          const arrayBuffer = await blob.arrayBuffer()
+          const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
+          audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
+          await audioCtx.close()
+        } else {
+          const response = await fetch(fallbackUrl)
+          const arrayBuffer = await response.arrayBuffer()
+          const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
+          audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
+          await audioCtx.close()
+        }
       }
 
       if (format === 'wav') {
         const a = document.createElement('a')
-        a.href = url
+        a.href = audioBufferToWav(audioBuffer)
         a.download = `vozpro_${Date.now()}.wav`
         a.click()
-        toast.success('WAV baixado com sucesso!')
+        toast.success('WAV masterizado baixado!')
       } else {
         if (!(window as unknown as { lamejs?: object }).lamejs) {
           await new Promise<void>((resolve, reject) => {
@@ -1865,7 +1961,7 @@ export default function VozProClient() {
         a.download = `vozpro_${Date.now()}.mp3`
         a.click()
         URL.revokeObjectURL(blobUrl)
-        toast.success('MP3 baixado com sucesso!')
+        toast.success('MP3 masterizado baixado!')
       }
     } catch (err) {
       console.error('Download error:', err)
@@ -1877,12 +1973,47 @@ export default function VozProClient() {
     }
   }, [cleanMixedUrl, audioUrl])
 
-  // Sempre abre o dialog para escolher formato (wav/mp3) e entrega (download/email)
+  // Masteriza ANTES de abrir o dialog de formato
   const handleDownloadClick = useCallback(async () => {
-    const url = audioUrl
+    const url = cleanMixedUrl || audioUrl
     if (!url) return
+
+    setIsMasterizing(true)
+    try {
+      let audioBuffer: AudioBuffer
+      if (url.startsWith('data:')) {
+        const byteString = atob(url.split(',')[1])
+        const ab = new ArrayBuffer(byteString.length)
+        const ia = new Uint8Array(ab)
+        for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i)
+        const blob = new Blob([ab], { type: url.split(',')[0].split(':')[1].split(';')[0] })
+        const arrayBuffer = await blob.arrayBuffer()
+        const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
+        audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
+        await audioCtx.close()
+      } else {
+        const response = await fetch(url)
+        const arrayBuffer = await response.arrayBuffer()
+        const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
+        audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
+        await audioCtx.close()
+      }
+      // Voz sem musica = masterizeVoice (bass+3.4, sat2%, comp20%)
+      // Voz com musica = masterizeAudio (normal + clareza)
+      if (isMixed) {
+        audioBuffer = await masterizeAudio(audioBuffer)
+      } else {
+        audioBuffer = await masterizeVoice(audioBuffer)
+      }
+      masterizedBufferRef.current = audioBuffer
+      console.log('[MASTERIZE] OK!')
+    } catch (e) {
+      console.warn('[MASTERIZE] Falhou, baixando original:', e)
+      masterizedBufferRef.current = null
+    }
+    setIsMasterizing(false)
     setPaymentDialogOpen(true)
-  }, [audioUrl])
+  }, [cleanMixedUrl, audioUrl, isMixed])
 
   if (loading) {
     return (
@@ -2291,9 +2422,14 @@ export default function VozProClient() {
                           onChange={async (e) => {
                             const file = e.target.files?.[0]
                             if (!file) return
-                            // Limpar upload anterior
+                            // Limpar upload anterior (cleanup no servidor)
+                            if (uploadedVoiceFilename) {
+                              fetch(`/api/upload-voice?filename=${encodeURIComponent(uploadedVoiceFilename)}`, { method: 'DELETE' }).catch(() => {})
+                            }
                             setUploadedVoiceUrl(null)
                             setUploadedVoiceFile(null)
+                            setUploadedVoiceFilename(null)
+                            setUploadedVoiceRefText(null)
                             // Limpar seleção de voz (upload substitui a seleção)
                             setSelectedVoiceId('')
                             setSelectedVariationId('')
@@ -2309,7 +2445,9 @@ export default function VozProClient() {
                               const data = await res.json()
                               if (data.serverUrl) {
                                 setUploadedVoiceUrl(data.serverUrl)
-                                toast.success(`Áudio "${file.name}" carregado!`) 
+                                if (data.filename) setUploadedVoiceFilename(data.filename)
+                                if (data.refText) setUploadedVoiceRefText(data.refText)
+                                toast.success(`Áudio "${file.name}" carregado!`)
                               } else {
                                 toast.error(data.error || 'Falha no upload')
                                 setUploadedVoiceFile(null)
@@ -2331,7 +2469,16 @@ export default function VozProClient() {
                             {uploadedVoiceFile?.name}
                           </span>
                           <button
-                            onClick={() => { setUploadedVoiceUrl(null); setUploadedVoiceFile(null) }}
+                            onClick={() => {
+                              // Cleanup do arquivo no servidor
+                              if (uploadedVoiceFilename) {
+                                fetch(`/api/upload-voice?filename=${encodeURIComponent(uploadedVoiceFilename)}`, { method: 'DELETE' }).catch(() => {})
+                              }
+                              setUploadedVoiceUrl(null)
+                              setUploadedVoiceFile(null)
+                              setUploadedVoiceFilename(null)
+                              setUploadedVoiceRefText(null)
+                            }}
                             className="text-slate-500 hover:text-red-400 text-xs"
                           >
                             ✕
@@ -2427,15 +2574,25 @@ export default function VozProClient() {
                             rows={3}
                             className="bg-white/5 border-white/10 text-white placeholder:text-slate-600 resize-none focus:border-violet-500"
                           />
-                          {/* Download individual desta parte */}
+                          {/* Download + Regenerate individual desta parte */}
                           {segmentResults[idx] && !isGenerating && (
-                            <button
-                              onClick={() => downloadSegmentAudio(segmentResults[idx].audioUrl, `vozpro_parte_${idx + 1}.wav`)}
-                              className="flex items-center gap-1 mt-1.5 text-[11px] text-emerald-400/70 hover:text-emerald-400 transition-colors"
-                            >
-                              <Download className="w-3 h-3" />
-                              Baixar Parte {idx + 1}
-                            </button>
+                            <div className="flex items-center gap-3 mt-1.5">
+                              <button
+                                onClick={() => regenerateSegment(idx)}
+                                className="flex items-center gap-1 text-[11px] text-amber-400/70 hover:text-amber-400 transition-colors"
+                                title="Regenerar esta parte"
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                                Refazer
+                              </button>
+                              <button
+                                onClick={() => downloadSegmentAudio(segmentResults[idx].audioUrl, `vozpro_parte_${idx + 1}.wav`)}
+                                className="flex items-center gap-1 text-[11px] text-emerald-400/70 hover:text-emerald-400 transition-colors"
+                              >
+                                <Download className="w-3 h-3" />
+                                Baixar
+                              </button>
+                            </div>
                           )}
                         </div>
                       ))}
@@ -2873,12 +3030,45 @@ export default function VozProClient() {
                     <div className="bg-gradient-to-br from-violet-500/10 to-purple-500/10 rounded-xl p-4 border border-violet-500/20">
                                             <audio
                         ref={resultAudioRef}
-                        src={mixedAudioUrl || audioUrl || undefined}
+                        src={previewMasterized && masterizedPreviewUrl ? masterizedPreviewUrl : (mixedAudioUrl || audioUrl || undefined)}
                         className="w-full relative z-10"
                         controls
                         controlsList="nodownload"
                         autoPlay
                       />
+                    </div>
+
+                    {/* Toggle Original / Masterizado */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-slate-500 mr-1">Preview:</span>
+                      <button
+                        onClick={() => setPreviewMasterized(false)}
+                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${!previewMasterized ? 'bg-slate-600 text-white shadow-md' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+                      >
+                        Original
+                      </button>
+                      <button
+                        onClick={async () => {
+                          setPreviewMasterized(true)
+                          const src = mixedAudioUrl || audioUrl
+                          if (src && !masterizedPreviewUrl) {
+                            try {
+                              const response = await fetch(src)
+                              const arrayBuffer = await response.arrayBuffer()
+                              const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
+                              const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
+                              await audioCtx.close()
+                              const buf = isMixed ? await masterizeAudio(audioBuffer) : await masterizeVoice(audioBuffer)
+                              setMasterizedPreviewUrl(audioBufferToWav(buf))
+                            } catch (e) {
+                              console.warn('[PREVIEW-MASTERIZE] Falhou:', e)
+                            }
+                          }
+                        }}
+                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${previewMasterized ? 'bg-violet-600 text-white shadow-md shadow-violet-500/30' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+                      >
+                        ✨ Masterizado
+                      </button>
                     </div>
 
                     {/* Status badges + duração */}
@@ -2929,16 +3119,19 @@ export default function VozProClient() {
                       </Button>
                       <Button
                         onClick={handleDownloadClick}
-                        className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white gap-1.5"
+                        disabled={isMasterizing}
+                        className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white gap-1.5 disabled:opacity-70 disabled:cursor-wait"
                       >
                         <Download className="w-4 h-4" />
-                        {paywallEnabled
-                          ? (paymentExempt
-                            ? 'Baixar (grátis)'
-                            : (freeDownloads > 0
-                              ? `Baixar (${freeDownloads} grátis)`
-                              : `Baixar R$${paymentAmount}`))
-                          : 'Baixar'}
+                        {isMasterizing
+                          ? '✨ MASTERIZANDO...'
+                          : paywallEnabled
+                            ? (paymentExempt
+                              ? 'Baixar (grátis)'
+                              : (freeDownloads > 0
+                                ? `Baixar (${freeDownloads} grátis)`
+                                : `Baixar R$${paymentAmount}`))
+                            : 'Baixar'}
                       </Button>
                     </div>
 
@@ -3299,7 +3492,7 @@ export default function VozProClient() {
             <div className="bg-gradient-to-br from-violet-500/10 to-purple-500/10 rounded-xl p-4 border border-violet-500/20">
               <audio
                 ref={resultAudioRef}
-                src={mixedAudioUrl || audioUrl || undefined}
+                src={previewMasterized && masterizedPreviewUrl ? masterizedPreviewUrl : (mixedAudioUrl || audioUrl || undefined)}
                 className="w-full relative z-10"
                 controls
                 controlsList="nodownload"
@@ -3373,6 +3566,13 @@ export default function VozProClient() {
                         {idx + 1}
                       </span>
                       <span className="text-slate-500 truncate flex-1">{seg.text.substring(0, 50)}{seg.text.length > 50 ? '...' : ''}</span>
+                      <button
+                        onClick={() => regenerateSegment(idx)}
+                        className="text-slate-600 hover:text-amber-400 transition-colors shrink-0 opacity-60 group-hover:opacity-100"
+                        title="Regenerar esta parte"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                      </button>
                       <button
                         onClick={() => downloadSegmentAudio(seg.audioUrl, `vozpro_parte_${idx + 1}.wav`)}
                         className="text-slate-600 hover:text-emerald-400 transition-colors shrink-0 opacity-60 group-hover:opacity-100"

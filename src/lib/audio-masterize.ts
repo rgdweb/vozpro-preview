@@ -223,3 +223,32 @@ export async function masterizeAudio(audioBuffer: AudioBuffer): Promise<AudioBuf
 
   return renderMasterized(audioBuffer, p)
 }
+
+// ===================== VOICE EXPORT (bass +3.4, sat 2%, comp 20%) =====================
+
+export async function masterizeVoice(audioBuffer: AudioBuffer): Promise<AudioBuffer> {
+  const analysis = analyze(audioBuffer)
+  const p = autoCorrect(analysis)
+
+  // Adicionar preset Clareza
+  p.bass += CLAREZA.bass; p.lowMid += CLAREZA.lowMid; p.mid += CLAREZA.mid
+  p.treble += CLAREZA.treble; p.comp += CLAREZA.comp
+
+  // Boost de voz: Graves +3.4dB
+  p.bass += 3.4
+  // Saturação 2%
+  p.drv = 2
+  // Compressão 20%
+  p.comp = 20
+
+  // Clamp
+  p.bass = Math.max(-6, Math.min(6, p.bass))
+  p.lowMid = Math.max(-6, Math.min(6, p.lowMid))
+  p.mid = Math.max(-6, Math.min(6, p.mid))
+  p.treble = Math.max(-6, Math.min(6, p.treble))
+  p.comp = Math.max(0, Math.min(35, p.comp))
+
+  console.log('[MASTERIZE-VOICE] params:', JSON.stringify(p))
+
+  return renderMasterized(audioBuffer, p)
+}

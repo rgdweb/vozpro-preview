@@ -1,14 +1,3 @@
-/** 🚨 CONTRATO DE GOVERNANCA EXECUTIVA - VOZPRO (SaaS Hibrido)
- * 🚨 PROIBICOES ABSOLUTAS (13 erros ja cometidos que derrubaram o sistema):
- *   1. NUNCA git reset --hard | 2. NUNCA altere git remote | 3. NUNCA rm -rf
- *   4. NUNCA push syntax errors | 5. NUNCA commit .env real | 6. NUNCA temp no root
- *   7. NUNCA scripts deploy alternativos | 8. NUNCA quebre next.config | 9. queue: 3x, 3min
- *   10. NUNCA remova AUDIO_SERVER_API_KEY | 11. NUNCA desalinhe tokens .env/config.php
- *   12. NUNCA pm2 restart sozinho (faz rebuild) | 13. NUNCA git checkout -- .env
- * 🚨 REGRA UNICA DE DEPLOY: python3 /home/ubuntu/omnivoice/deploy-seguro.py
- * 🚨 REGISTRO COMPLETO: REGRAS-ERROS-PROIBIDOS.md (leia ANTES de alterar qualquer coisa)
- * 🚨 IP: 147.15.77.137 | Repo: rgdweb/vozpro-preview | PM2: PM2_HOME=/root/.pm2
- */
 // build: 9869573-revert-stable-paywall-queue-oauth
 'use client'
 
@@ -26,7 +15,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   AudioWaveform, Sparkles, Loader2, Download, Play, Pause, Square,
   Volume2, Music, Mic, ChevronRight, Settings2, Globe, Bug, Copy, ChevronDown,
-  Upload, CheckCircle2, FolderOpen, ChevronLeft, Folder, Mail, Plus, X, RefreshCw
+  Upload, CheckCircle2, FolderOpen, ChevronLeft, Folder, Mail
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Label } from '@/components/ui/label'
@@ -249,7 +238,7 @@ function formatDuration(seconds: number): string {
 
 const LANGUAGES = [
   { value: 'Auto', label: 'Auto Detectar' },
-  { value: 'Portuguese (pt)', label: 'Português' },
+  { value: 'Portuguese', label: 'Português' },
   { value: 'English', label: 'Inglês' },
   { value: 'Spanish', label: 'Espanhol' },
   { value: 'French', label: 'Francês' },
@@ -724,13 +713,6 @@ export default function VozProClient() {
 
   // Settings
   const [text, setText] = useState('')
-  const [segments, setSegments] = useState<Array<{ id: string; text: string }>>([{ id: 'seg-1', text: '' }])
-  const [multiPartMode, setMultiPartMode] = useState(false)
-  const [generatingSegmentIndex, setGeneratingSegmentIndex] = useState<number>(-1)
-  const [totalSegments, setTotalSegments] = useState(0)
-  const [segmentResults, setSegmentResults] = useState<Array<{text: string; audioUrl: string}>>([])
-  const [autoSplitting, setAutoSplitting] = useState(false)
-  const autoSplitDoneRef = useRef(false)
   const [trackEnabled, setTrackEnabled] = useState(false)
   const [trackVolume, setTrackVolume] = useState(1.0)
   const [duckVolume, setDuckVolume] = useState(DEFAULT_DUCKING.duckVolume)
@@ -780,100 +762,12 @@ export default function VozProClient() {
   const [uploadedVoiceFilename, setUploadedVoiceFilename] = useState<string | null>(null)
   const [uploadedVoiceRefText, setUploadedVoiceRefText] = useState<string | null>(null)
 
-  // Locutores Oficiais (cache SSD)
-  const [officialSpeakers, setOfficialSpeakers] = useState<Array<{ id: string; name: string; speakerFile: string; refAudioUrl: string; refText: string; avatarUrl?: string | null }>>([])
-  // Set rapido: speakerFile → true (para lookup O(1) nas variacoes)
-  const officialFiles = new Set(officialSpeakers.map(s => s.speakerFile))
-  // Funcao slugify igualzinha ao admin page (para mapear voice+variation → speakerFile)
-  const slugify = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
-
   // Payment dialog state
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false)
   const [freeDownloads, setFreeDownloads] = useState(0)
   const [paymentExempt, setPaymentExempt] = useState(false)
 
-  // ===== SMART AUTO-SPLIT: corta texto em ~200 chars nas pontuações =====
-  function smartSplitText(fullText: string, targetChars = 200): string[] {
-    if (fullText.length <= targetChars * 1.4) return [fullText]
-    const parts: string[] = []
-    let remaining = fullText.trim()
-    while (remaining.length > targetChars * 1.4) {
-      const searchStart = Math.max(targetChars - 40, 0)
-      const searchEnd = Math.min(remaining.length, targetChars + 60)
-      let splitPos = -1
-      // Prioridade: ! ? . ,
-      for (const punct of ['!', '?', '.']) {
-        for (let i = searchEnd; i >= searchStart; i--) {
-          if (remaining[i] === punct) {
-            splitPos = i + 1
-            break
-          }
-        }
-        if (splitPos >= 0) break
-      }
-      if (splitPos < 0) splitPos = targetChars
-      parts.push(remaining.substring(0, splitPos).trim())
-      remaining = remaining.substring(splitPos).trim()
-    }
-    if (remaining.length > 0) {
-      // Resto pequeno (< 50 chars) = junta com a última parte
-      if (remaining.length < 50 && parts.length > 0) {
-        parts[parts.length - 1] = parts[parts.length - 1] + ' ' + remaining
-      } else {
-        parts.push(remaining)
-      }
-    }
-    return parts
-  }
-
-  // Auto-split debounced: quando texto único passa de ~200 chars, divide automaticamente
-  useEffect(() => {
-    if (multiPartMode || autoSplitDoneRef.current) return
-    // Auto-split ativo: textos > ~280 chars sao divididos automaticamente
-    const timer = setTimeout(() => {
-      setAutoSplitting(true)
-      setTimeout(() => {
-        const parts = smartSplitText(text)
-        if (parts.length > 1) {
-          const newSegments = parts.map((p, i) => ({ id: `seg-auto-${i}-${Date.now()}`, text: p }))
-          setSegments(newSegments)
-          setMultiPartMode(true)
-          setText('')
-          autoSplitDoneRef.current = true
-          toast.info(`Texto dividido em ${parts.length} partes automaticamente`, { duration: 3000 })
-        }
-        setAutoSplitting(false)
-      }, 250)
-    }, 800)
-    return () => clearTimeout(timer)
-  }, [text, multiPartMode])
-
-  // Reset auto-split flag quando volta ao modo único
-  useEffect(() => {
-    if (!multiPartMode) autoSplitDoneRef.current = false
-  }, [multiPartMode])
-
-  // Segment management
-  const addSegment = useCallback(() => {
-    setSegments(prev => [...prev, { id: `seg-${Date.now()}`, text: '' }])
-  }, [])
-  const removeSegment = useCallback((id: string) => {
-    setSegments(prev => {
-      if (prev.length <= 1) return prev
-      return prev.filter(s => s.id !== id)
-    })
-  }, [])
-  const updateSegmentText = useCallback((id: string, newText: string) => {
-    setSegments(prev => prev.map(s => s.id === id ? { ...s, text: newText } : s))
-  }, [])
-  // Auto-toggle multi-part mode based on segment count (manual add only)
-  useEffect(() => {
-    if (!autoSplitDoneRef.current) {
-      setMultiPartMode(segments.length > 1)
-    }
-  }, [segments.length])
-
-  // Queue state
+  // Generate audio
   const [queueId, setQueueId] = useState<string | null>(null)
   const [queuePosition, setQueuePosition] = useState<number>(0)
   const [queueStatus, setQueueStatus] = useState<string>('') // waiting, processing
@@ -911,7 +805,6 @@ export default function VozProClient() {
           fetch('/api/track-categories'),
           fetch('/api/voice-categories'),
         ])
-        // Locutores Oficiais desativado — usa clone padrao com ref_audio_url
         // Carregar downloads grátis do usuário (não bloqueante)
         fetch('/api/free-download').then(res => res.json()).then(data => {
           if (typeof data.freeDownloads === 'number') setFreeDownloads(data.freeDownloads)
@@ -993,171 +886,10 @@ export default function VozProClient() {
     }
   }, [selectedVoiceId, selectedVoice])
 
-  // Cleanup upload clone ao sair da pagina (fecha aba, navega pra fora)
-  useEffect(() => {
-    const handler = () => {
-      if (uploadedVoiceFilename) {
-        navigator.sendBeacon(`/api/upload-voice?filename=${encodeURIComponent(uploadedVoiceFilename)}&method=DELETE`)
-      }
-    }
-    window.addEventListener('beforeunload', handler)
-    return () => window.removeEventListener('beforeunload', handler)
-  }, [uploadedVoiceFilename])
-
-  // Concatenate multiple AudioBuffers into one (with short silence gap)
-  async function concatenateAudioBuffers(buffers: AudioBuffer[], gapMs = 400): Promise<string> {
-    if (buffers.length === 0) return ''
-    if (buffers.length === 1) return audioBufferToWav(buffers[0])
-    const sampleRate = buffers[0].sampleRate
-    const gapSamples = Math.round((gapMs / 1000) * sampleRate)
-    const totalLength = buffers.reduce((acc, buf) => acc + buf.length + gapSamples, 0) - gapSamples // no gap after last
-    const offlineCtx = new OfflineAudioContext(1, totalLength, sampleRate)
-    const dest = offlineCtx.createBufferSource()
-    const mergedBuffer = offlineCtx.createBuffer(1, totalLength, sampleRate)
-    const output = mergedBuffer.getChannelData(0)
-    let offset = 0
-    for (const buf of buffers) {
-      const data = buf.getChannelData(0)
-      for (let i = 0; i < data.length; i++) {
-        output[offset + i] = data[i]
-      }
-      offset += data.length
-      // Add silence gap (except after last buffer)
-      if (buf !== buffers[buffers.length - 1]) {
-        for (let i = 0; i < gapSamples; i++) {
-          output[offset + i] = 0
-        }
-        offset += gapSamples
-      }
-    }
-    await offlineCtx.startRendering()
-    return audioBufferToWav(mergedBuffer)
-  }
-
-  // Download individual segment audio
-  const downloadSegmentAudio = useCallback((audioUrl: string, filename: string) => {
-    const a = document.createElement('a')
-    a.href = audioUrl
-    a.download = filename
-    a.click()
-  }, [])
-
-  // Download all segments as individual files (one by one)
-  const downloadAllSegments = useCallback(() => {
-    segmentResults.forEach((seg, idx) => {
-      setTimeout(() => {
-        const a = document.createElement('a')
-        a.href = seg.audioUrl
-        a.download = `vozpro_parte_${idx + 1}.wav`
-        a.click()
-      }, idx * 300)
-    })
-  }, [segmentResults])
-
-  // Regenerar apenas uma parte (sem refazer todas)
-  const regenerateSegment = useCallback(async (segIdx: number) => {
-    const segText = segments.filter(s => s.text.trim())[segIdx]?.trim()
-    if (!segText) { toast.error('Sem texto nesta parte'); return }
-
-    const isUploaded = voiceMode === 'clone' && uploadedVoiceUrl
-    let refUrl = fixAudioServerUrl(selectedVariation?.refAudioServerUrl || '') || ''
-    if (isUploaded) refUrl = uploadedVoiceUrl
-    const finalInstruct = voiceMode === 'design' ? voiceDesignInstruct : (selectedVariation?.instruct || '')
-
-    const tunnelBody = {
-      text: segText,
-      language,
-      referenceAudioUrl: voiceMode !== 'clone' ? undefined : refUrl,
-      instruct: finalInstruct,
-      voiceMode,
-      refText: uploadedVoiceRefText || selectedVariation?.refText || '',
-      speed,
-    }
-
-    try {
-      toast.info(`Regenerando parte ${segIdx + 1}...`, { duration: 2000 })
-      const tokenRes = await fetch('/api/generate-token')
-      if (!tokenRes.ok) { toast.error('Erro ao obter token'); return }
-      const { token: tunnelToken } = await tokenRes.json()
-      if (!tunnelToken) { toast.error('Servidor nao configurado'); return }
-
-      const oracleApi = process.env.NEXT_PUBLIC_AUDIO_SERVER_URL || 'https://api.cvmnews.com.br'
-      const res = await fetch(`${oracleApi}/tunnel-generate.php`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Generate-Token': tunnelToken },
-        body: JSON.stringify(tunnelBody),
-      })
-
-      if (!res.ok) { toast.error(`Erro do servidor (${res.status})`); return }
-      const data = await res.json()
-      if (data.error) { toast.error(data.error); return }
-      if (!data.audioUrl) { toast.error('Nenhum audio retornado'); return }
-
-      // Atualizar resultado desta parte
-      const newSegResults = [...segmentResults]
-      newSegResults[segIdx] = { text: segText, audioUrl: data.audioUrl }
-      setSegmentResults(newSegResults)
-
-      // Re-concatenar todas as partes
-      if (newSegResults.length > 1) {
-        try {
-          const buffers: AudioBuffer[] = []
-          for (const seg of newSegResults) {
-            const buf = await decodeAudioToBuffer(seg.audioUrl)
-            buffers.push(buf)
-          }
-          const concatWav = await concatenateAudioBuffers(buffers, 500)
-          setAudioUrl(concatWav)
-          setPreviewUrl(concatWav)
-          setMixedAudioUrl(null)
-          toast.success(`Parte ${segIdx + 1} regenerada e audio reconcatenado!`)
-        } catch (concatErr) {
-          console.error('[Regen] Concat failed:', concatErr)
-          setAudioUrl(data.audioUrl)
-          toast.success(`Parte ${segIdx + 1} regenerada! (concatenacao falhou)`)
-        }
-      } else {
-        setAudioUrl(data.audioUrl)
-        setPreviewUrl(data.audioUrl)
-        toast.success(`Parte ${segIdx + 1} regenerada!`)
-      }
-    } catch (err) {
-      console.error('[Regen] Error:', err)
-      toast.error('Erro ao regenerar parte')
-    }
-  }, [segments, segmentResults, voiceMode, uploadedVoiceUrl, selectedVariation, uploadedVoiceRefText, voiceDesignInstruct, language, speed, fixAudioServerUrl])
-
-  // Decode a data URI or URL into an AudioBuffer
-  async function decodeAudioToBuffer(audioDataUri: string): Promise<AudioBuffer> {
-    const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
-    let arrayBuffer: ArrayBuffer
-    if (audioDataUri.startsWith('data:')) {
-      const byteString = atob(audioDataUri.split(',')[1])
-      const ab = new ArrayBuffer(byteString.length)
-      const ia = new Uint8Array(ab)
-      for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i)
-      arrayBuffer = ab
-    } else {
-      const resp = await fetch(audioDataUri)
-      arrayBuffer = await resp.arrayBuffer()
-    }
-    const buffer = await audioCtx.decodeAudioData(arrayBuffer)
-    await audioCtx.close()
-    return buffer
-  }
-
-  // Generate audio (supports single and multi-part)
+  // Generate audio
   const handleGenerate = useCallback(async () => {
-    // Determine texts to generate
-    const textsToGenerate: string[] = multiPartMode
-      ? segments.filter(s => s.text.trim()).map(s => s.text.trim())
-      : [text.trim()]
-    if (textsToGenerate.length === 0) {
+    if (!text.trim()) {
       toast.error('Digite o texto para sintetizar')
-      return
-    }
-    if (multiPartMode && textsToGenerate.length < segments.filter(s => s.text.trim()).length) {
-      toast.error('Preencha todas as partes com texto')
       return
     }
 
@@ -1196,7 +928,6 @@ export default function VozProClient() {
     masterizedBufferRef.current = null
     setPreviewingVoiceId(null)
     setQueueStatus('')
-    setSegmentResults([])
 
     try {
       const queueRes = await fetch('/api/queue/join', { method: 'POST' })
@@ -1252,8 +983,9 @@ export default function VozProClient() {
     }
 
     setGeneratingTime(0) // Reset timer after queue wait
-    // Em multi-part mode, o primeiro join na fila já foi feito acima
-    // O loop começa aqui (na single-part é 1 iteração)
+
+    // Texto limpo — enviado direto ao TTS sem processamento de tags
+    let textToSend = text.trim()
 
     // Timer para mostrar tempo decorrido ao usuario
     const genStartTime = Date.now()
@@ -1269,78 +1001,57 @@ export default function VozProClient() {
     let lastRequestBody: Record<string, unknown> | null = null
     let lastRequestUrl = ''
 
-    // Montar instruct a partir dos metadados da voz (extraído antes do loop para reuse)
-    const voice = selectedVoice
-    const variationBelongsToVoice = selectedVoice?.variations.some(v => v.id === selectedVariationId)
-    const instructParts: string[] = []
-    const categoryKeywords: Record<string, string[]> = {
-      'female': ['female', 'feminino'],
-      'male': ['male', 'masculino'],
-      'child': ['child', 'criança', 'crianca'],
-      'young adult': ['young adult', 'jovem'],
-      'middle-aged': ['middle-aged', 'adulto', 'middle aged'],
-      'elderly': ['elderly', 'idoso'],
-      'low pitch': ['low pitch', 'grave'],
-      'moderate pitch': ['moderate pitch', 'médio', 'medio'],
-      'high pitch': ['high pitch', 'agudo'],
-    }
-    function normalizeInstructItem(item: string): string {
-      const lower = item.trim().toLowerCase()
-      for (const [canonical, keywords] of Object.entries(categoryKeywords)) {
-        for (const kw of keywords) {
-          if (lower === kw || lower.includes(kw)) return canonical
-        }
-      }
-      return lower
-    }
-    const seen = new Set<string>()
-    function addInstruct(raw: string) {
-      const normalized = normalizeInstructItem(raw)
-      if (normalized && !seen.has(normalized)) {
-        seen.add(normalized)
-        instructParts.push(normalized)
-      }
-    }
-    if (voice && voice.gender !== 'Auto') addInstruct(voice.gender)
-    if (voice && voice.age !== 'Auto') addInstruct(voice.age)
-    if (voice && voice.pitch !== 'Auto') addInstruct(voice.pitch)
-    if (voice && voice.accent !== 'Auto') addInstruct(voice.accent)
-    if (variationBelongsToVoice && selectedVariation?.instruct && selectedVariation.instruct.trim()) {
-      selectedVariation.instruct.trim().split(',').forEach(addInstruct)
-    }
-    const instructStr = instructParts.join(', ')
-
-    // Determinar audio de referencia e modo (extraído antes do loop)
-    let refUrl = fixAudioServerUrl(selectedVariation?.refAudioServerUrl || '')
-    let refName = selectedVariation?.refAudioName || 'ref_audio.wav'
-    if (voiceMode === 'clone' && uploadedVoiceUrl) {
-      refUrl = uploadedVoiceUrl
-      refName = uploadedVoiceFile?.name || 'uploaded_voice.wav'
-    }
-    let finalInstruct = instructStr
-    if (voiceMode === 'design') {
-      finalInstruct = voiceDesignInstruct
-    }
-
-    // Multi-part: loop over texts, single: just one iteration
-    const allSegmentAudioUrls: string[] = []
-    const totalParts = textsToGenerate.length
-    setTotalSegments(totalParts)
-
     try {
-      for (let segIdx = 0; segIdx < textsToGenerate.length; segIdx++) {
-        const textToSend = textsToGenerate[segIdx]
-
-        if (multiPartMode) {
-          setGeneratingSegmentIndex(segIdx)
-          if (totalParts > 1) {
-            toast.info(`Gerando parte ${segIdx + 1} de ${totalParts}...`, { duration: 2000 })
+      // Montar instruct a partir dos metadados da voz
+      // IMPORTANTE: deduplicar para evitar "Conflicting instruct items" do OmniVoice
+      // Os valores dos dropdowns vêm como "Female / 女" etc, precisam normalizar.
+      const voice = selectedVoice
+      const variationBelongsToVoice = selectedVoice?.variations.some(v => v.id === selectedVariationId)
+      const instructParts: string[] = []
+      // Mapa de categorias OmniVoice para normalizar (ex: "female / 女" → "female")
+      const categoryKeywords: Record<string, string[]> = {
+        'female': ['female', 'feminino'],
+        'male': ['male', 'masculino'],
+        'child': ['child', 'criança', 'crianca'],
+        'young adult': ['young adult', 'jovem'],
+        'middle-aged': ['middle-aged', 'adulto', 'middle aged'],
+        'elderly': ['elderly', 'idoso'],
+        'low pitch': ['low pitch', 'grave'],
+        'moderate pitch': ['moderate pitch', 'médio', 'medio'],
+        'high pitch': ['high pitch', 'agudo'],
+      }
+      // Extrai o keyword OmniVoice válido de um texto (ex: "Female / 女" → "female")
+      function normalizeInstructItem(item: string): string {
+        const lower = item.trim().toLowerCase()
+        for (const [canonical, keywords] of Object.entries(categoryKeywords)) {
+          for (const kw of keywords) {
+            if (lower === kw || lower.includes(kw)) return canonical
           }
         }
+        return lower
+      }
+      const seen = new Set<string>()
+      function addInstruct(raw: string) {
+        const normalized = normalizeInstructItem(raw)
+        if (normalized && !seen.has(normalized)) {
+          seen.add(normalized)
+          instructParts.push(normalized)
+        }
+      }
+      if (voice && voice.gender !== 'Auto') addInstruct(voice.gender)
+      if (voice && voice.age !== 'Auto') addInstruct(voice.age)
+      if (voice && voice.pitch !== 'Auto') addInstruct(voice.pitch)
+      if (voice && voice.accent !== 'Auto') addInstruct(voice.accent)
+      // Só adicionar instruct da variação se ela realmente pertence à voz selecionada
+      if (variationBelongsToVoice && selectedVariation?.instruct && selectedVariation.instruct.trim()) {
+        // A variação pode ter múltiplos itens separados por vírgula
+        selectedVariation.instruct.trim().split(',').forEach(addInstruct)
+      }
+      const instructStr = instructParts.join(', ')
 
-        // CORPO DA REQUISICAO - todos os dados que o PHP precisa
-        const body: Record<string, unknown> = {
-          text: textToSend,
+      // CORPO DA REQUISICAO - todos os dados que o PHP precisa
+      const body: Record<string, unknown> = {
+        text: textToSend,
         language,
         refAudioUrl: selectedVariation?.refAudioServerUrl || '',
         refAudioPath: selectedVariation?.refAudioPath || '',
@@ -1360,38 +1071,41 @@ export default function VozProClient() {
 
       // ===== F5-TTS via Tunnel (GPU local via Oracle PHP, HTTPS direto) =====
       if (useTunnelGenerate) {
-        // ===== TUNNEL: Browser -> Oracle HTTPS -> GPU local (nativo, sem Vercel no meio) =====
-        // SSL (Let's Encrypt) em api.cvmnews.com.br — zero mixed content, zero Vercel.
+        // ===== TUNNEL: Browser -> Next.js API (same-origin) -> GPU local =====
+        // Same-origin: zero CORS, zero DNS, zero SSL issues do lado do cliente.
+        // O /api/tunnel-generate chama o GPU via tunnel internamente.
+        console.log(`[F5-TTS] Gerando via tunnel (same-origin)... modo: ${voiceMode}`)
+
+        // Determinar instruct baseado no modo
+        let finalInstruct = instructStr
+        if (voiceMode === 'design') {
+          finalInstruct = voiceDesignInstruct
+        }
+
+        // Determinar audio de referencia (corrigir URL se apontar pro sorteiomax morto)
+        let refUrl = fixAudioServerUrl(selectedVariation?.refAudioServerUrl || body.refAudioUrl || '')
+        let refName = body.refAudioName || 'ref_audio.wav'
+
+        // Se tem upload de voz do frontend, usa ele
+        if (voiceMode === 'clone' && uploadedVoiceUrl) {
+          refUrl = uploadedVoiceUrl
+          refName = uploadedVoiceFile?.name || 'uploaded_voice.wav'
+        }
 
         const tunnelBody = {
           ...body,
-          referenceAudioUrl: voiceMode === 'design' ? undefined : refUrl,
-          referenceAudioName: voiceMode === 'design' ? undefined : refName,
+          referenceAudioUrl: voiceMode !== 'clone' ? undefined : refUrl,
+          referenceAudioName: voiceMode !== 'clone' ? undefined : refName,
           instruct: finalInstruct,
           voiceMode,
         }
 
-        console.log(`[F5-TTS] Gerando via tunnel... modo: ${voiceMode}`)
-
-        // Obter token HMAC para autenticacao com o PHP
-        const tokenRes = await fetch('/api/generate-token')
-        if (!tokenRes.ok) {
-          toast.error('Erro ao obter token de geracao')
-          return
-        }
-        const { token: tunnelToken } = await tokenRes.json()
-        if (!tunnelToken) {
-          toast.error('Servidor nao configurado corretamente')
-          return
-        }
-
-        // Chamar Oracle PHP direto via HTTPS (SSL Letsencrypt, sem Vercel no meio)
-        const oracleApi = process.env.NEXT_PUBLIC_AUDIO_SERVER_URL || 'https://api.cvmnews.com.br'
-        res = await fetch(`${oracleApi}/tunnel-generate.php`, {
+        // Chamar via proxy same-origin (Next.js API route)
+        // Nao precisa de token HMAC — o proxy roda no mesmo servidor
+        res = await fetch('/api/tunnel-generate', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Generate-Token': tunnelToken,
           },
           body: JSON.stringify(tunnelBody),
           signal: controller.signal,
@@ -1498,10 +1212,8 @@ export default function VozProClient() {
         return
       }
 
-      // Store full response for debugging (ultima parte)
-      if (segIdx === textsToGenerate.length - 1) {
-        setLastGenResponse(data)
-      }
+      // Store full response for debugging
+      setLastGenResponse(data)
 
       if (!data.audioUrl) {
         console.error('[VozPro] No audio returned from API', data)
@@ -1510,9 +1222,10 @@ export default function VozProClient() {
       }
 
       // ===== ASR RETRY AUTOMÁTICO (VozPro) =====
+      // Valida pronúncia e refaz automaticamente se errou
       let finalAudioUrl = data.audioUrl
       const maxAsrRetries = 0
-      const originalTextForCompare = textToSend.replace(/\[.*?\]/g, '')
+      const originalTextForCompare = textToSend.replace(/\[.*?\]/g, '') // Remove colchetes de pronúncia pra comparar
 
       if (maxAsrRetries > 0 && originalTextForCompare.split(/\s+/).length >= 5) {
         for (let retryAttempt = 0; retryAttempt < maxAsrRetries; retryAttempt++) {
@@ -1570,46 +1283,6 @@ export default function VozProClient() {
         }
       }
 
-      // Multi-part: coletar audio desta parte e continuar para próxima
-      if (multiPartMode) {
-        allSegmentAudioUrls.push(finalAudioUrl)
-        setSegmentResults(prev => [...prev, { text: textToSend, audioUrl: finalAudioUrl }])
-        // Marcar fila como completa desta parte (fire-and-forget)
-        if (queueId) {
-          fetch('/api/queue/complete', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ queueId, success: true }),
-          }).catch(() => {})
-        }
-        // Se tem mais partes, entrar na fila novamente para a próxima
-        if (segIdx < textsToGenerate.length - 1) {
-          try {
-            const nextQueueRes = await fetch('/api/queue/join', { method: 'POST' })
-            const nextQueueData = await nextQueueRes.json()
-            if (nextQueueRes.ok) {
-              const nextQId = nextQueueData.id
-              setQueueId(nextQId)
-              if (nextQueueData.status === 'waiting') {
-                setQueueStatus('waiting')
-                setQueuePosition(nextQueueData.position)
-                while (true) {
-                  const stRes = await fetch(`/api/queue/join?id=${nextQId}`)
-                  const stData = await stRes.json()
-                  if (stData.status === 'processing') { setQueueStatus('processing'); setQueuePosition(0); break }
-                  if (stData.status === 'failed') break
-                  if (stData.position) setQueuePosition(stData.position)
-                  await new Promise(resolve => setTimeout(resolve, 2000))
-                }
-              }
-            }
-          } catch (nextErr) {
-            console.warn('[Queue] Erro ao entrar na fila para próxima parte:', nextErr)
-          }
-        }
-        continue // Próxima parte do loop
-      }
-
-      // ===== MODO SINGLE (não é multi-part) — comportamento original =====
       // Mixagem client-side com trilha (funciona tanto com PHP quanto Vercel)
       if (trackEnabled && selectedTrack?.audioPath) {
         console.log('[VozPro] Client-side mixing, mixing voice + track...')
@@ -1622,8 +1295,9 @@ export default function VozProClient() {
             trackVolume,
             { duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs }
           )
-          setAudioUrl(finalAudioUrl)
-          setCleanMixedUrl(mixedDataUri)
+          setAudioUrl(finalAudioUrl) // voz limpa (sem trilha)
+          setCleanMixedUrl(mixedDataUri) // voz + trilha SEM watermark (para download)
+          // Preview: aplicar watermark SÓ se paywall ativo E usuario nao tem gratis E nao isento
           const needWm = paywallEnabled && watermarkAudioPath && freeDownloads <= 0 && !paymentExempt
           if (needWm) {
             try {
@@ -1640,6 +1314,7 @@ export default function VozProClient() {
           console.error('[VozPro] Client-side mixing failed:', mixErr)
           setAudioUrl(finalAudioUrl)
           setCleanMixedUrl(null)
+          // Aplicar watermark no preview se paywall ativo E sem gratis E sem isencao
           if (paywallEnabled && watermarkAudioPath && freeDownloads <= 0 && !paymentExempt) {
             try {
               const previewWithWm = await applyWatermark(finalAudioUrl, toProxyAudioUrl(watermarkAudioPath), watermarkVolume)
@@ -1649,8 +1324,10 @@ export default function VozProClient() {
           toast.warning('Não foi possível mixar a trilha. Reproduzindo apenas a voz.')
         }
       } else {
-        setAudioUrl(finalAudioUrl)
-        setCleanMixedUrl(null)
+        // No track - just voice
+        setAudioUrl(finalAudioUrl) // limpo (pra download)
+        setCleanMixedUrl(null) // sem trilha = sem mix limpo
+        // Preview: aplicar watermark SÓ se paywall ativo E usuario nao tem gratis E nao isento
         if (paywallEnabled && watermarkAudioPath && freeDownloads <= 0 && !paymentExempt) {
           try {
             const previewWithWm = await applyWatermark(finalAudioUrl, toProxyAudioUrl(watermarkAudioPath), watermarkVolume)
@@ -1659,110 +1336,41 @@ export default function VozProClient() {
             console.warn('[VozPro] Watermark failed:', wmErr)
           }
         }
+
         if (data.mixedAudio) {
           setMixedAudioUrl(data.mixedAudio)
           setIsMixed(true)
         }
+
         toast.success('Áudio gerado com sucesso!')
       }
 
-      // Feedback do ASR Validator (só no modo single)
-      if (!multiPartMode) {
-        if (data.asrWarning) {
-          toast.warning('Qualidade da voz', {
-            description: data.asrMessage || 'O audio pode conter imperfeicoes. Tente outra voz ou texto mais curto.',
-            duration: 6000,
-          })
-        } else if (data.asrValidation && !data.asrValidation.valid) {
-          console.warn('[VozPro] ASR rejeitou:', data.asrValidation)
-        } else if (data.asrValidation?.attempts > 1) {
-          toast.success('Qualidade verificada', {
-            description: `Audio regenerado automaticamente (${data.asrValidation.attempts} tentativas).`,
-            duration: 4000,
-          })
-        }
-        if (data.warning) {
-          toast.warning(data.warning)
-        }
-      }
-      } // fim do loop multi-part
-
-      // ===== MULTI-PART: concatenar todos os áudios das partes =====
-      if (multiPartMode && allSegmentAudioUrls.length > 1) {
-        try {
-          toast.info('Juntando todas as partes...', { duration: 2000 })
-          const audioBuffers: AudioBuffer[] = []
-          for (const segUrl of allSegmentAudioUrls) {
-            const buf = await decodeAudioToBuffer(segUrl)
-            audioBuffers.push(buf)
-          }
-          const concatenatedWav = await concatenateAudioBuffers(audioBuffers, 500) // 500ms gap entre partes
-
-          // Mixar com trilha se habilitado (mixagem com audio concatenado)
-          if (trackEnabled && selectedTrack?.audioPath) {
-            try {
-              const mixedDataUri = await mixAudioClientSide(
-                concatenatedWav,
-                toProxyAudioUrl(selectedTrack.audioPath),
-                trackVolume,
-                { duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs }
-              )
-              setAudioUrl(concatenatedWav)
-              setCleanMixedUrl(mixedDataUri)
-              const needWm = paywallEnabled && watermarkAudioPath && freeDownloads <= 0 && !paymentExempt
-              if (needWm) {
-                try {
-                  const previewWithWm = await applyWatermark(mixedDataUri, toProxyAudioUrl(watermarkAudioPath), watermarkVolume)
-                  setPreviewUrl(previewWithWm)
-                  setMixedAudioUrl(previewWithWm)
-                } catch { setMixedAudioUrl(mixedDataUri) }
-              } else {
-                setMixedAudioUrl(mixedDataUri)
-              }
-              setIsMixed(true)
-              toast.success(`${totalParts} partes geradas e mixadas com trilha!`)
-            } catch (mixErr) {
-              console.error('[VozPro] Multi-part mixing failed:', mixErr)
-              setAudioUrl(concatenatedWav)
-              toast.success(`${totalParts} partes geradas com sucesso! (sem trilha)`)
-            }
-          } else {
-            setAudioUrl(concatenatedWav)
-            setCleanMixedUrl(null)
-            // Watermark se paywall
-            if (paywallEnabled && watermarkAudioPath && freeDownloads <= 0 && !paymentExempt) {
-              try {
-                const previewWithWm = await applyWatermark(concatenatedWav, toProxyAudioUrl(watermarkAudioPath), watermarkVolume)
-                setPreviewUrl(previewWithWm)
-              } catch {}
-            }
-            toast.success(`${totalParts} partes geradas com sucesso!`)
-          }
-        } catch (concatErr) {
-          console.error('[VozPro] Concatenation failed:', concatErr)
-          // Fallback: usar a primeira parte como resultado
-          if (allSegmentAudioUrls[0]) {
-            setAudioUrl(allSegmentAudioUrls[0])
-          }
-          toast.warning('Erro ao juntar partes. Usando a primeira parte.')
-        }
-      } else if (multiPartMode && allSegmentAudioUrls.length === 1) {
-        // Só 1 parte preenchida — tratar como single
-        setAudioUrl(allSegmentAudioUrls[0])
-        if (paywallEnabled && watermarkAudioPath && freeDownloads <= 0 && !paymentExempt) {
-          try {
-            const previewWithWm = await applyWatermark(allSegmentAudioUrls[0], toProxyAudioUrl(watermarkAudioPath), watermarkVolume)
-            setPreviewUrl(previewWithWm)
-          } catch {}
-        }
-        toast.success('Áudio gerado com sucesso!')
+      // Feedback do ASR Validator (camada 2 de qualidade)
+      if (data.asrWarning) {
+        toast.warning('Qualidade da voz', {
+          description: data.asrMessage || 'O audio pode conter imperfeicoes. Tente outra voz ou texto mais curto.',
+          duration: 6000,
+        })
+      } else if (data.asrValidation && !data.asrValidation.valid) {
+        // ASR rejeitou mas não houve retry (texto curto, etc)
+        console.warn('[VozPro] ASR rejeitou:', data.asrValidation)
+      } else if (data.asrValidation?.attempts > 1) {
+        // ASR regenerou automaticamente (tudo ok agora)
+        toast.success('Qualidade verificada', {
+          description: `Audio regenerado automaticamente (${data.asrValidation.attempts} tentativas).`,
+          duration: 4000,
+        })
       }
 
+      if (data.warning) {
+        toast.warning(data.warning)
+      }
     } catch (err) {
       console.error('[VozPro] Generate exception:', err)
       const elapsed = Date.now() - genStartTime
 
       if (err instanceof DOMException && err.name === 'AbortError') {
+        // Timeout do frontend (10 min - CPU HF Space)
         toast.error('Tempo limite excedido', { description: 'A geracao demorou mais de 10 minutos. Tente um texto mais curto.' })
         setLastGenResponse({
           error: 'Timeout do frontend (10 min CPU) — abortado automaticamente',
@@ -1793,11 +1401,8 @@ export default function VozProClient() {
       setQueueStatus('')
       setQueueId(null)
       setQueuePosition(0)
-      setGeneratingSegmentIndex(-1)
-      setTotalSegments(0)
-      // NÃO limpar segmentResults no finally — o usuário precisa baixar as partes
-      // Marcar fila como completa (fire-and-forget) — só se não foi feito dentro do loop
-      if (queueId && !multiPartMode) {
+      // Marcar fila como completa (fire-and-forget)
+      if (queueId) {
         fetch('/api/queue/complete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1805,7 +1410,7 @@ export default function VozProClient() {
         }).catch(() => {})
       }
     }
-  }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs, voiceMode, uploadedVoiceUrl, paywallEnabled, watermarkAudioPath, watermarkVolume, multiPartMode, segments])
+  }, [text, selectedVariationId, language, speed, numStep, guidanceScale, trackEnabled, selectedTrackId, trackVolume, duckVolume, fadeInMs, duckFadeMs, unduckFadeMs, fadeOutMs, musicStartLeadMs, voiceMode, uploadedVoiceUrl, paywallEnabled, watermarkAudioPath, watermarkVolume])
 
   // Get the active audio URL
   // Se o usuario tem downloads gratis ou e isento, NAO mostra watermark no preview
@@ -2012,9 +1617,30 @@ export default function VozProClient() {
       masterizedBufferRef.current = null
     }
     setIsMasterizing(false)
-    setPaymentDialogOpen(true)
-  }, [cleanMixedUrl, audioUrl, isMixed])
 
+    // Abrir dialog de pagamento ou baixar direto
+    if (paywallEnabled) {
+      if (freeDownloads > 0) {
+        try {
+          const res = await fetch('/api/free-download', { method: 'POST' })
+          const data = await res.json()
+          if (data.hasFree) {
+            setFreeDownloads(data.remaining)
+            if (data.paymentExempt) {
+              toast.success('Download liberado!', { duration: 2000 })
+            } else {
+              toast.success(`Download grátis! Restam ${data.remaining}`, { duration: 3000 })
+            }
+            handlePaymentApproved('mp3')
+            return
+          }
+        } catch { /* fallback to paywall */ }
+      }
+      setPaymentDialogOpen(true)
+    } else {
+      handlePaymentApproved('mp3')
+    }
+  }, [cleanMixedUrl, audioUrl, isMixed, paywallEnabled, freeDownloads, handlePaymentApproved])
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-900">
@@ -2164,7 +1790,6 @@ export default function VozProClient() {
                                     const varAudioUrl = toProxyAudioUrl(v.refAudioServerUrl || v.refAudioPath || '')
                                     const isVarSelected = selectedVariationId === v.id
                                     const isInactive = v.active === false || !v.hasAudio
-                                    const isOfficial = !isInactive && officialFiles.has(`${slugify(voice.name)}_${slugify(v.label)}.wav`)
                                     return (
                                       <button
                                         key={v.id}
@@ -2172,15 +1797,11 @@ export default function VozProClient() {
                                         className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all duration-200 ${
                                           isInactive
                                             ? 'border-slate-800 bg-slate-900/30 text-slate-600 opacity-50 cursor-default'
-                                            : isOfficial && isVarSelected
-                                              ? 'border-emerald-500 bg-emerald-500/15 text-emerald-200 shadow-sm shadow-emerald-500/10'
-                                            : isOfficial
-                                              ? 'border-amber-500/60 bg-amber-500/10 text-amber-200'
                                             : isVarSelected
                                               ? 'border-violet-500 bg-violet-500/20 text-violet-200'
                                               : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'
                                         }`}
-                                        title={isInactive ? 'Variação desativada / sem áudio' : isOfficial ? `${v.label} (Oficial)` : v.label}
+                                        title={isInactive ? 'Variação desativada / sem áudio' : v.label}
                                       >
                                         <VoicePreviewButton
                                           audioUrl={isInactive ? '' : varAudioUrl}
@@ -2192,7 +1813,7 @@ export default function VozProClient() {
                                         <span className="flex-shrink-0">{v.emoji || '🎙️'}</span>
                                         <span className="truncate">{v.label}</span>
                                         {isInactive && <span className="text-[10px] text-slate-600 ml-auto flex-shrink-0">off</span>}
-                                        {!isInactive && !isOfficial && isVarSelected && <CheckCircle2 className="w-3.5 h-3.5 text-violet-400 ml-auto flex-shrink-0" />}
+                                        {!isInactive && isVarSelected && <CheckCircle2 className="w-3.5 h-3.5 text-violet-400 ml-auto flex-shrink-0" />}
                                       </button>
                                     )
                                   })}
@@ -2254,10 +1875,8 @@ export default function VozProClient() {
                         <div className="flex flex-wrap gap-2">
                           {selectedVoice.variations.map((v) => {
                             const varAudioUrl = toProxyAudioUrl(v.refAudioServerUrl || v.refAudioPath || '')
-                            const isVarSelected = selectedVariationId === v.id
-                            const isOfficial = officialFiles.has(`${slugify(selectedVoice.name)}_${slugify(v.label)}.wav`)
                             return (
-                              <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all duration-300 flex items-center gap-1.5 ${isOfficial && isVarSelected ? 'border-emerald-500 bg-emerald-500/15 text-emerald-200' : isOfficial ? 'border-amber-500/60 bg-amber-500/10 text-amber-200' : isVarSelected ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
+                              <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all duration-300 flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
                                 <VoicePreviewButton
                                   audioUrl={varAudioUrl}
                                   voiceId={v.id}
@@ -2304,10 +1923,8 @@ export default function VozProClient() {
                         <div className="flex flex-wrap gap-2">
                           {selectedVoice.variations.map((v) => {
                             const varAudioUrl = toProxyAudioUrl(v.refAudioServerUrl || v.refAudioPath || '')
-                            const isVarSelected = selectedVariationId === v.id
-                            const isOfficial = officialFiles.has(`${slugify(selectedVoice.name)}_${slugify(v.label)}.wav`)
                             return (
-                              <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all duration-300 flex items-center gap-1.5 ${isOfficial && isVarSelected ? 'border-emerald-500 bg-emerald-500/15 text-emerald-200' : isOfficial ? 'border-amber-500/60 bg-amber-500/10 text-amber-200' : isVarSelected ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
+                              <button key={v.id} onClick={() => setSelectedVariationId(v.id)} className={`px-4 py-2 rounded-full border text-sm transition-all duration-300 flex items-center gap-1.5 ${selectedVariationId === v.id ? 'border-violet-500 bg-violet-500/20 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400 hover:border-white/20'}`}>
                                 <VoicePreviewButton
                                   audioUrl={varAudioUrl}
                                   voiceId={v.id}
@@ -2506,105 +2123,17 @@ export default function VozProClient() {
               <CardContent className="pt-5 space-y-4">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-slate-300">
-                      Texto para Sintetizar
-                      {multiPartMode && <span className="ml-2 text-xs text-violet-400">({segments.filter(s=>s.text.trim()).length} partes)</span>}
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setMultiPartMode(!multiPartMode)}
-                        className={`text-xs px-2 py-1 rounded-md border transition-colors ${multiPartMode ? 'border-violet-500/50 text-violet-300 bg-violet-500/10' : 'border-white/10 text-slate-400 hover:text-slate-300 hover:border-white/20'}`}
-                        title={multiPartMode ? 'Voltar para texto único' : 'Dividir texto em múltiplas partes'}
-                      >
-                        {multiPartMode ? 'Parte Única' : 'Múltiplas Partes'}
-                      </button>
-                      <span className="text-xs text-slate-500">
-                        {multiPartMode
-                          ? segments.reduce((acc, s) => acc + s.text.length, 0) + ' caracteres'
-                          : text.length + ' caracteres'}
-                      </span>
-                    </div>
+                    <label className="text-sm font-medium text-slate-300">Texto para Sintetizar</label>
+                    <span className="text-xs text-slate-500">{text.length} caracteres</span>
                   </div>
-
-                  {autoSplitting ? (
-                    <div className="flex items-center justify-center gap-2 py-8 text-violet-300">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span className="text-sm">Processando texto...</span>
-                    </div>
-                  ) : !multiPartMode ? (
-                    <Textarea
-                      id="tts-text"
-                      value={text}
-                      onChange={(e) => setText(e.target.value)}
-                      placeholder="Digite o texto que deseja que a voz fale... Ex: Na compra de qualquer produto, ganhe 50% de desconto! Aproveite essa promoção exclusiva!"
-                      rows={4}
-                      className="bg-white/5 border-white/10 text-white placeholder:text-slate-600 resize-none focus:border-violet-500"
-                    />
-                  ) : (
-                    <div className="space-y-3">
-                      {segments.map((seg, idx) => (
-                        <div key={seg.id} className="relative group">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-xs font-medium text-violet-400 bg-violet-500/10 border border-violet-500/20 rounded px-1.5 py-0.5">
-                              Parte {idx + 1}
-                            </span>
-                            {generatingSegmentIndex === idx && isGenerating && (
-                              <span className="text-[10px] text-amber-300 flex items-center gap-1">
-                                <Loader2 className="w-2.5 h-2.5 animate-spin" /> Gerando...
-                              </span>
-                            )}
-                            {generatingSegmentIndex >= 0 && idx < generatingSegmentIndex && (
-                              <span className="text-[10px] text-emerald-400">✓ Concluída</span>
-                            )}
-                            <span className="text-xs text-slate-600 ml-auto">{seg.text.length} chars</span>
-                            {segments.length > 1 && (
-                              <button
-                                onClick={() => removeSegment(seg.id)}
-                                className="text-slate-600 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
-                                title="Remover parte"
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-                          <Textarea
-                            value={seg.text}
-                            onChange={(e) => updateSegmentText(seg.id, e.target.value)}
-                            placeholder={`Parte ${idx + 1} — Digite o texto...`}
-                            rows={3}
-                            className="bg-white/5 border-white/10 text-white placeholder:text-slate-600 resize-none focus:border-violet-500"
-                          />
-                          {/* Download + Regenerate individual desta parte */}
-                          {segmentResults[idx] && !isGenerating && (
-                            <div className="flex items-center gap-3 mt-1.5">
-                              <button
-                                onClick={() => regenerateSegment(idx)}
-                                className="flex items-center gap-1 text-[11px] text-amber-400/70 hover:text-amber-400 transition-colors"
-                                title="Regenerar esta parte"
-                              >
-                                <RefreshCw className="w-3 h-3" />
-                                Refazer
-                              </button>
-                              <button
-                                onClick={() => downloadSegmentAudio(segmentResults[idx].audioUrl, `vozpro_parte_${idx + 1}.wav`)}
-                                className="flex items-center gap-1 text-[11px] text-emerald-400/70 hover:text-emerald-400 transition-colors"
-                              >
-                                <Download className="w-3 h-3" />
-                                Baixar
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                      <button
-                        onClick={addSegment}
-                        className="w-full py-2 rounded-lg border border-dashed border-violet-500/30 text-violet-400 text-xs hover:bg-violet-500/10 hover:border-violet-500/50 transition-colors flex items-center justify-center gap-1"
-                      >
-                        <Plus className="w-3.5 h-3.5" /> Adicionar Parte
-                      </button>
-                    </div>
-                  )}
-                </div>
+                  <Textarea
+                    id="tts-text"
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    placeholder="Digite o texto que deseja que a voz fale... Ex: Na compra de qualquer produto, ganhe 50% de desconto! Aproveite essa promoção exclusiva!"
+                    rows={4}
+                    className="bg-white/5 border-white/10 text-white placeholder:text-slate-600 resize-none focus:border-violet-500"
+                  />                </div>
 
                 {/* Language */}
                 <div className="flex items-center gap-3">
@@ -3067,8 +2596,7 @@ export default function VozProClient() {
                         }}
                         className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${previewMasterized ? 'bg-violet-600 text-white shadow-md shadow-violet-500/30' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
                       >
-                        ✨ Masterizado
-                      </button>
+                        Masterizado                      </button>
                     </div>
 
                     {/* Status badges + duração */}
@@ -3124,8 +2652,7 @@ export default function VozProClient() {
                       >
                         <Download className="w-4 h-4" />
                         {isMasterizing
-                          ? '✨ MASTERIZANDO...'
-                          : paywallEnabled
+                          ? 'MASTERIZANDO...'                          : paywallEnabled
                             ? (paymentExempt
                               ? 'Baixar (grátis)'
                               : (freeDownloads > 0
@@ -3533,59 +3060,6 @@ export default function VozProClient() {
               </Button>
             </div>
 
-            {/* Multi-part download options */}
-            {segmentResults.length > 1 && !isGenerating && (
-              <div className="space-y-2 mt-1">
-                <div className="flex items-center gap-2 text-xs text-slate-400">
-                  <span className="font-medium text-slate-300">{segmentResults.length} partes geradas</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    onClick={handleDownloadClick}
-                    size="sm"
-                    className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white text-xs h-8 gap-1"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Audio Completo
-                  </Button>
-                  <Button
-                    onClick={downloadAllSegments}
-                    size="sm"
-                    variant="outline"
-                    className="border-violet-500/40 bg-violet-500/10 text-violet-300 text-xs h-8 gap-1"
-                  >
-                    <FolderOpen className="w-3.5 h-3.5" />
-                    Todas as Partes
-                  </Button>
-                </div>
-                {/* Individual parts */}
-                <div className="space-y-1 max-h-32 overflow-y-auto">
-                  {segmentResults.map((seg, idx) => (
-                    <div key={idx} className="flex items-center gap-2 text-xs group">
-                      <span className="text-violet-400 bg-violet-500/10 border border-violet-500/20 rounded px-1.5 py-0.5 shrink-0">
-                        {idx + 1}
-                      </span>
-                      <span className="text-slate-500 truncate flex-1">{seg.text.substring(0, 50)}{seg.text.length > 50 ? '...' : ''}</span>
-                      <button
-                        onClick={() => regenerateSegment(idx)}
-                        className="text-slate-600 hover:text-amber-400 transition-colors shrink-0 opacity-60 group-hover:opacity-100"
-                        title="Regenerar esta parte"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={() => downloadSegmentAudio(seg.audioUrl, `vozpro_parte_${idx + 1}.wav`)}
-                        className="text-slate-600 hover:text-emerald-400 transition-colors shrink-0 opacity-60 group-hover:opacity-100"
-                        title="Baixar esta parte"
-                      >
-                        <Download className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* Switch voice/mixed */}
             {isMixed && audioUrl && mixedAudioUrl && (
               <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
@@ -3617,7 +3091,6 @@ export default function VozProClient() {
                 <p className="text-xs text-white font-medium truncate">
                   {selectedVoice?.name || 'Áudio gerado'}
                   {selectedVariation && <span className="text-slate-400"> — {selectedVariation.label}</span>}
-                  {totalSegments > 0 && !isGenerating && <span className="text-violet-400 ml-1">({totalSegments} partes)</span>}
                   {audioDuration !== null && (
                     <span className="text-amber-400 ml-2">
                       {audioDuration >= 60
@@ -3649,10 +3122,6 @@ export default function VozProClient() {
                   <Users className="w-3 h-3 inline mr-1" />
                   Posição {queuePosition} na fila... {generatingTime}s
                 </span>
-              ) : multiPartMode && generatingSegmentIndex >= 0 ? (
-                <span className="text-xs text-violet-300 flex-1">
-                  Gerando parte {generatingSegmentIndex + 1} de {totalSegments}... {generatingTime}s
-                </span>
               ) : (
                 <span className="text-xs text-violet-300 flex-1">Gerando áudio... {generatingTime}s</span>
               )}
@@ -3662,24 +3131,20 @@ export default function VozProClient() {
           {/* Generate Button — always in the fixed bar on mobile */}
           <Button
             onClick={handleGenerate}
-            disabled={isGenerating || (!multiPartMode && !text.trim()) || (multiPartMode && segments.filter(s=>s.text.trim()).length === 0) || (voiceMode === 'clone' && !selectedVariationId && !uploadedVoiceUrl)}
+            disabled={isGenerating || !text.trim() || (voiceMode === 'clone' && !selectedVariationId && !uploadedVoiceUrl)}
             className="w-full h-12 text-base font-bold bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white shadow-xl shadow-violet-500/25 disabled:opacity-50"
             title={
               !selectedVariationId && !uploadedVoiceUrl && voiceMode === 'clone'
                 ? 'Selecione uma voz ou faça upload de um áudio'
-                : !multiPartMode && !text.trim()
+                : !text.trim()
                   ? 'Digite o texto para gerar'
-                  : multiPartMode && segments.filter(s=>s.text.trim()).length === 0
-                    ? 'Preencha pelo menos uma parte com texto'
-                    : undefined
+                  : undefined
             }
           >
             {isGenerating ? (
               <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Gerando...</>
             ) : !selectedVariationId && !uploadedVoiceUrl && voiceMode === 'clone' ? (
               <><Sparkles className="w-4 h-4 mr-2" />Selecione uma Voz</>
-            ) : multiPartMode ? (
-              <><Sparkles className="w-4 h-4 mr-2" />Gerar {segments.filter(s=>s.text.trim()).length} Partes</>
             ) : (
               <><Sparkles className="w-4 h-4 mr-2" />Gerar Voz</>
             )}
@@ -3706,3 +3171,4 @@ export default function VozProClient() {
     </div>
   )
 }
+

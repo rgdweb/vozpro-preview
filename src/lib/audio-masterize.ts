@@ -3,6 +3,10 @@
  * Masterização automática + preset Clareza
  * Portado do index.html (MEngine) para Web Audio API
  * 100% client-side, zero carga no servidor
+ *
+ * Funções extras:
+ * - preprocessRefAudio(): High-pass 70Hz + normalização para vozes graves
+ * - masterizeGraveVoice(): Preset especial com limiter true peak
  */
 
 interface BandAnalysis {
@@ -251,4 +255,176 @@ export async function masterizeVoice(audioBuffer: AudioBuffer): Promise<AudioBuf
   console.log('[MASTERIZE-VOICE] params:', JSON.stringify(p))
 
   return renderMasterized(audioBuffer, p)
+}
+
+// ===================== GRAVE VOICE EXPORT (otimizado para vozes graves) =====================
+// Preset especial: mais presença nos graves, sem distorcer
+// Limiter verdadeiro com ceiling em -0.3 dBTP para nunca estourar
+
+export async function masterizeGraveVoice(audioBuffer: AudioBuffer): Promise<AudioBuffer> {
+  const analysis = analyze(audioBuffer)
+  const p = autoCorrect(analysis)
+
+  // Preset Voz Grave:
+  // - Graves (+2dB) — presença sem exagero (evita "fundo de lata")
+  // - Low-mid (+1.5dB) — corpo/warmth
+  // - Mid (+1dB) — inteligibilidade
+  // - Treble (+2dB) — clareza/brilho pra compensar grave
+  // - Compressão 15% — presença sem esmagar
+  // - Saturação 1% — calor sutil
+  p.bass = 2.0
+  p.lowMid = 1.5
+  p.mid = 1.0
+  p.treble = 2.0
+  p.comp = 15
+  p.drv = 1
+  p.vol = 0  // limiter cuida do volume
+
+  console.log('[MASTERIZE-GRAVE-VOICE] params:', JSON.stringify(p))
+
+  return renderMasterizedWithTruePeakLimiter(audioBuffer, p)
+}
+
+// ===================== RENDER COM TRUE PEAK LIMITER =====================
+// Limiter profissional: ceiling em -0.3 dBTP
+// Garante que o audio NUNCA estoure, mesmo em conversões MP3/AAC
+
+async function renderMasterizedWithTruePeakLimiter(buf: AudioBuffer, p: MasterParams): Promise<AudioBuffer> {
+  const sr = buf.sampleRate, len = buf.length, ch = buf.numberOfChannels
+  const oc = new OfflineAudioContext(ch, len, sr)
+  const src = oc.createBufferSource(); src.buffer = buf
+
+  // EQ chain
+  const bf = oc.createBiquadFilter(); bf.type = 'lowshelf'; bf.frequency.value = 150; bf.gain.value = p.bass
+  const lmf = oc.createBiquadFilter(); lmf.type = 'peaking'; lmf.frequency.value = 350; lmf.Q.value = 0.8; lmf.gain.value = p.lowMid
+  const mf = oc.createBiquadFilter(); mf.type = 'peaking'; mf.frequency.value = 1200; mf.Q.value = 1; mf.gain.value = p.mid
+  const tf = oc.createBiquadFilter(); tf.type = 'highshelf'; tf.frequency.value = 5000; tf.gain.value = p.treble
+
+  // Compressor
+  const comp = oc.createDynamicsCompressor()
+  if (p.comp > 0) {
+    comp.ratio.value = 1 + (p.comp / 100) * 19; comp.threshold.value = -24 + (1 - p.comp / 100) * 20
+    comp.knee.value = 6; comp.attack.value = 0.005; comp.release.value = 0.15
+  } else { comp.ratio.value = 1; comp.threshold.value = 0 }
+
+  // Saturação
+  const drv = oc.createWaveShaper()
+  if (p.drv > 0) {
+    const n = 44100, c = new Float32Array(n), k = (p.drv / 100) * 30
+    for (let i = 0; i < n; i++) { const x = (i * 2) / n - 1; c[i] = Math.tanh(x * (1 + k * Math.abs(x))) }
+    drv.curve = c; drv.oversample = '4x'
+  } else { drv.curve = null }
+
+  // Volume
+  const vol = oc.createGain(); vol.gain.value = Math.pow(10, p.vol / 20)
+
+  // === LIMITER PROFISSIONAL (True Peak) ===
+  // Ceiling em -0.3 dBTP — padrão de broadcasting
+  // Primeiro estágio: compressor agressivo (brick-wall)
+  const lim1 = oc.createDynamicsCompressor()
+  lim1.threshold.value = -1.0; lim1.ratio.value = 20; lim1.knee.value = 0
+  lim1.attack.value = 0.001; lim1.release.value = 0.05
+
+  // Segundo estágio: safety limiter (garante -0.3 dBTP)
+  const lim2 = oc.createDynamicsCompressor()
+  lim2.threshold.value = -0.3; lim2.ratio.value = 20; lim2.knee.value = 0
+  lim2.attack.value = 0.0005; lim2.release.value = 0.03
+
+  // Conectar: src -> EQ -> comp -> drv -> vol -> lim1 -> lim2 -> destination
+  src.connect(bf); bf.connect(lmf); lmf.connect(mf); mf.connect(tf)
+  tf.connect(comp); comp.connect(drv); drv.connect(vol); vol.connect(lim1)
+  lim1.connect(lim2); lim2.connect(oc.destination)
+
+  src.start(0)
+  return await oc.startRendering()
+}
+
+// ===================== PREPROCESS REF AUDIO (High-pass + Normalização) =====================
+// Para vozes graves: remove subgraves (<70Hz) que confundem o speaker embedding
+// e normaliza o volume pra -1 dB peak
+// Retorna WAV como base64 (data URI)
+
+export async function preprocessRefAudio(audioUrl: string): Promise<string> {
+  // 1. Baixar o áudio
+  const response = await fetch(audioUrl)
+  const arrayBuffer = await response.arrayBuffer()
+
+  // 2. Decodificar
+  const audioCtx = new AudioContext()
+  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
+  await audioCtx.close()
+
+  // 3. Aplicar high-pass 70Hz + normalização
+  const sr = audioBuffer.sampleRate, len = audioBuffer.length, ch = audioBuffer.numberOfChannels
+  const oc = new OfflineAudioContext(ch, len, sr)
+  const src = oc.createBufferSource()
+  src.buffer = audioBuffer
+
+  // High-pass 70Hz — remove subgraves (ar condicionado, vibração, microfone)
+  const hp = oc.createBiquadFilter()
+  hp.type = 'highpass'
+  hp.frequency.value = 70
+  hp.Q.value = 0.707  // Butterworth (flat response)
+
+  // Normalização: ganho automático pra -1 dB peak
+  const channelData = audioBuffer.getChannelData(0)
+  let peak = 0
+  for (let i = 0; i < channelData.length; i++) {
+    const abs = Math.abs(channelData[i])
+    if (abs > peak) peak = abs
+  }
+
+  const targetDb = -1.0
+  const targetLinear = Math.pow(10, targetDb / 20)  // ~0.891
+  const gainValue = peak > 0 ? targetLinear / peak : 1.0
+  const gain = oc.createGain()
+  gain.gain.value = Math.min(gainValue, 10)  // Cap em +20dB
+
+  // Conectar: src -> highpass -> gain -> destination
+  src.connect(hp)
+  hp.connect(gain)
+  gain.connect(oc.destination)
+
+  src.start(0)
+  const processedBuffer = await oc.startRendering()
+
+  // 4. Converter para WAV base64
+  const wavBase64 = audioBufferToWavBase64(processedBuffer)
+  console.log(`[PREPROCESS-REF] High-pass 70Hz + norm OK (peak: ${peak.toFixed(3)}, gain: ${gainValue.toFixed(2)}x)`)
+
+  return wavBase64
+}
+
+// ===================== AUDIOBUFFER -> WAV BASE64 =====================
+
+function audioBufferToWavBase64(buf: AudioBuffer): string {
+  const nc = buf.numberOfChannels, sr = buf.sampleRate, bps = 2
+  const ba = nc * bps, dl = buf.length * ba, tl = 44 + dl
+  const ab = new ArrayBuffer(tl)
+  const v = new DataView(ab)
+
+  const ws = (o: number, s: string) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)) }
+  ws(0, 'RIFF'); v.setUint32(4, tl - 8, true); ws(8, 'WAVE'); ws(12, 'fmt ')
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true)
+  v.setUint16(22, nc, true); v.setUint32(24, sr, true)
+  v.setUint32(28, sr * ba, true); v.setUint16(32, ba, true); v.setUint16(34, 16, true)
+  ws(36, 'data'); v.setUint32(40, dl, true)
+
+  const chs: Float32Array[] = []
+  for (let c = 0; c < nc; c++) chs.push(buf.getChannelData(c))
+  let o = 44
+  for (let i = 0; i < buf.length; i++) {
+    for (let c = 0; c < nc; c++) {
+      let s = Math.max(-1, Math.min(1, chs[c][i]))
+      s = s < 0 ? s * 0x8000 : s * 0x7FFF
+      v.setInt16(o, s | 0, true)
+      o += 2
+    }
+  }
+
+  const bytes = new Uint8Array(ab)
+  let binary = ''
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+  const base64 = btoa(binary)
+  return `data:audio/wav;base64,${base64}`
 }

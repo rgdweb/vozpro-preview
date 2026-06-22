@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 // Mesmo HMAC do generate-token, mas aponta para generate-omnivoice.php
 export async function GET() {
   try {
-    const audioServerUrl = process.env.AUDIO_SERVER_URL || 'https://sorteiomax.com.br/omnivoice'
+    const audioServerUrl = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
     const apiKey = process.env.AUDIO_SERVER_API_KEY || ''
 
     if (!audioServerUrl || !apiKey) {

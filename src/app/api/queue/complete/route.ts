@@ -15,15 +15,15 @@ import { db } from '@/lib/db'
 const MAX_CONCURRENT_GENERATIONS = 1
 const PROCESSING_TIMEOUT_MS = 1 * 60 * 1000 // 1 minuto — consistente com join
 const GPU_HEALTH_CHECK_MS = 5000 // 5 segundos timeout para health check
-const TUNNEL_API = process.env.AUDIO_SERVER_URL || 'https://api.sorteiomax.com.br'
+const ORACLE_BASE = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
 
 // ============================================================
-// 🏥 HEALTH CHECK INTELIGENTE — verifica GPU REALMENTE está viva
+// 🏥 HEALTH CHECK INTELIGENTE — verifica GPU via WireGuard VPN
 // ============================================================
 interface GPUHealthResult {
   gpuOnline: boolean
-  tunnelAlive: boolean
-  tunnelUrl: string | null
+  wireGuardAlive: boolean
+  gpuUrl: string | null
   responseTime: number
   error: string | null
 }
@@ -32,44 +32,33 @@ async function checkGPUHealth(): Promise<GPUHealthResult> {
   const startTime = Date.now()
   const result: GPUHealthResult = {
     gpuOnline: false,
-    tunnelAlive: false,
-    tunnelUrl: null,
+    wireGuardAlive: false,
+    gpuUrl: null,
     responseTime: 0,
     error: null,
   }
 
   try {
-    const tunnelRes = await fetch(`${TUNNEL_API}/get_tunnel.php`, {
+    const healthRes = await fetch(`${ORACLE_BASE}/health`, {
+      cache: 'no-store',
       signal: AbortSignal.timeout(GPU_HEALTH_CHECK_MS),
     })
 
-    if (!tunnelRes.ok) {
-      result.error = `get_tunnel.php retornou HTTP ${tunnelRes.status}`
+    if (!healthRes.ok) {
+      result.error = `/health retornou HTTP ${healthRes.status}`
       return result
     }
 
-    const tunnelData = await tunnelRes.json()
+    const healthData = await healthRes.json()
 
-    if (tunnelData.status !== 'online' || !tunnelData.tunnelUrl) {
-      result.error = tunnelData.message || 'GPU reportou status offline'
+    if (healthData.status !== 'ok' || !healthData.model_loaded) {
+      result.error = healthData.error || 'GPU reportou status offline'
       return result
     }
 
     result.gpuOnline = true
-    result.tunnelUrl = tunnelData.tunnelUrl
-
-    // Verificar se o túnel responde
-    const gpuPing = await fetch(`${tunnelData.tunnelUrl}/`, {
-      method: 'GET',
-      signal: AbortSignal.timeout(GPU_HEALTH_CHECK_MS),
-    }).catch(() => null)
-
-    if (gpuPing) {
-      result.tunnelAlive = true
-    } else {
-      result.error = `Túnel ${tunnelData.tunnelUrl.substring(0, 40)}... não responde`
-    }
-
+    result.wireGuardAlive = true
+    result.gpuUrl = ORACLE_BASE
     result.responseTime = Date.now() - startTime
     return result
 
@@ -100,11 +89,11 @@ async function unstickProcessing(): Promise<{ released: number; reason: string }
     const elapsedMs = Date.now() - stuckItems[0].startedAt.getTime()
     const elapsedMin = (elapsedMs / 60000).toFixed(1)
 
-    console.log(`[Queue Premium Complete] ${stuckItems.length} item(s) há ${elapsedMin}min | GPU: ${health.gpuOnline ? 'ONLINE' : 'OFFLINE'} | Túnel: ${health.tunnelAlive ? 'VIVO' : 'MORTO'}`)
+    console.log(`[Queue Premium Complete] ${stuckItems.length} item(s) há ${elapsedMin}min | GPU: ${health.gpuOnline ? 'ONLINE' : 'OFFLINE'} | WireGuard: ${health.wireGuardAlive ? 'VIVO' : 'MORTO'}`)
 
-    // Se GPU tá online E túnel vivo E < 1.5min = mantém
-    if (health.gpuOnline && health.tunnelAlive && elapsedMs < 1.5 * 60 * 1000) {
-      console.log(`[Queue Premium Complete] GPU online + túnel vivo + < 1.5min → MANTÉM`)
+    // Se GPU tá online E WireGuard vivo E < 1.5min = mantém
+    if (health.gpuOnline && health.wireGuardAlive && elapsedMs < 1.5 * 60 * 1000) {
+      console.log(`[Queue Premium Complete] GPU online + WireGuard vivo + < 1.5min → MANTÉM`)
       return { released: 0, reason: 'gpu_alive_keep_processing' }
     }
 

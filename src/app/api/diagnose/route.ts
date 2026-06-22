@@ -4,15 +4,14 @@ import { NextResponse } from 'next/server'
  * GET /api/diagnose — Diagnóstico em tempo real do sistema OmniVoice
  *
  * Verifica:
- * 1. Tunnel (cloudflared) — URL registrada + health check
- * 2. Gradio API — upload, submit, heartbeat
+ * 1. WireGuard VPN — conexão com GPU via Oracle Nginx
+ * 2. Native API — health check e endpoint /api/native-generate
  * 3. Configurações do frontend vs backend — consistência de parâmetros
- * 4. GPU status (se disponível via tunnel)
  *
- * Uso: GET /api/diagnose?deep=true  (deep=true testa upload + submit no Gradio)
+ * Uso: GET /api/diagnose?deep=true  (deep=true testa geração real)
  */
 
-const HOSTGATOR_BASE = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
+const ORACLE_BASE = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
 
 interface CheckResult {
   name: string
@@ -28,227 +27,156 @@ export async function GET(req: Request) {
   const startTime = Date.now()
 
   // ============================================================
-  // 1. TUNNEL CHECK — URL registrada no PHP
+  // 1. WIREGUARD VPN CHECK — GPU health via Oracle Nginx
   // ============================================================
-  let tunnelUrl = ''
-  let tunnelAlive = false
+  let wireGuardAlive = false
+  let gpuOnline = false
 
   try {
     const t0 = Date.now()
-    const res = await fetch(`${HOSTGATOR_BASE}/get_tunnel.php`, {
+    const res = await fetch(`${ORACLE_BASE}/health`, {
+      cache: 'no-store',
       signal: AbortSignal.timeout(10000),
     })
     const data = await res.json()
 
-    if (data.status === 'online' && data.tunnelUrl) {
-      tunnelUrl = data.tunnelUrl
-
-      // Health check: tentar acessar a raiz do tunnel
-      try {
-        const healthRes = await fetch(`${tunnelUrl}/`, {
-          signal: AbortSignal.timeout(8000),
-        })
-        tunnelAlive = healthRes.ok
-        checks.push({
-          name: 'Tunnel URL',
-          status: tunnelAlive ? 'ok' : 'warn',
-          detail: tunnelAlive
-            ? `${tunnelUrl.substring(0, 60)}... (vivo, HTTP ${healthRes.status})`
-            : `${tunnelUrl.substring(0, 60)}... (URL registrada mas tunnel MORTO — HTTP ${healthRes.status})`,
-          durationMs: Date.now() - t0,
-        })
-      } catch (healthErr) {
-        checks.push({
-          name: 'Tunnel URL',
-          status: 'error',
-          detail: `URL registrada (${tunnelUrl.substring(0, 50)}...) mas tunnel INACCESSÍVEL: ${healthErr instanceof Error ? healthErr.message : String(healthErr)}`,
-          durationMs: Date.now() - t0,
-        })
-      }
+    if (data.status === 'ok' && data.model_loaded) {
+      gpuOnline = true
+      wireGuardAlive = true
+      checks.push({
+        name: 'WireGuard VPN',
+        status: 'ok',
+        detail: `GPU online via WireGuard (10.99.0.2:7860) — model_loaded=true, pitch_engine=${data.pitch_engine || 'unknown'}`,
+        durationMs: Date.now() - t0,
+      })
     } else {
       checks.push({
-        name: 'Tunnel URL',
-        status: 'error',
-        detail: data.message || 'GPU offline — nenhuma URL registrada',
+        name: 'WireGuard VPN',
+        status: 'warn',
+        detail: `Oracle respondeu mas GPU modelo nao carregado: status=${data.status}`,
         durationMs: Date.now() - t0,
       })
     }
   } catch (err) {
     checks.push({
-      name: 'Tunnel URL',
+      name: 'WireGuard VPN',
       status: 'error',
-      detail: `Falha ao consultar PHP: ${err instanceof Error ? err.message : String(err)}`,
+      detail: `Falha ao conectar Oracle/WireGuard: ${err instanceof Error ? err.message : String(err)}`,
     })
   }
 
   // ============================================================
-  // 2. GRADIO API CHECK — Disponibilidade da API de voz
+  // 2. NATIVE API CHECK — /api/native-generate endpoint
   // ============================================================
-  if (tunnelUrl && tunnelAlive) {
-    // 2a. Info endpoint
+  if (wireGuardAlive) {
     try {
       const t0 = Date.now()
-      const infoRes = await fetch(`${tunnelUrl}/gradio_api/info`, {
-        signal: AbortSignal.timeout(10000),
+      const nativeRes = await fetch(`${ORACLE_BASE}/api/native-generate`, {
+        method: 'OPTIONS',
+        signal: AbortSignal.timeout(8000),
       })
-      if (infoRes.ok) {
-        const info = await infoRes.json()
-        const apiNames = (info.named_endpoints || []).map((ep: { fn_index: number; name: string }) => `${ep.name}(${ep.fn_index})`)
-        checks.push({
-          name: 'Gradio API',
-          status: 'ok',
-          detail: `${apiNames.length} endpoints disponíveis: ${apiNames.join(', ')}`,
-          durationMs: Date.now() - t0,
-        })
-      } else {
-        checks.push({
-          name: 'Gradio API',
-          status: 'warn',
-          detail: `Gradio respondeu mas info retornou HTTP ${infoRes.status}`,
-          durationMs: Date.now() - t0,
-        })
-      }
+      checks.push({
+        name: 'Native API',
+        status: nativeRes.ok ? 'ok' : 'warn',
+        detail: nativeRes.ok
+          ? `/api/native-generate OPTIONS OK (CORS habilitado)`
+          : `/api/native-generate retornou HTTP ${nativeRes.status}`,
+        durationMs: Date.now() - t0,
+      })
     } catch (err) {
       checks.push({
-        name: 'Gradio API',
+        name: 'Native API',
         status: 'error',
-        detail: `Não conseguiu acessar Gradio API: ${err instanceof Error ? err.message : String(err)}`,
+        detail: `Não conseguiu acessar /api/native-generate: ${err instanceof Error ? err.message : String(err)}`,
       })
     }
   } else {
     checks.push({
-      name: 'Gradio API',
+      name: 'Native API',
       status: 'error',
-      detail: 'Tunnel não disponível — não é possível testar Gradio',
+      detail: 'WireGuard não disponível — não é possível testar Native API',
     })
   }
 
   // ============================================================
-  // 3. DEEP CHECK — Testa upload + submit no Gradio (se deep=true)
+  // 3. DEEP CHECK — Testa geração real (se deep=true)
   // ============================================================
-  if (deep && tunnelUrl && tunnelAlive) {
-    // 3a. Upload test (arquivo vazio)
+  if (deep && wireGuardAlive) {
     try {
       const t0 = Date.now()
-      const blob = new Blob([new Uint8Array(44).fill(0)], { type: 'audio/wav' }) // WAV header vazio
-      const form = new FormData()
-      form.append('files', blob, 'test.wav')
-
-      const uploadRes = await fetch(`${tunnelUrl}/gradio_api/upload`, {
-        method: 'POST',
-        body: form,
-        signal: AbortSignal.timeout(15000),
-      })
-
-      if (uploadRes.ok) {
-        const paths = await uploadRes.json()
-        checks.push({
-          name: 'Upload Test',
-          status: 'ok',
-          detail: `Upload OK — path: ${Array.isArray(paths) ? paths[0] : 'unknown'}`,
-          durationMs: Date.now() - t0,
-        })
-      } else {
-        const errText = await uploadRes.text()
-        checks.push({
-          name: 'Upload Test',
-          status: 'warn',
-          detail: `Upload falhou: HTTP ${uploadRes.status} — ${errText.substring(0, 200)}`,
-          durationMs: Date.now() - t0,
-        })
+      const testPayload = {
+        text: 'teste de diagnóstico',
+        voice_mode: 'design',
+        language: 'pt',
+        instruct: 'female, moderate pitch',
+        speed: 1.0,
+        num_step: 8,
+        guidance_scale: 2.0,
       }
-    } catch (err) {
-      checks.push({
-        name: 'Upload Test',
-        status: 'error',
-        detail: `Upload timeout/falhou: ${err instanceof Error ? err.message : String(err)}`,
-      })
-    }
 
-    // 3b. GPU Status (se exposto pelo servidor)
-    try {
-      const t0 = Date.now()
-      const gpuRes = await fetch(`${tunnelUrl}/gradio_api/call/_clone_fn`, {
+      const genRes = await fetch(`${ORACLE_BASE}/api/native-generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: ['test', 'Auto', null, '', '', 32, 2.0, true, 1.0, null, true, true] }),
-        signal: AbortSignal.timeout(15000),
+        body: JSON.stringify(testPayload),
+        signal: AbortSignal.timeout(120000),
       })
 
-      if (gpuRes.ok) {
+      if (genRes.ok) {
+        const result = await genRes.json()
         checks.push({
-          name: 'Submit Test',
-          status: 'ok',
-          detail: 'Gradio aceitou submit de teste — GPU respondendo',
+          name: 'Generation Test',
+          status: result.status === 'ok' && result.audio_base64 ? 'ok' : 'warn',
+          detail: result.status === 'ok'
+            ? `Geração OK — ${result.duration || '?'}s em ${result.generation_time || '?'}s (RTF=${result.rtf || '?'})`
+            : `Geração falhou: ${result.error || 'unknown'}`,
           durationMs: Date.now() - t0,
         })
       } else {
         checks.push({
-          name: 'Submit Test',
-          status: 'warn',
-          detail: `Submit falhou: HTTP ${gpuRes.status}`,
+          name: 'Generation Test',
+          status: 'error',
+          detail: `HTTP ${genRes.status}`,
           durationMs: Date.now() - t0,
         })
       }
     } catch (err) {
       checks.push({
-        name: 'Submit Test',
+        name: 'Generation Test',
         status: 'error',
-        detail: `Submit falhou: ${err instanceof Error ? err.message : String(err)}`,
+        detail: `Timeout/falhou: ${err instanceof Error ? err.message : String(err)}`,
       })
     }
   }
 
   // ============================================================
-  // 4. CONFIG CONSISTENCY CHECK — Frontend vs Backend
+  // 4. CONFIG CONSISTENCY CHECK
   // ============================================================
-  const configChecks: CheckResult[] = []
-
-  // Speed range (frontend: 0.8-1.3, backend: any float)
-  configChecks.push({
+  checks.push({
     name: 'Speed Range',
     status: 'ok',
     detail: 'Frontend: 0.8-1.3 (step 0.05) | Backend: parseFloat com fallback 1.0',
   })
 
-  // Modo pipeline
-  configChecks.push({
+  checks.push({
     name: 'Pipeline',
     status: 'ok',
-    detail: 'MODO LIMPO: 100% single-shot, SEM chunking, SEM ASR, SEM preprocess. Texto direto pro Gradio.',
+    detail: 'WireGuard VPN v4.0: Browser → Oracle Nginx → 10.99.0.2:7860 → GPU FastAPI',
   })
 
-  // postprocess_output
-  configChecks.push({
+  checks.push({
     name: 'Postprocess',
     status: 'ok',
     detail: 'postprocess_output=false (DESATIVADO — causava estalos e oscilacao de velocidade)',
   })
 
-  // denoise
-  configChecks.push({
-    name: 'Denoise',
-    status: 'ok',
-    detail: 'denoise=false (DESATIVADO — evita artefatos no audio gerado)',
+  // WireGuard registration
+  checks.push({
+    name: 'WireGuard VPN',
+    status: wireGuardAlive ? 'ok' : 'error',
+    detail: wireGuardAlive
+      ? `GPU online via Oracle Nginx (${ORACLE_BASE})`
+      : `WireGuard offline — verifique WireGuard no Oracle e GPU PC`,
   })
-
-  // refText
-  configChecks.push({
-    name: 'Ref Text',
-    status: 'ok',
-    detail: 'Sempre vazio (evita alucinacao do modelo)',
-  })
-
-  // Tunnel registration
-  configChecks.push({
-    name: 'Tunnel Registration',
-    status: tunnelAlive ? 'ok' : 'error',
-    detail: tunnelAlive
-      ? `POST JSON { tunnelUrl } para ${HOSTGATOR_BASE}/update_tunnel.php`
-      : `Tunnel offline — verifique start_tunnel.ps1 na máquina local`,
-  })
-
-  checks.push(...configChecks)
 
   // ============================================================
   // RESUMO
@@ -263,14 +191,14 @@ export async function GET(req: Request) {
     timestamp: new Date().toISOString(),
     totalDurationMs: Date.now() - startTime,
     summary: { ok: okCount, warn: warnCount, error: errorCount, total: checks.length },
-    tunnel: {
-      url: tunnelUrl || null,
-      alive: tunnelAlive,
-      registered: !!tunnelUrl,
+    wireguard: {
+      url: ORACLE_BASE,
+      alive: wireGuardAlive,
+      gpuOnline,
     },
     checks,
     recommendations: errorCount > 0
-      ? ['Reinicie o tunnel na máquina local (start_tunnel.ps1)', 'Verifique se omnivoice_gpu.py está rodando na porta 7860', 'Acesse /api/diagnose?deep=true para teste completo']
+      ? ['Verifique WireGuard VPN no Oracle (sudo wg show)', 'Verifique se omnivoice_gpu.py está rodando no GPU PC (porta 7860)', 'Acesse /api/diagnose?deep=true para teste completo']
       : warnCount > 0
         ? ['Alguns checks apresentaram avisos — monitore ao longo do dia']
         : ['Tudo funcionando — sistema pronto para gerar voz'],

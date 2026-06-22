@@ -46,16 +46,20 @@ function createDebug() {
 // TUNNEL URL
 // ============================================================
 
-async function getTunnelUrl(debug: ReturnType<typeof createDebug>): Promise<string> {
+async function getGpuUrl(debug: ReturnType<typeof createDebug>): Promise<string> {
+  // v4.0: WireGuard VPN — IP fixo, sem tunnel, sem get_tunnel.php
+  // Nginx no Oracle faz proxy direto para 10.99.0.2:7860 via WireGuard
+  // Antes: descobria URL do Cloudflare Tunnel (mudava a cada reinicio)
+  // Agora: IP fixo permanente, zero terceiro
   try {
-    const res = await fetch(`${ORACLE_BASE}/get_tunnel.php`, { cache: 'no-store', signal: AbortSignal.timeout(10000) })
+    const res = await fetch(`${ORACLE_BASE}/health`, { cache: 'no-store', signal: AbortSignal.timeout(10000) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
-    if (data.status !== 'online' || !data.tunnelUrl) {
-      throw new Error(data.message || 'GPU offline')
+    if (data.status !== 'ok' || !data.model_loaded) {
+      throw new Error('GPU offline (modelo nao carregado)')
     }
-    debug.log('Tunnel', 'ok', data.tunnelUrl.substring(0, 60) + '...')
-    return data.tunnelUrl
+    debug.log('WireGuard VPN', 'ok', 'GPU online via WireGuard (IP fixo)')
+    return ORACLE_BASE
   } catch (err) {
     throw new Error('GPU offline: ' + (err instanceof Error ? err.message : String(err)))
   }
@@ -171,9 +175,9 @@ export async function POST(req: NextRequest) {
     const cleanText = stripSSMLForTTS(text)
     debug.log('SSML Strip', 'info', cleanText !== text ? 'Tags removidas' : 'sem SSML')
 
-    // 1. Descobrir tunnel
-    debug.log('Tunnel', 'info', 'Descobrindo URL do tunnel...')
-    const tunnelUrl = await getTunnelUrl(debug)
+    // 1. Verificar GPU online via WireGuard VPN
+    debug.log('WireGuard', 'info', 'Verificando GPU via WireGuard VPN...')
+    const gpuUrl = await getGpuUrl(debug)
 
     // 2. Gerar via API nativa Python (100% OmniVoice, zero processamento JS)
     debug.log('Pipeline', 'info', `Modo NATIVE (${voiceMode})`)
@@ -192,17 +196,14 @@ export async function POST(req: NextRequest) {
       guidanceScale,
     }
 
-    let result = await callNativeGenerate(tunnelUrl, genParams, debug)
+    let result = await callNativeGenerate(gpuUrl, genParams, debug)
 
-    // 3. Retry com novo tunnel se falhou (tunnel pode estar stale)
+    // 3. Retry se falhou
     if (!result) {
-      debug.log('Pipeline', 'warn', 'Falhou, tentando novo tunnel...')
+      debug.log('Pipeline', 'warn', 'Falhou, tentando novamente...')
       try {
-        const newUrl = await getTunnelUrl(debug)
-        if (newUrl !== tunnelUrl) {
-          debug.log('Pipeline', 'info', `Novo tunnel: ${newUrl.substring(0, 60)}...`)
-          result = await callNativeGenerate(newUrl, genParams, debug)
-        }
+        const retryUrl = await getGpuUrl(debug)
+        result = await callNativeGenerate(retryUrl, genParams, debug)
       } catch (retryErr) {
         debug.log('Pipeline', 'error', `Retry falhou: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`)
       }
@@ -227,7 +228,8 @@ export async function POST(req: NextRequest) {
     // 5. Montar resposta
     const response: Record<string, unknown> = {
       audioUrl: `data:audio/wav;base64,${result.audio_base64}`,
-      viaTunnel: true,
+      viaTunnel: false,
+      viaWireGuard: true,
       mode: 'native',
       duration: result.duration,
       generationTime: result.generation_time,

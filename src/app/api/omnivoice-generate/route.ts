@@ -2,24 +2,25 @@ import { NextRequest, NextResponse } from 'next/server'
 import { stripSSMLForTTS, parseSSML, containsSSML } from '@/lib/ssml-parser'
 import { trimAudioBuffer } from '@/lib/audio-trimmer'
 
-// POST /api/omnivoice-generate - Proxy para VozPro (k2-fsa) via tunnel
+// POST /api/omnivoice-generate - Proxy para VozPro (k2-fsa) via WireGuard VPN
 // Usa API Gradio nativa do VozPro com parametros corretos
 // NAO altera nenhum fluxo existente do F5-TTS (tunnel-generate)
 
 export const dynamic = 'force-dynamic' // Nunca cachar esta rota no Vercel
 
-const HOSTGATOR_BASE = process.env.AUDIO_SERVER_URL
+const ORACLE_BASE = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
 
-async function getTunnelUrl(debug: ReturnType<typeof createDebug>): Promise<string> {
+async function getGpuUrl(debug: ReturnType<typeof createDebug>): Promise<string> {
+  // v4.0: WireGuard VPN — IP fixo, sem tunnel, sem get_tunnel.php
   try {
-    const res = await fetch(`${HOSTGATOR_BASE}/get_tunnel.php`, { signal: AbortSignal.timeout(10000) })
+    const res = await fetch(`${ORACLE_BASE}/health`, { cache: 'no-store', signal: AbortSignal.timeout(10000) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
-    if (data.status !== 'online' || !data.tunnelUrl) {
-      throw new Error(data.message || 'GPU offline')
+    if (data.status !== 'ok' || !data.model_loaded) {
+      throw new Error('GPU offline (modelo nao carregado)')
     }
-    debug.log('Tunnel URL', 'ok', data.tunnelUrl.substring(0, 60) + '...')
-    return data.tunnelUrl
+    debug.log('WireGuard VPN', 'ok', 'GPU online via WireGuard (IP fixo)')
+    return ORACLE_BASE
   } catch (err) {
     throw new Error('GPU offline: ' + (err instanceof Error ? err.message : String(err)))
   }
@@ -287,7 +288,7 @@ export async function POST(request: NextRequest) {
 
     // Obter tunnel URL
     debug.log('Tunnel', 'info', 'Descobrindo URL do tunnel...')
-    const effectiveUrl = await getTunnelUrl(debug)
+    const effectiveUrl = await getGpuUrl(debug)
 
     const startTime = Date.now()
 
@@ -477,25 +478,12 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   let reachable = false
-  let effectiveUrl = ''
 
   try {
-    const res = await fetch(`${HOSTGATOR_BASE}/get_tunnel.php`, { signal: AbortSignal.timeout(8000) })
+    const res = await fetch(`${ORACLE_BASE}/health`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
     if (res.ok) {
       const data = await res.json()
-      if (data.status === 'online' && data.tunnelUrl) {
-        effectiveUrl = data.tunnelUrl
-        const healthRes = await fetch(effectiveUrl + '/gradio_api/info/', {
-          cache: 'no-store', signal: AbortSignal.timeout(8000),
-        })
-        if (healthRes.ok) {
-          const info = await healthRes.json()
-          const endpoints = info?.named_endpoints || {}
-          const hasDesign = !!endpoints['/_design_fn'] || !!endpoints['_design_fn']
-          const hasClone = !!endpoints['/_clone_fn'] || !!endpoints['_clone_fn']
-          reachable = hasDesign || hasClone
-        }
-      }
+      reachable = data.status === 'ok' && !!data.model_loaded
     }
   } catch {
     reachable = false
@@ -503,9 +491,10 @@ export async function GET() {
 
   return NextResponse.json({
     status: reachable ? 'tts_engine_available' : 'tts_engine_unavailable',
-    url: effectiveUrl || undefined,
+    url: ORACLE_BASE,
     reachable,
     model: 'k2-fsa/OmniVoice',
+    viaWireGuard: true,
     features: [
       'voice_cloning',
       'voice_design',

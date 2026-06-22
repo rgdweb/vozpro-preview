@@ -1,26 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 const ORACLE_URL = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
-const ORACLE_API_KEY = process.env.AUDIO_SERVER_API_KEY || 'vozpro_2024_a8f7d9e2b4c1m6n3p5q0r9s2t8u1'
+const ORACLE_API_KEY = process.env.AUDIO_SERVER_API_KEY || 'omnivoice_api_key_2026_secure'
 
 /**
  * Maintenance API - Live repair tools
  * 
- * GET  /api/maintenance?action=status     → Full system status (tunnel + GPU + Oracle)
- * GET  /api/maintenance?action=gpu-status  → GPU VRAM via tunnel
- * POST /api/maintenance?action=gpu-cleanup → Force GPU cleanup via tunnel
+ * GET  /api/maintenance?action=status     → Full system status (WireGuard + GPU + Oracle)
+ * GET  /api/maintenance?action=gpu-status  → GPU status via WireGuard VPN
+ * POST /api/maintenance?action=gpu-cleanup → Force GPU cleanup via WireGuard
  * POST /api/maintenance?action=oracle-cleanup → Clean Oracle temp files
- * GET  /api/maintenance?action=tunnel-refresh → Refresh tunnel URL from Oracle
  */
 
-async function getTunnelUrl(): Promise<string | null> {
+async function getGpuUrl(): Promise<string | null> {
   try {
-    const res = await fetch(`${ORACLE_URL}/get_tunnel.php`, {
-      headers: { 'Authorization': `Bearer ${ORACLE_API_KEY}` },
+    const res = await fetch(`${ORACLE_URL}/health`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10000),
     })
     if (!res.ok) return null
     const data = await res.json()
-    return data.tunnelUrl || data.url || null
+    if (data.status !== 'ok' || !data.model_loaded) return null
+    return ORACLE_URL
   } catch {
     return null
   }
@@ -30,18 +31,18 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const action = searchParams.get('action') || 'status'
 
-  // === GPU Status (via tunnel) ===
+  // === GPU Status (via WireGuard) ===
   if (action === 'gpu-status') {
-    const tunnelUrl = await getTunnelUrl()
-    if (!tunnelUrl) {
-      return NextResponse.json({ error: 'Tunnel URL não encontrada', status: 'offline' }, { status: 503 })
+    const gpuUrl = await getGpuUrl()
+    if (!gpuUrl) {
+      return NextResponse.json({ error: 'GPU offline via WireGuard', status: 'offline' }, { status: 503 })
     }
     try {
-      const res = await fetch(`${tunnelUrl}/api/maint/status`, { signal: AbortSignal.timeout(10000) })
+      const res = await fetch(`${gpuUrl}/api/maint/status`, { signal: AbortSignal.timeout(10000) })
       const data = await res.json()
       return NextResponse.json(data)
     } catch (err) {
-      return NextResponse.json({ error: 'GPU inacessível via tunnel', details: String(err) }, { status: 504 })
+      return NextResponse.json({ error: 'GPU inacessível via WireGuard', details: String(err) }, { status: 504 })
     }
   }
 
@@ -49,24 +50,24 @@ export async function GET(request: NextRequest) {
   if (action === 'status') {
     const results: Record<string, unknown> = {}
 
-    // 1. Tunnel URL
-    const tunnelUrl = await getTunnelUrl()
-    results.tunnel = {
-      url: tunnelUrl,
-      ok: !!tunnelUrl,
+    // 1. WireGuard VPN
+    const gpuUrl = await getGpuUrl()
+    results.wireguard = {
+      url: gpuUrl,
+      ok: !!gpuUrl,
     }
 
-    // 2. GPU Status (via tunnel)
-    if (tunnelUrl) {
+    // 2. GPU Status (via WireGuard)
+    if (gpuUrl) {
       try {
-        const gpuRes = await fetch(`${tunnelUrl}/api/maint/status`, { signal: AbortSignal.timeout(10000) })
+        const gpuRes = await fetch(`${gpuUrl}/api/maint/status`, { signal: AbortSignal.timeout(10000) })
         results.gpu = await gpuRes.json()
-        results.gpu.tunnel_ok = true
+        results.gpu.wireguard_ok = true
       } catch {
-        results.gpu = { error: 'Inacessível', tunnel_ok: false }
+        results.gpu = { error: 'Inacessível', wireguard_ok: false }
       }
     } else {
-      results.gpu = { error: 'Sem tunnel', tunnel_ok: false }
+      results.gpu = { error: 'GPU offline', wireguard_ok: false }
     }
 
     // 3. Oracle health
@@ -107,14 +108,14 @@ export async function POST(request: NextRequest) {
     // no body, use default
   }
 
-  // === GPU Cleanup (via tunnel) ===
+  // === GPU Cleanup (via WireGuard) ===
   if (action === 'gpu-cleanup') {
-    const tunnelUrl = await getTunnelUrl()
-    if (!tunnelUrl) {
-      return NextResponse.json({ error: 'Tunnel URL não encontrada', status: 'offline' }, { status: 503 })
+    const gpuUrl = await getGpuUrl()
+    if (!gpuUrl) {
+      return NextResponse.json({ error: 'GPU offline via WireGuard', status: 'offline' }, { status: 503 })
     }
     try {
-      const res = await fetch(`${tunnelUrl}/api/maint/cleanup`, {
+      const res = await fetch(`${gpuUrl}/api/maint/cleanup`, {
         method: 'POST',
         signal: AbortSignal.timeout(15000),
       })

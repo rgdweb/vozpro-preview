@@ -12,13 +12,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { stripSSMLForTTS } from '@/lib/ssml-parser'
 
-// POST /api/generate - Geracao via OmniVoice Native Server (Cloudflare Tunnel)
-// Pipeline: Browser -> Next.js -> get_tunnel.php -> Tunnel -> GPU PC (/api/native-generate)
-// Sem Gradio, sem upload de arquivo, sem SSE — tudo via JSON + base64
+// POST /api/generate - Geracao via OmniVoice Native Server (WireGuard VPN)
+// Pipeline: Browser -> Next.js -> Oracle Nginx -> WireGuard VPN -> GPU PC (/api/native-generate)
+// Zero tunnel, zero Cloudflare, IP fixo permanente
 
 export const maxDuration = 300
 
-const TUNNEL_API = process.env.AUDIO_SERVER_URL || 'https://api.sorteiomax.com.br'
+// v4.0: WireGuard VPN — Oracle Nginx proxies to 10.99.0.2:7860
+// Zero tunnel, zero Cloudflare, IP fixo permanente
+const ORACLE_BASE = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
 
 function createDebug() {
   const steps: { time: string; step: string; status: string; detail?: string; duration?: number }[] = []
@@ -31,19 +33,19 @@ function createDebug() {
 }
 
 // ============================================================
-// OBTER TUNNEL URL
+// CHECK GPU VIA WIREGUARD (health check via Oracle Nginx)
 // ============================================================
 
-async function getTunnelUrl(debug: ReturnType<typeof createDebug>): Promise<string> {
+async function checkGpuOnline(debug: ReturnType<typeof createDebug>): Promise<string> {
   try {
-    const res = await fetch(`${TUNNEL_API}/get_tunnel.php`, { signal: AbortSignal.timeout(10000) })
+    const res = await fetch(`${ORACLE_BASE}/health`, { cache: 'no-store', signal: AbortSignal.timeout(10000) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
-    if (data.status !== 'online' || !data.tunnelUrl) {
-      throw new Error(data.message || 'GPU offline')
+    if (data.status !== 'ok' || !data.model_loaded) {
+      throw new Error('GPU offline (modelo nao carregado)')
     }
-    debug.log('Tunnel URL', 'ok', data.tunnelUrl.substring(0, 60) + '...')
-    return data.tunnelUrl
+    debug.log('WireGuard VPN', 'ok', 'GPU online via WireGuard (IP fixo)')
+    return ORACLE_BASE
   } catch (err) {
     throw new Error('GPU offline: ' + (err instanceof Error ? err.message : String(err)))
   }
@@ -158,9 +160,9 @@ export async function POST(req: NextRequest) {
     // REMOVER SSML residual
     const textNoSSML = stripSSMLForTTS(text)
 
-    // Buscar tunnel URL
-    debug.log('Tunnel', 'info', 'Descobrindo URL do tunnel...')
-    const tunnelUrl = await getTunnelUrl(debug)
+    // Check GPU online via WireGuard VPN
+    debug.log('WireGuard', 'info', 'Verificando GPU via WireGuard VPN...')
+    const gpuUrl = await checkGpuOnline(debug)
 
     // =========================================================
     // MONTAR PAYLOAD — clone_normal ou clone_fast (Locutor Oficial)
@@ -214,7 +216,7 @@ export async function POST(req: NextRequest) {
         debug.log('Geracao', 'info', 'Iniciando geracao via Native API...')
       }
 
-      result = await nativeGenerate(tunnelUrl, payload, debug)
+      result = await nativeGenerate(gpuUrl, payload, debug)
 
       if (result) {
         if (attempt > 0) debug.log('Retry', 'ok', `Sucesso na tentativa ${attempt + 1}!`)

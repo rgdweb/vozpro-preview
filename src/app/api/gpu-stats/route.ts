@@ -1,53 +1,45 @@
-// GET /api/gpu-stats — Busca estatísticas da GPU local via tunnel
-// Usa o mesmo mecanismo do tunnel-generate para descobrir a URL local
+// GET /api/gpu-stats — Busca estatísticas da GPU via WireGuard VPN
 
 import { NextResponse } from 'next/server'
 
-const HOSTGATOR_BASE = process.env.HOSTGATOR_BASE || 'https://sorteiomax.com.br/omnivoice'
-
-async function getTunnelUrl(): Promise<string | null> {
-  try {
-    const res = await fetch(`${HOSTGATOR_BASE}/get_tunnel.php`, {
-      signal: AbortSignal.timeout(10000),
-    })
-    if (!res.ok) return null
-    const data = await res.json()
-    if (data.status !== 'online' || !data.tunnelUrl) return null
-    return data.tunnelUrl
-  } catch {
-    return null
-  }
-}
+const ORACLE_BASE = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
 
 export async function GET() {
   try {
-    // Descobrir URL do tunnel (mesmo mecanismo do tunnel-generate)
-    const tunnelUrl = await getTunnelUrl()
+    // WireGuard VPN: check /health endpoint via Oracle Nginx
+    const healthRes = await fetch(`${ORACLE_BASE}/health`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10000),
+    })
 
-    if (!tunnelUrl) {
+    if (!healthRes.ok) {
       return NextResponse.json({
         status: 'offline',
-        error: 'Tunnel offline',
+        error: 'GPU offline via WireGuard',
         gpu: null,
       })
     }
 
-    // Buscar stats do GPU monitor local (porta 7861)
-    // O tunnel redireciona: sorteiomax.com.br/omnivoice → localhost:7860
-    // Para o GPU monitor: usamos a mesma URL base mas com porta diferente
-    // O cloudflared precisa ter a porta 7861 configurada
-    const gpuMonitorUrl = tunnelUrl.replace(/:(\d+)$/, ':7861').replace(/\/$/, '')
+    const healthData = await healthRes.json()
 
+    if (healthData.status !== 'ok' || !healthData.model_loaded) {
+      return NextResponse.json({
+        status: 'offline',
+        error: 'GPU modelo nao carregado',
+        gpu: null,
+      })
+    }
+
+    // Buscar stats do GPU monitor (porta 7861 via WireGuard)
     try {
-      const res = await fetch(`${gpuMonitorUrl}/stats`, {
+      const res = await fetch(`${ORACLE_BASE}/stats`, {
         signal: AbortSignal.timeout(5000),
       })
 
       if (!res.ok) {
         return NextResponse.json({
           status: 'monitor_offline',
-          error: 'GPU Monitor nao esta rodando na porta 7861',
-          tunnelUrl: tunnelUrl.substring(0, 60),
+          error: 'GPU Monitor nao disponivel',
           gpu: null,
         })
       }
@@ -56,12 +48,12 @@ export async function GET() {
       return NextResponse.json({
         status: 'ok',
         gpu,
+        viaWireGuard: true,
       })
     } catch (fetchErr) {
       return NextResponse.json({
         status: 'monitor_offline',
-        error: 'GPU Monitor nao esta rodando na porta 7861',
-        tunnelUrl: tunnelUrl.substring(0, 60),
+        error: 'GPU Monitor nao disponivel',
         gpu: null,
       })
     }

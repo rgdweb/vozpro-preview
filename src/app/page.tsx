@@ -53,7 +53,7 @@ function toProxyAudioUrl(url: string): string {
   }
 }
 import { Users } from 'lucide-react'
-import { masterizeAudio, masterizeVoice } from '@/lib/audio-masterize'
+import { masterizeAudio, masterizeVoice, masterizeGraveVoice, preprocessRefAudio } from '@/lib/audio-masterize'
 
 interface TrackControlsProps {
   selectedTrack: { id: string; name: string; audioPath: string; [key: string]: unknown } | null
@@ -1064,10 +1064,29 @@ export default function VozProClient() {
     if (isUploaded) refUrl = uploadedVoiceUrl
     const finalInstruct = voiceMode === 'design' ? voiceDesignInstruct : (selectedVariation?.instruct || '')
 
+    // Detectar voz grave e pré-processar ref_audio (high-pass 70Hz)
+    let regRefUrl = voiceMode !== 'clone' ? undefined : refUrl
+    let regRefBase64: string | undefined = undefined
+    if (voiceMode === 'clone' && refUrl) {
+      const vName = (selectedVoice?.name || '').toLowerCase()
+      const vInstruct = (selectedVariation?.instruct || '').toLowerCase()
+      const isGraveVoice = vName.includes('grave') || vName.includes('bariton') || vName.includes('bass')
+        || vInstruct.includes('low pitch') || vInstruct.includes('very low pitch') || vInstruct.includes('grave')
+      if (isGraveVoice) {
+        try {
+          regRefBase64 = await preprocessRefAudio(refUrl)
+          regRefUrl = undefined
+        } catch (e) {
+          console.warn('[GRAVE-VOICE] Pré-processamento falhou no regen:', e)
+        }
+      }
+    }
+
     const tunnelBody = {
       text: segText,
       language,
-      referenceAudioUrl: voiceMode !== 'clone' ? undefined : refUrl,
+      referenceAudioUrl: regRefUrl,
+      referenceAudioBase64: regRefBase64,
       instruct: finalInstruct,
       voiceMode,
       refText: uploadedVoiceRefText || selectedVariation?.refText || '',
@@ -1082,7 +1101,7 @@ export default function VozProClient() {
       if (!tunnelToken) { toast.error('Servidor nao configurado'); return }
 
       const oracleApi = process.env.NEXT_PUBLIC_AUDIO_SERVER_URL || 'https://api.cvmnews.com.br'
-      const res = await fetch(`${oracleApi}/tunnel-generate.php`, {
+      const res = await fetch(`${oracleApi}/api/native-generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Generate-Token': tunnelToken },
         body: JSON.stringify(tunnelBody),
@@ -1090,7 +1109,14 @@ export default function VozProClient() {
 
       if (!res.ok) { toast.error(`Erro do servidor (${res.status})`); return }
       const data = await res.json()
-      if (data.error) { toast.error(data.error); return }
+      if (data.error || data.erro) { toast.error(data.error || data.erro); return }
+
+      // Compatibilidade WireGuard: GPU retorna audio_base64, converter para audioUrl
+      if (!data.audioUrl && data.audio_base64) {
+        data.audioUrl = `data:audio/wav;base64,${data.audio_base64}`
+        data.viaWireGuard = true
+      }
+
       if (!data.audioUrl) { toast.error('Nenhum audio retornado'); return }
 
       // Atualizar resultado desta parte
@@ -1363,9 +1389,30 @@ export default function VozProClient() {
         // ===== TUNNEL: Browser -> Oracle HTTPS -> GPU local (nativo, sem Vercel no meio) =====
         // SSL (Let's Encrypt) em api.cvmnews.com.br — zero mixed content, zero Vercel.
 
+        // Detectar voz grave e pré-processar ref_audio (high-pass 70Hz + normalização)
+        let processedRefUrl = voiceMode === 'design' ? undefined : refUrl
+        let processedRefBase64: string | undefined = undefined
+        if (voiceMode !== 'design' && refUrl) {
+          const vName = (selectedVoice?.name || '').toLowerCase()
+          const vInstruct = (selectedVariation?.instruct || '').toLowerCase()
+          const isGraveVoice = vName.includes('grave') || vName.includes('bariton') || vName.includes('bass')
+            || vInstruct.includes('low pitch') || vInstruct.includes('very low pitch') || vInstruct.includes('grave')
+          if (isGraveVoice) {
+            try {
+              console.log('[GRAVE-VOICE] Pré-processando ref_audio com high-pass 70Hz...')
+              processedRefBase64 = await preprocessRefAudio(refUrl)
+              processedRefUrl = undefined  // Usar base64 em vez de URL
+              console.log('[GRAVE-VOICE] Pré-processamento OK — enviando ref_audio como base64')
+            } catch (e) {
+              console.warn('[GRAVE-VOICE] Pré-processamento falhou, usando URL original:', e)
+            }
+          }
+        }
+
         const tunnelBody = {
           ...body,
-          referenceAudioUrl: voiceMode === 'design' ? undefined : refUrl,
+          referenceAudioUrl: processedRefUrl,
+          referenceAudioBase64: processedRefBase64,
           referenceAudioName: voiceMode === 'design' ? undefined : refName,
           instruct: finalInstruct,
           voiceMode,
@@ -1385,9 +1432,9 @@ export default function VozProClient() {
           return
         }
 
-        // Chamar Oracle PHP direto via HTTPS (SSL Letsencrypt, sem Vercel no meio)
+        // Chamar Oracle via Nginx + WireGuard (zero tunnel, zero PHP proxy)
         const oracleApi = process.env.NEXT_PUBLIC_AUDIO_SERVER_URL || 'https://api.cvmnews.com.br'
-        res = await fetch(`${oracleApi}/tunnel-generate.php`, {
+        res = await fetch(`${oracleApi}/api/native-generate`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1488,7 +1535,34 @@ export default function VozProClient() {
       }
 
       const data = await res.json()
-      console.log('[VozPro] Generate response:', { hasAudioUrl: !!data.audioUrl, hasTrackUrl: !!data.trackUrl, clientMix: data.clientMix })
+      
+      // ===== Compatibilidade WireGuard/Nginx (v4.0) =====
+      // GPU server retorna audio_base64, PHP proxy retornava audioUrl
+      // Se veio audio_base64 direto do GPU, converter para audioUrl
+      if (!data.audioUrl && data.audio_base64) {
+        data.audioUrl = `data:audio/wav;base64,${data.audio_base64}`
+        data.viaWireGuard = true
+        data.mode = data.mode || 'native'
+        if (data.pitch_shift) {
+          data.pitchShift = {
+            applied: data.pitch_shift.applied || 0,
+            engine: data.pitch_shift.engine || 'rubberband',
+            reversed: data.pitch_shift.reversed || false,
+          }
+        }
+        if (!data.debug) {
+          data.debug = {
+            totalDuration: 0,
+            architecture: 'wireguard-nginx',
+            steps: [
+              { step: 'WireGuard VPN', status: 'ok', detail: '10.99.0.2:7860 (IP fixo)' },
+              { step: 'Native Generate', status: 'ok', detail: `${data.duration || '?'}s em ${data.generation_time || '?'}s` },
+            ],
+          }
+        }
+      }
+      
+      console.log('[VozPro] Generate response:', { hasAudioUrl: !!data.audioUrl, hasTrackUrl: !!data.trackUrl, clientMix: data.clientMix, viaWireGuard: !!data.viaWireGuard })
 
       if (data.error || data.erro) {
         const errMsg = data.erro || data.error
@@ -1998,12 +2072,21 @@ export default function VozProClient() {
         audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
         await audioCtx.close()
       }
-      // Voz sem musica = masterizeVoice (bass+3.4, sat2%, comp20%)
+      // Voz sem musica = masterizeVoice ou masterizeGraveVoice
       // Voz com musica = masterizeAudio (normal + clareza)
       if (isMixed) {
         audioBuffer = await masterizeAudio(audioBuffer)
       } else {
-        audioBuffer = await masterizeVoice(audioBuffer)
+        // Detectar se voz e grave pelo nome ou instruct
+        const voiceName = (selectedVoice?.name || '').toLowerCase()
+        const instruct = (selectedVariation?.instruct || '').toLowerCase()
+        const isGrave = voiceName.includes('grave') || voiceName.includes('bariton') || voiceName.includes('bass')
+          || instruct.includes('low pitch') || instruct.includes('very low pitch') || instruct.includes('grave')
+        if (isGrave) {
+          audioBuffer = await masterizeGraveVoice(audioBuffer)
+        } else {
+          audioBuffer = await masterizeVoice(audioBuffer)
+        }
       }
       masterizedBufferRef.current = audioBuffer
       console.log('[MASTERIZE] OK!')
@@ -3058,7 +3141,11 @@ export default function VozProClient() {
                               const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
                               const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
                               await audioCtx.close()
-                              const buf = isMixed ? await masterizeAudio(audioBuffer) : await masterizeVoice(audioBuffer)
+                              const voiceName2 = (selectedVoice?.name || '').toLowerCase()
+                              const instruct2 = (selectedVariation?.instruct || '').toLowerCase()
+                              const isGrave2 = voiceName2.includes('grave') || voiceName2.includes('bariton') || voiceName2.includes('bass')
+                                || instruct2.includes('low pitch') || instruct2.includes('very low pitch') || instruct2.includes('grave')
+                              const buf = isMixed ? await masterizeAudio(audioBuffer) : (isGrave2 ? await masterizeGraveVoice(audioBuffer) : await masterizeVoice(audioBuffer))
                               setMasterizedPreviewUrl(audioBufferToWav(buf))
                             } catch (e) {
                               console.warn('[PREVIEW-MASTERIZE] Falhou:', e)

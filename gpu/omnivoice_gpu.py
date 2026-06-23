@@ -372,7 +372,45 @@ def _master_audio(audio_array, sr):
     return result.astype(np.float32)
 
 
-# _split_text_for_generation REMOVIDO — texto é gerado inteiro, sem divisão
+def _split_text_for_generation(text, max_chars=250):
+    """
+    Divide texto longo em frases menores para o modelo não embaralhar a fala.
+    O F5-TTS embaralha/repete palavras quando o texto é muito longo.
+    Solução: gerar em trechos menores e concatenar os audios.
+    """
+    if len(text) <= max_chars:
+        return [text]
+    
+    import re
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    
+    chunks = []
+    current_chunk = ""
+    
+    for sentence in sentences:
+        if len(sentence) > max_chars:
+            parts = sentence.split(', ')
+            for part in parts:
+                if len(current_chunk) + len(part) + 2 <= max_chars:
+                    current_chunk = (current_chunk + ", " + part) if current_chunk else part
+                else:
+                    if current_chunk:
+                        chunks.append(current_chunk.strip())
+                    current_chunk = part
+        elif len(current_chunk) + len(sentence) + 1 <= max_chars:
+            current_chunk = (current_chunk + " " + sentence) if current_chunk else sentence
+        else:
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+            current_chunk = sentence
+    
+    if current_chunk:
+        chunks.append(current_chunk.strip())
+    
+    if len(chunks) > 1:
+        print(f"[SplitText] Texto longo ({len(text)} chars) dividido em {len(chunks)} trechos: {[len(c) for c in chunks]}")
+    
+    return chunks
 
 
 # ============================================================
@@ -736,25 +774,52 @@ async def native_generate(request):
             print(f"[Native] Modo design: instruct='{instruct.strip() if instruct else '(vazio)'}'")
 
         # ================================================================
-        # GERAR — texto inteiro, sem split
+        # GERAR — com split de texto longo (necessário para não embaralhar)
         # ================================================================
         _pre_generate_cleanup()
 
-        print(f"[Native] Gerando: mode={voice_mode} lang={lang or 'Auto'} speed={speed} cfg={guidance_scale} steps={num_step} denoise={denoise} postprocess={postprocess_output} instruct='{instruct}' ref_text={'sim' if ref_text and ref_text.strip() else 'vazio'} pitch_shift={pitch_shift_semitones:+.1f} text='{text[:40]}...'")
+        # Split quando texto > 250 chars (sem split, F5-TTS embaralha a fala)
+        need_split = len(text) > 250
+        if need_split:
+            text_chunks = _split_text_for_generation(text, max_chars=250)
+        else:
+            text_chunks = [text]
         
-        start_gen = time.time()
-        loop = asyncio.get_event_loop()
-        audio_list = await loop.run_in_executor(None, lambda: _model.generate(**kw))
-        elapsed = time.time() - start_gen
+        all_audio = []
+        total_gen_time = 0.0
 
-        raw_audio = audio_list[0]
-        if hasattr(raw_audio, "cpu"):
-            raw_audio = raw_audio.cpu().detach().numpy()
-        
-        # Pitch-shift reverso na SAIDA
-        if pitch_shift_semitones != 0.0:
-            print(f"[PitchShift] SAIDA: {-pitch_shift_semitones:+.1f} semitons no audio gerado")
-            raw_audio = _pitch_shift_audio(raw_audio.astype(np.float32), SAMPLE_RATE, -pitch_shift_semitones)
+        for chunk_idx, chunk_text in enumerate(text_chunks):
+            chunk_kw = dict(kw)
+            chunk_kw["text"] = chunk_text.strip()
+            
+            if voice_mode == 'clone' and ref_audio_array is not None:
+                chunk_kw["ref_audio"] = (ref_audio_array, SAMPLE_RATE)
+            
+            chunk_label = f" [{chunk_idx+1}/{len(text_chunks)}]" if len(text_chunks) > 1 else ""
+            print(f"[Native] Gerando{chunk_label}: mode={voice_mode} lang={lang or 'Auto'} speed={speed} cfg={guidance_scale} steps={num_step} denoise={denoise} postprocess={postprocess_output} instruct='{instruct}' ref_text={'sim' if ref_text and ref_text.strip() else 'vazio'} pitch_shift={pitch_shift_semitones:+.1f} text='{chunk_text[:40]}...'")
+            
+            start_chunk = time.time()
+            loop = asyncio.get_event_loop()
+            audio_list = await loop.run_in_executor(None, lambda k=chunk_kw: _model.generate(**k))
+            elapsed_chunk = time.time() - start_chunk
+            total_gen_time += elapsed_chunk
+
+            chunk_audio = audio_list[0]
+            if hasattr(chunk_audio, "cpu"):
+                chunk_audio = chunk_audio.cpu().detach().numpy()
+            
+            # Pitch-shift reverso na SAIDA para cada trecho
+            if pitch_shift_semitones != 0.0:
+                if chunk_idx == 0:
+                    print(f"[PitchShift] SAIDA: {-pitch_shift_semitones:+.1f} semitons no audio gerado")
+                chunk_audio = _pitch_shift_audio(chunk_audio.astype(np.float32), SAMPLE_RATE, -pitch_shift_semitones)
+            
+            all_audio.append(chunk_audio)
+            print(f"[Native] Trecho{chunk_label} OK: {elapsed_chunk:.2f}s ({len(chunk_audio)/SAMPLE_RATE:.1f}s audio)")
+
+        # Concatenar trechos
+        raw_audio = np.concatenate(all_audio) if len(all_audio) > 1 else all_audio[0]
+        elapsed = total_gen_time
 
         # ================================================================
         # TRIM NA SAIDA DESATIVADO
@@ -774,7 +839,8 @@ async def native_generate(request):
         waveform_int16 = (raw_audio * 32767).astype(np.int16)
         audio_duration = len(waveform_int16) / SAMPLE_RATE
         rtf = elapsed / audio_duration if audio_duration > 0 else 0
-        print(f"[Native] OK: {elapsed:.2f}s (duracao={audio_duration:.1f}s, RTF={rtf:.3f})")
+        chunks_info = f" ({len(text_chunks)} trechos)" if len(text_chunks) > 1 else ""
+        print(f"[Native] OK: {elapsed:.2f}s (duracao={audio_duration:.1f}s, RTF={rtf:.3f}){chunks_info}")
 
         _post_generate_cleanup()
 

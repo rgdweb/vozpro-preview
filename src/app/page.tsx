@@ -729,8 +729,7 @@ export default function VozProClient() {
   const [generatingSegmentIndex, setGeneratingSegmentIndex] = useState<number>(-1)
   const [totalSegments, setTotalSegments] = useState(0)
   const [segmentResults, setSegmentResults] = useState<Array<{text: string; audioUrl: string}>>([])
-  const [autoSplitting, setAutoSplitting] = useState(false)
-  const autoSplitDoneRef = useRef(false)
+  // Auto-split REMOVIDO — texto não é mais dividido automaticamente
   const [trackEnabled, setTrackEnabled] = useState(false)
   const [trackVolume, setTrackVolume] = useState(1.0)
   const [duckVolume, setDuckVolume] = useState(DEFAULT_DUCKING.duckVolume)
@@ -792,66 +791,7 @@ export default function VozProClient() {
   const [freeDownloads, setFreeDownloads] = useState(0)
   const [paymentExempt, setPaymentExempt] = useState(false)
 
-  // ===== SMART AUTO-SPLIT: corta texto em ~200 chars nas pontuações =====
-  function smartSplitText(fullText: string, targetChars = 200): string[] {
-    if (fullText.length <= targetChars * 1.4) return [fullText]
-    const parts: string[] = []
-    let remaining = fullText.trim()
-    while (remaining.length > targetChars * 1.4) {
-      const searchStart = Math.max(targetChars - 40, 0)
-      const searchEnd = Math.min(remaining.length, targetChars + 60)
-      let splitPos = -1
-      // Prioridade: ! ? . ,
-      for (const punct of ['!', '?', '.']) {
-        for (let i = searchEnd; i >= searchStart; i--) {
-          if (remaining[i] === punct) {
-            splitPos = i + 1
-            break
-          }
-        }
-        if (splitPos >= 0) break
-      }
-      if (splitPos < 0) splitPos = targetChars
-      parts.push(remaining.substring(0, splitPos).trim())
-      remaining = remaining.substring(splitPos).trim()
-    }
-    if (remaining.length > 0) {
-      // Resto pequeno (< 50 chars) = junta com a última parte
-      if (remaining.length < 50 && parts.length > 0) {
-        parts[parts.length - 1] = parts[parts.length - 1] + ' ' + remaining
-      } else {
-        parts.push(remaining)
-      }
-    }
-    return parts
-  }
-
-  // Auto-split debounced: quando texto único passa de ~200 chars, divide automaticamente
-  useEffect(() => {
-    if (multiPartMode || autoSplitDoneRef.current) return
-    // Auto-split ativo: textos > ~280 chars sao divididos automaticamente
-    const timer = setTimeout(() => {
-      setAutoSplitting(true)
-      setTimeout(() => {
-        const parts = smartSplitText(text)
-        if (parts.length > 1) {
-          const newSegments = parts.map((p, i) => ({ id: `seg-auto-${i}-${Date.now()}`, text: p }))
-          setSegments(newSegments)
-          setMultiPartMode(true)
-          setText('')
-          autoSplitDoneRef.current = true
-          toast.info(`Texto dividido em ${parts.length} partes automaticamente`, { duration: 3000 })
-        }
-        setAutoSplitting(false)
-      }, 250)
-    }, 800)
-    return () => clearTimeout(timer)
-  }, [text, multiPartMode])
-
-  // Reset auto-split flag quando volta ao modo único
-  useEffect(() => {
-    if (!multiPartMode) autoSplitDoneRef.current = false
-  }, [multiPartMode])
+  // Auto-split REMOVIDO — o texto é enviado inteiro ao GPU, sem divisão automática
 
   // Segment management
   const addSegment = useCallback(() => {
@@ -868,9 +808,7 @@ export default function VozProClient() {
   }, [])
   // Auto-toggle multi-part mode based on segment count (manual add only)
   useEffect(() => {
-    if (!autoSplitDoneRef.current) {
-      setMultiPartMode(segments.length > 1)
-    }
+    setMultiPartMode(segments.length > 1)
   }, [segments.length])
 
   // Queue state
@@ -1364,13 +1302,16 @@ export default function VozProClient() {
           }
         }
 
-        // CORPO DA REQUISICAO - todos os dados que o PHP precisa
+        // CORPO DA REQUISICAO
         const body: Record<string, unknown> = {
           text: textToSend,
+          variationId: selectedVariationId || undefined,
+          voiceMode: voiceMode === 'clone_fast' ? 'clone_fast' : undefined,
+          speakerFile: voiceMode === 'clone_fast' ? (selectedVoice?.speakerFile || undefined) : undefined,
         language,
         refAudioUrl: selectedVariation?.refAudioServerUrl || '',
         refAudioPath: selectedVariation?.refAudioPath || '',
-        refText: uploadedVoiceRefText || selectedVariation?.refText || '',  // usa transcricao do upload clone ou texto do admin; vazio = Whisper auto-transcreve (pode errar)
+        refText: uploadedVoiceRefText || selectedVariation?.refText || '',
         instruct: instructStr,
         refAudioName: selectedVariation?.refAudioName || 'ref_audio.wav',
         speed,
@@ -1418,29 +1359,13 @@ export default function VozProClient() {
           voiceMode,
         }
 
-        console.log(`[F5-TTS] Gerando via tunnel... modo: ${voiceMode}`)
+        console.log(`[F5-TTS] Gerando via /api/generate (WireGuard direto)... modo: ${voiceMode}`)
 
-        // Obter token HMAC para autenticacao com o PHP
-        const tokenRes = await fetch('/api/generate-token')
-        if (!tokenRes.ok) {
-          toast.error('Erro ao obter token de geracao')
-          return
-        }
-        const { token: tunnelToken } = await tokenRes.json()
-        if (!tunnelToken) {
-          toast.error('Servidor nao configurado corretamente')
-          return
-        }
-
-        // Chamar Oracle via Nginx + WireGuard (zero tunnel, zero PHP proxy)
-        const oracleApi = process.env.NEXT_PUBLIC_AUDIO_SERVER_URL || 'https://api.cvmnews.com.br'
-        res = await fetch(`${oracleApi}/api/native-generate`, {
+        // Chamar via /api/generate (server-side usa WireGuard direto, sem SSL/cert issues)
+        res = await fetch('/api/generate', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Generate-Token': tunnelToken,
-          },
-          body: JSON.stringify(tunnelBody),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
           signal: controller.signal,
         })
       } else if (usePhpGenerate) {
@@ -2609,12 +2534,7 @@ export default function VozProClient() {
                     </div>
                   </div>
 
-                  {autoSplitting ? (
-                    <div className="flex items-center justify-center gap-2 py-8 text-violet-300">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span className="text-sm">Processando texto...</span>
-                    </div>
-                  ) : !multiPartMode ? (
+                  {!multiPartMode ? (
                     <Textarea
                       id="tts-text"
                       value={text}

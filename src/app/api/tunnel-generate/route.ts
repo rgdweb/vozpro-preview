@@ -27,6 +27,7 @@ import { fixAudioServerUrl } from '@/lib/audio-server'
 export const maxDuration = 300
 
 const ORACLE_BASE = 'http://147.15.77.137'
+const GPU_DIRECT_URL = process.env.GPU_DIRECT_URL || 'http://10.99.0.2:7860'
 
 // ============================================================
 // DEBUG
@@ -47,10 +48,25 @@ function createDebug() {
 // ============================================================
 
 async function getGpuUrl(debug: ReturnType<typeof createDebug>): Promise<string> {
-  // v4.0: WireGuard VPN — IP fixo, sem tunnel, sem get_tunnel.php
-  // Nginx no Oracle faz proxy direto para 10.99.0.2:7860 via WireGuard
-  // Antes: descobria URL do Cloudflare Tunnel (mudava a cada reinicio)
-  // Agora: IP fixo permanente, zero terceiro
+  // v4.1: Try WireGuard direct first (bypasses nginx/SSL issues), then ORACLE_BASE as fallback
+  // WireGuard direct: http://10.99.0.2:7860 — no SSL, no nginx, no cert issues
+  // ORACLE_BASE: http://147.15.77.137 — nginx proxy, sometimes SSL cert mismatch
+
+  // Try 1: WireGuard direct URL
+  try {
+    const res = await fetch(`${GPU_DIRECT_URL}/health`, { cache: 'no-store', signal: AbortSignal.timeout(10000) })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    if (data.status !== 'ok' || !data.model_loaded) {
+      throw new Error('GPU offline (modelo nao carregado)')
+    }
+    debug.log('WireGuard Direct', 'ok', `GPU online via WireGuard direct (${GPU_DIRECT_URL})`)
+    return GPU_DIRECT_URL
+  } catch (directErr) {
+    debug.log('WireGuard Direct', 'warn', `Falhou: ${directErr instanceof Error ? directErr.message : String(directErr)}, tentando ORACLE_BASE...`)
+  }
+
+  // Try 2: ORACLE_BASE (nginx fallback)
   try {
     const res = await fetch(`${ORACLE_BASE}/health`, { cache: 'no-store', signal: AbortSignal.timeout(10000) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -58,10 +74,10 @@ async function getGpuUrl(debug: ReturnType<typeof createDebug>): Promise<string>
     if (data.status !== 'ok' || !data.model_loaded) {
       throw new Error('GPU offline (modelo nao carregado)')
     }
-    debug.log('WireGuard VPN', 'ok', 'GPU online via WireGuard (IP fixo)')
+    debug.log('ORACLE_BASE', 'ok', 'GPU online via Oracle nginx fallback')
     return ORACLE_BASE
   } catch (err) {
-    throw new Error('GPU offline: ' + (err instanceof Error ? err.message : String(err)))
+    throw new Error('GPU offline (direct + nginx fallback): ' + (err instanceof Error ? err.message : String(err)))
   }
 }
 

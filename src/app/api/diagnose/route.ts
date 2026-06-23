@@ -12,6 +12,7 @@ import { NextResponse } from 'next/server'
  */
 
 const ORACLE_BASE = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
+const GPU_DIRECT_URL = process.env.GPU_DIRECT_URL || 'http://10.99.0.2:7860'
 
 interface CheckResult {
   name: string
@@ -27,14 +28,16 @@ export async function GET(req: Request) {
   const startTime = Date.now()
 
   // ============================================================
-  // 1. WIREGUARD VPN CHECK — GPU health via Oracle Nginx
+  // 1. WIREGUARD VPN CHECK — GPU health via WireGuard Direct first, then Oracle Nginx fallback
   // ============================================================
   let wireGuardAlive = false
   let gpuOnline = false
+  let usedGpuUrl = GPU_DIRECT_URL
 
+  // Try 1: WireGuard direct URL
   try {
     const t0 = Date.now()
-    const res = await fetch(`${ORACLE_BASE}/health`, {
+    const res = await fetch(`${GPU_DIRECT_URL}/health`, {
       cache: 'no-store',
       signal: AbortSignal.timeout(10000),
     })
@@ -44,34 +47,71 @@ export async function GET(req: Request) {
       gpuOnline = true
       wireGuardAlive = true
       checks.push({
-        name: 'WireGuard VPN',
+        name: 'WireGuard Direct',
         status: 'ok',
-        detail: `GPU online via WireGuard (10.99.0.2:7860) — model_loaded=true, pitch_engine=${data.pitch_engine || 'unknown'}`,
+        detail: `GPU online via WireGuard direct (${GPU_DIRECT_URL}) — model_loaded=true, pitch_engine=${data.pitch_engine || 'unknown'}`,
         durationMs: Date.now() - t0,
       })
     } else {
       checks.push({
-        name: 'WireGuard VPN',
+        name: 'WireGuard Direct',
         status: 'warn',
-        detail: `Oracle respondeu mas GPU modelo nao carregado: status=${data.status}`,
+        detail: `WireGuard direct respondeu mas GPU modelo nao carregado: status=${data.status}`,
         durationMs: Date.now() - t0,
       })
     }
-  } catch (err) {
+  } catch (directErr) {
     checks.push({
-      name: 'WireGuard VPN',
-      status: 'error',
-      detail: `Falha ao conectar Oracle/WireGuard: ${err instanceof Error ? err.message : String(err)}`,
+      name: 'WireGuard Direct',
+      status: 'warn',
+      detail: `Falha via WireGuard direct (${GPU_DIRECT_URL}): ${directErr instanceof Error ? directErr.message : String(directErr)}, tentando ORACLE_BASE...`,
     })
   }
 
+  // Try 2: ORACLE_BASE (nginx fallback) — only if direct failed
+  if (!wireGuardAlive) {
+    usedGpuUrl = ORACLE_BASE
+    try {
+      const t0 = Date.now()
+      const res = await fetch(`${ORACLE_BASE}/health`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(10000),
+      })
+      const data = await res.json()
+
+      if (data.status === 'ok' && data.model_loaded) {
+        gpuOnline = true
+        wireGuardAlive = true
+        checks.push({
+          name: 'WireGuard VPN (fallback)',
+          status: 'ok',
+          detail: `GPU online via Oracle nginx fallback (${ORACLE_BASE}) — model_loaded=true`,
+          durationMs: Date.now() - t0,
+        })
+      } else {
+        checks.push({
+          name: 'WireGuard VPN (fallback)',
+          status: 'warn',
+          detail: `Oracle respondeu mas GPU modelo nao carregado: status=${data.status}`,
+          durationMs: Date.now() - t0,
+        })
+      }
+    } catch (err) {
+      checks.push({
+        name: 'WireGuard VPN (fallback)',
+        status: 'error',
+        detail: `Falha ao conectar Oracle/WireGuard: ${err instanceof Error ? err.message : String(err)}`,
+      })
+    }
+  }
+
   // ============================================================
-  // 2. NATIVE API CHECK — /api/native-generate endpoint
+  // 2. NATIVE API CHECK — /api/native-generate endpoint (via usedGpuUrl)
   // ============================================================
   if (wireGuardAlive) {
     try {
       const t0 = Date.now()
-      const nativeRes = await fetch(`${ORACLE_BASE}/api/native-generate`, {
+      const nativeRes = await fetch(`${usedGpuUrl}/api/native-generate`, {
         method: 'OPTIONS',
         signal: AbortSignal.timeout(8000),
       })
@@ -114,7 +154,7 @@ export async function GET(req: Request) {
         guidance_scale: 2.0,
       }
 
-      const genRes = await fetch(`${ORACLE_BASE}/api/native-generate`, {
+      const genRes = await fetch(`${usedGpuUrl}/api/native-generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(testPayload),
@@ -174,7 +214,7 @@ export async function GET(req: Request) {
     name: 'WireGuard VPN',
     status: wireGuardAlive ? 'ok' : 'error',
     detail: wireGuardAlive
-      ? `GPU online via Oracle Nginx (${ORACLE_BASE})`
+      ? `GPU online via ${usedGpuUrl}`
       : `WireGuard offline — verifique WireGuard no Oracle e GPU PC`,
   })
 
@@ -192,7 +232,9 @@ export async function GET(req: Request) {
     totalDurationMs: Date.now() - startTime,
     summary: { ok: okCount, warn: warnCount, error: errorCount, total: checks.length },
     wireguard: {
-      url: ORACLE_BASE,
+      url: usedGpuUrl,
+      directUrl: GPU_DIRECT_URL,
+      oracleUrl: ORACLE_BASE,
       alive: wireGuardAlive,
       gpuOnline,
     },

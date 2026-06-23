@@ -18,8 +18,10 @@ import { stripSSMLForTTS } from '@/lib/ssml-parser'
 
 export const maxDuration = 300
 
-// v4.0: WireGuard VPN — Oracle Nginx proxies to 10.99.0.2:7860
-// Zero tunnel, zero Cloudflare, IP fixo permanente
+// v4.1: WireGuard VPN direto — sem passar pelo nginx/SSL
+// Server-to-server usa WireGuard (10.99.0.2:7860), evitando erro de certificado SSL
+// Fallback para AUDIO_SERVER_URL apenas se WireGuard não estiver disponível
+const GPU_DIRECT_URL = process.env.GPU_DIRECT_URL || 'http://10.99.0.2:7860'
 const ORACLE_BASE = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
 
 // Cache do health check — evita consultar GPU a cada requisicao
@@ -37,30 +39,43 @@ function createDebug() {
 }
 
 // ============================================================
-// CHECK GPU VIA WIREGUARD (health check via Oracle Nginx)
+// CHECK GPU VIA WIREGUARD DIRETO (sem nginx/SSL)
 // ============================================================
 
 async function checkGpuOnline(debug: ReturnType<typeof createDebug>): Promise<string> {
   // Usar cache se disponível e recente (< 30s)
   if (_gpuHealthCache && _gpuHealthCache.online && (Date.now() - _gpuHealthCache.timestamp) < _GPU_CACHE_MS) {
-    debug.log('WireGuard VPN', 'ok', 'GPU online via cache (IP fixo)')
+    debug.log('WireGuard VPN', 'ok', 'GPU online via cache')
     return _gpuHealthCache.url
   }
 
+  // Tentar WireGuard direto primeiro (sem SSL, sem nginx)
   try {
-    const res = await fetch(`${ORACLE_BASE}/health`, { cache: 'no-store', signal: AbortSignal.timeout(10000) })
+    const res = await fetch(`${GPU_DIRECT_URL}/health`, { cache: 'no-store', signal: AbortSignal.timeout(10000) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     if (data.status !== 'ok' || !data.model_loaded) {
       throw new Error('GPU offline (modelo nao carregado)')
     }
-    // Salvar no cache
-    _gpuHealthCache = { online: true, url: ORACLE_BASE, timestamp: Date.now() }
-    debug.log('WireGuard VPN', 'ok', 'GPU online via WireGuard (IP fixo)')
-    return ORACLE_BASE
-  } catch (err) {
-    _gpuHealthCache = { online: false, url: '', timestamp: Date.now() }
-    throw new Error('GPU offline: ' + (err instanceof Error ? err.message : String(err)))
+    _gpuHealthCache = { online: true, url: GPU_DIRECT_URL, timestamp: Date.now() }
+    debug.log('WireGuard VPN', 'ok', 'GPU online via WireGuard direto')
+    return GPU_DIRECT_URL
+  } catch (directErr) {
+    // Fallback: tentar via nginx (URL externa)
+    try {
+      const res = await fetch(`${ORACLE_BASE}/health`, { cache: 'no-store', signal: AbortSignal.timeout(10000) })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      if (data.status !== 'ok' || !data.model_loaded) {
+        throw new Error('GPU offline (modelo nao carregado)')
+      }
+      _gpuHealthCache = { online: true, url: ORACLE_BASE, timestamp: Date.now() }
+      debug.log('WireGuard VPN', 'ok', 'GPU online via nginx fallback')
+      return ORACLE_BASE
+    } catch (nginxErr) {
+      _gpuHealthCache = { online: false, url: '', timestamp: Date.now() }
+      throw new Error('GPU offline: WireGuard=' + (directErr instanceof Error ? directErr.message : String(directErr)) + ' | Nginx=' + (nginxErr instanceof Error ? nginxErr.message : String(nginxErr)))
+    }
   }
 }
 

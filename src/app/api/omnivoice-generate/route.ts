@@ -9,9 +9,28 @@ import { trimAudioBuffer } from '@/lib/audio-trimmer'
 export const dynamic = 'force-dynamic' // Nunca cachar esta rota no Vercel
 
 const ORACLE_BASE = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
+const GPU_DIRECT_URL = process.env.GPU_DIRECT_URL || 'http://10.99.0.2:7860'
 
 async function getGpuUrl(debug: ReturnType<typeof createDebug>): Promise<string> {
-  // v4.0: WireGuard VPN — IP fixo, sem tunnel, sem get_tunnel.php
+  // v4.1: Try WireGuard direct first (bypasses nginx/SSL issues), then ORACLE_BASE as fallback
+  // WireGuard direct: http://10.99.0.2:7860 — no SSL, no nginx, no cert issues
+  // ORACLE_BASE: http://147.15.77.137 — nginx proxy, sometimes SSL cert mismatch
+
+  // Try 1: WireGuard direct URL
+  try {
+    const res = await fetch(`${GPU_DIRECT_URL}/health`, { cache: 'no-store', signal: AbortSignal.timeout(10000) })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    if (data.status !== 'ok' || !data.model_loaded) {
+      throw new Error('GPU offline (modelo nao carregado)')
+    }
+    debug.log('WireGuard Direct', 'ok', `GPU online via WireGuard direct (${GPU_DIRECT_URL})`)
+    return GPU_DIRECT_URL
+  } catch (directErr) {
+    debug.log('WireGuard Direct', 'warn', `Falhou: ${directErr instanceof Error ? directErr.message : String(directErr)}, tentando ORACLE_BASE...`)
+  }
+
+  // Try 2: ORACLE_BASE (nginx fallback)
   try {
     const res = await fetch(`${ORACLE_BASE}/health`, { cache: 'no-store', signal: AbortSignal.timeout(10000) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -19,10 +38,10 @@ async function getGpuUrl(debug: ReturnType<typeof createDebug>): Promise<string>
     if (data.status !== 'ok' || !data.model_loaded) {
       throw new Error('GPU offline (modelo nao carregado)')
     }
-    debug.log('WireGuard VPN', 'ok', 'GPU online via WireGuard (IP fixo)')
+    debug.log('ORACLE_BASE', 'ok', 'GPU online via Oracle nginx fallback')
     return ORACLE_BASE
   } catch (err) {
-    throw new Error('GPU offline: ' + (err instanceof Error ? err.message : String(err)))
+    throw new Error('GPU offline (direct + nginx fallback): ' + (err instanceof Error ? err.message : String(err)))
   }
 }
 
@@ -478,9 +497,11 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   let reachable = false
+  let usedUrl = GPU_DIRECT_URL
 
+  // Try WireGuard direct first, then ORACLE_BASE fallback
   try {
-    const res = await fetch(`${ORACLE_BASE}/health`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+    const res = await fetch(`${GPU_DIRECT_URL}/health`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
     if (res.ok) {
       const data = await res.json()
       reachable = data.status === 'ok' && !!data.model_loaded
@@ -489,9 +510,23 @@ export async function GET() {
     reachable = false
   }
 
+  // Fallback to ORACLE_BASE if direct failed
+  if (!reachable) {
+    usedUrl = ORACLE_BASE
+    try {
+      const res = await fetch(`${ORACLE_BASE}/health`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+      if (res.ok) {
+        const data = await res.json()
+        reachable = data.status === 'ok' && !!data.model_loaded
+      }
+    } catch {
+      reachable = false
+    }
+  }
+
   return NextResponse.json({
     status: reachable ? 'tts_engine_available' : 'tts_engine_unavailable',
-    url: ORACLE_BASE,
+    url: usedUrl,
     reachable,
     model: 'k2-fsa/OmniVoice',
     viaWireGuard: true,

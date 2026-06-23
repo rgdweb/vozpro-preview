@@ -21,6 +21,7 @@ import { db } from '@/lib/db'
 const MAX_CONCURRENT_GENERATIONS = 1
 const PROCESSING_TIMEOUT_MS = 3 * 60 * 1000 // 3 minutos — consistente com GPU timeout
 const GPU_HEALTH_CHECK_MS = 5000 // 5 segundos timeout para health check
+const GPU_DIRECT_URL = process.env.GPU_DIRECT_URL || 'http://10.99.0.2:7860'
 const ORACLE_BASE = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
 
 // ============================================================
@@ -75,7 +76,8 @@ async function checkGPUHealth(): Promise<GPUHealthResult> {
   }
 
   try {
-    const healthRes = await fetch(`${ORACLE_BASE}/health`, {
+    // Tentar WireGuard direto primeiro (sem SSL, sem nginx)
+    const healthRes = await fetch(`${GPU_DIRECT_URL}/health`, {
       cache: 'no-store',
       signal: AbortSignal.timeout(GPU_HEALTH_CHECK_MS),
     })
@@ -92,15 +94,40 @@ async function checkGPUHealth(): Promise<GPUHealthResult> {
       } else {
         result.gpuOnline = true
         result.wireGuardAlive = true
-        result.gpuUrl = ORACLE_BASE
+        result.gpuUrl = GPU_DIRECT_URL
         result.responseTime = Date.now() - startTime
         gpuHealthStatus = 'online'
         lastGPUContact = Date.now()
       }
     }
-  } catch (err) {
-    result.error = err instanceof Error ? err.message : String(err)
-    gpuHealthStatus = 'offline'
+  } catch (directErr) {
+    // Fallback: tentar via nginx (URL externa)
+    try {
+      const healthRes = await fetch(`${ORACLE_BASE}/health`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(GPU_HEALTH_CHECK_MS),
+      })
+      if (healthRes.ok) {
+        const healthData = await healthRes.json()
+        if (healthData.status === 'ok' && healthData.model_loaded) {
+          result.gpuOnline = true
+          result.wireGuardAlive = true
+          result.gpuUrl = ORACLE_BASE
+          result.responseTime = Date.now() - startTime
+          gpuHealthStatus = 'online'
+          lastGPUContact = Date.now()
+        } else {
+          result.error = healthData.error || 'GPU reportou status offline'
+          gpuHealthStatus = 'offline'
+        }
+      } else {
+        result.error = `/health retornou HTTP ${healthRes.status}`
+        gpuHealthStatus = 'offline'
+      }
+    } catch (nginxErr) {
+      result.error = 'WireGuard: ' + (directErr instanceof Error ? directErr.message : String(directErr)) + ' | Nginx: ' + (nginxErr instanceof Error ? nginxErr.message : String(nginxErr))
+      gpuHealthStatus = 'offline'
+    }
   }
 
   // Salvar no cache

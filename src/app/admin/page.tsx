@@ -25,7 +25,7 @@ import { Switch } from '@/components/ui/switch'
 import { Slider } from '@/components/ui/slider'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import {
-  AudioWaveform, LogOut, Plus, Trash2, Edit, FileText, Upload, Music, Mic, Zap,
+  AudioWaveform, LogOut, Plus, Trash2, Edit, FileText, Upload, Music, Mic,
   Loader2, RefreshCw, Volume2, FileAudio, CheckCircle2, Settings2,
   FolderOpen, ChevronLeft, FolderPlus, Folder, Play, Pause, Users, UserPlus, Shield,
   UploadCloud, X, Download, VolumeX, CreditCard, Chrome, DollarSign, Tag
@@ -3174,30 +3174,6 @@ export default function AdminDashboard() {
                                       <Button variant="ghost" size="sm" onClick={() => document.getElementById(`quick-audio-${selectedVoiceCategory}-${v.id}`)?.click()} className={`h-7 px-2 text-xs gap-1 ${(v.refAudioPath || v.refAudioServerUrl) ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30' : 'text-amber-400 hover:text-amber-300 hover:bg-amber-900/30'}`}><Upload className="w-3 h-3" />{(v.refAudioPath || v.refAudioServerUrl) ? 'Update' : 'Add'}</Button>
                                       <Button variant="ghost" size="sm" onClick={() => handleEditVariationWithAudio(v)} className="h-7 px-2 text-xs text-slate-400 hover:text-white hover:bg-slate-700 gap-1"><Edit className="w-3 h-3" />Editar</Button>
                                       <Switch checked={v.active} onCheckedChange={() => handleToggleVariation(v)} className="scale-75" />
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        disabled={convertingSpeakerId === v.id || !v.refAudioServerUrl}
-                                        onClick={() => handleToggleSpeaker(v, voice.name)}
-                                        className={`h-7 w-7 ${speakerVarIds.has(slugify(voice.name) + '_' + slugify(v.label) + '.wav') ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30' : 'text-amber-400/70 hover:text-amber-300 hover:bg-amber-900/30'}`}
-                                        title={speakerVarIds.has(slugify(voice.name) + '_' + slugify(v.label) + '.wav') ? 'Desativar Clonagem Rapida' : 'Ativar Clonagem Rapida (Locutor Oficial)'}
-                                      >
-                                        {convertingSpeakerId === v.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-                                      </Button>
-                                      {(() => {
-                                        const sf = slugify(voice.name) + '_' + slugify(v.label) + '.wav'
-                                        const sp = speakersData.find((s: { speakerFile: string }) => s.speakerFile === sf)
-                                        if (!sp) return null
-                                        return (
-                                          <button
-                                            onClick={() => { setEditingSpeakerId(sp.id); setSpeakerRefText(sp.refText || '') }}
-                                            className={`h-7 w-7 rounded flex items-center justify-center shrink-0 ${sp.refText ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30' : 'text-amber-400/70 hover:text-amber-300 hover:bg-amber-900/30'}`}
-                                            title={sp.refText ? 'Texto ref: ' + sp.refText.substring(0, 50) : 'Sem texto de referencia (clique para adicionar)'}
-                                          >
-                                            <FileText className="w-3 h-3" />
-                                          </button>
-                                        )
-                                      })()}
                                       <Button variant="ghost" size="icon" onClick={() => handleDeleteVariation(v.id)} className="text-slate-500 hover:text-red-400 h-7 w-7"><Trash2 className="w-3 h-3" /></Button>
                                     </div>
                                   </div>
@@ -3487,7 +3463,7 @@ export default function AdminDashboard() {
                   <Textarea
                     value={variationForm.refText}
                     onChange={(e) => setVariationForm(p => ({ ...p, refText: e.target.value }))}
-                    placeholder="Transcrição do áudio. Deixe vazio para transcrição automática."
+                    placeholder="Cole aqui o que o locutor fala no áudio de referência. Melhora muito a clonagem."
                     className="bg-slate-900/50 border-slate-600 text-white resize-none"
                     rows={2}
                   />
@@ -4188,25 +4164,6 @@ export default function AdminDashboard() {
             <HealthSection />
           </TabsContent>
         </Tabs>
-                    {/* Dialog: Editar refText do Locutor Oficial */}
-              {editingSpeakerId && (
-                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setEditingSpeakerId(null)}>
-                  <div className="bg-slate-800 rounded-xl p-6 max-w-lg w-full mx-4 border border-slate-600" onClick={e => e.stopPropagation()}>
-                    <h3 className="text-lg font-semibold text-white mb-2">Texto de Referencia do Locutor</h3>
-                    <p className="text-sm text-slate-400 mb-4">Cole a transcricao exata do que o locutor fala no audio de referencia. Isso melhora drasticamente a qualidade da clonagem.</p>
-                    <textarea
-                      className="w-full h-40 bg-slate-900 border border-slate-600 rounded-lg p-3 text-white text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-500"
-                      placeholder="Ex: Bom dia senhores, bem-vindos ao programa matinal da nossa radio..."
-                      value={speakerRefText}
-                      onChange={e => setSpeakerRefText(e.target.value)}
-                    />
-                    <div className="flex gap-2 mt-4 justify-end">
-                      <button onClick={() => setEditingSpeakerId(null)} className="px-4 py-2 text-sm text-slate-400 hover:text-white rounded-lg hover:bg-slate-700">Cancelar</button>
-                      <button onClick={() => handleSaveSpeakerRefText(editingSpeakerId)} className="px-4 py-2 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-500">Salvar</button>
-                    </div>
-                  </div>
-                </div>
-              )}
 </main>
 
       {/* Track Category Management Dialog */}

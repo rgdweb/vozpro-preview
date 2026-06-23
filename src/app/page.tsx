@@ -1359,13 +1359,34 @@ export default function VozProClient() {
           voiceMode,
         }
 
-        console.log(`[F5-TTS] Gerando via /api/generate (WireGuard direto)... modo: ${voiceMode}`)
+        console.log(`[F5-TTS] Gerando via /api/gpu-proxy (WireGuard direto)... modo: ${voiceMode}`)
 
-        // Chamar via /api/generate (server-side usa WireGuard direto, sem SSL/cert issues)
-        res = await fetch('/api/generate', {
+        // Montar payload no formato que o GPU espera (snake_case)
+        const gpuPayload: Record<string, unknown> = {
+          text: textToSend,
+          voice_mode: voiceMode,
+          ref_audio_url: processedRefUrl || refUrl || '',
+          ref_audio_base64: processedRefBase64 || '',
+          ref_text: uploadedVoiceRefText || selectedVariation?.refText || '',
+          ref_audio_name: voiceMode === 'design' ? undefined : refName,
+          instruct: finalInstruct || '',
+          language: language || 'Auto',
+          speed,
+          num_step: numStep,
+          guidance_scale: guidanceScale,
+          denoise,
+          postprocess_output: postprocessOutput,
+          preprocess_prompt: preprocessPrompt,
+        }
+        if (voiceMode === 'clone_fast' && selectedVoice?.speakerFile) {
+          gpuPayload.speaker_id = selectedVoice.speakerFile
+        }
+
+        // Chamar via proxy transparente (server-side repassa pro GPU via WireGuard)
+        res = await fetch('/api/gpu-proxy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify(gpuPayload),
           signal: controller.signal,
         })
       } else if (usePhpGenerate) {

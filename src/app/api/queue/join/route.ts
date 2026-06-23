@@ -2,9 +2,9 @@
  * 🚨 CONTRATO DE GOVERNANÇA EXECUTIVA - VOZPRO (SaaS HÍBRIDO)
  * ARQUIVO CRÍTICO: Controle de fila de geração (concorrência e rate limiting).
  *
- * ⚡ SISTEMA PREMIUM DE FILA INTELIGENTE v2.0
- * - Health check REAL na GPU a cada poll (não só timeout cego)
- * - 1 minuto de timeout absoluto como backup
+ * ⚡ SISTEMA PREMIUM DE FILA INTELIGENTE v2.1
+ * - Health check com CACHE de 30s (nao consulta GPU a cada poll)
+ * - 3 minutos de timeout absoluto como backup
  * - Detecção inteligente: GPU online + respondendo = mantém | GPU offline/túnel morto = libera
  * - Heartbeat: registra última comunicação com GPU
  * - Auto-promote imediato ao detectar item preso
@@ -19,7 +19,7 @@ import { getSession } from '@/lib/auth'
 import { db } from '@/lib/db'
 
 const MAX_CONCURRENT_GENERATIONS = 1
-const PROCESSING_TIMEOUT_MS = 1 * 60 * 1000 // 1 minuto — backup absoluto
+const PROCESSING_TIMEOUT_MS = 3 * 60 * 1000 // 3 minutos — consistente com GPU timeout
 const GPU_HEALTH_CHECK_MS = 5000 // 5 segundos timeout para health check
 const ORACLE_BASE = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
 
@@ -29,13 +29,17 @@ const ORACLE_BASE = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
 let lastGPUContact: number = 0
 let gpuHealthStatus: 'online' | 'offline' | 'unknown' = 'unknown'
 
-// Atualizar heartbeat quando a GPU responde
+// ============================================================
+// 🏥 CACHE DO HEALTH CHECK — evita consultar GPU a cada poll
+// ============================================================
+let healthCache: { result: GPUHealthResult; timestamp: number } | null = null
+const HEALTH_CACHE_MS = 30000 // 30 segundos de cache
+
 export function touchGPUHeartbeat() {
   lastGPUContact = Date.now()
   gpuHealthStatus = 'online'
 }
 
-// Obter status da GPU
 export function getGPUHealthInfo() {
   return {
     status: gpuHealthStatus,
@@ -45,7 +49,7 @@ export function getGPUHealthInfo() {
 }
 
 // ============================================================
-// 🏥 HEALTH CHECK INTELIGENTE — verifica GPU REALMENTE está viva via WireGuard
+// 🏥 HEALTH CHECK INTELIGENTE COM CACHE
 // ============================================================
 interface GPUHealthResult {
   gpuOnline: boolean
@@ -56,6 +60,11 @@ interface GPUHealthResult {
 }
 
 async function checkGPUHealth(): Promise<GPUHealthResult> {
+  // Se temos cache recente (< 30s), usar cache
+  if (healthCache && (Date.now() - healthCache.timestamp) < HEALTH_CACHE_MS) {
+    return healthCache.result
+  }
+
   const startTime = Date.now()
   const result: GPUHealthResult = {
     gpuOnline: false,
@@ -66,7 +75,6 @@ async function checkGPUHealth(): Promise<GPUHealthResult> {
   }
 
   try {
-    // WireGuard VPN: check /health endpoint via Oracle Nginx
     const healthRes = await fetch(`${ORACLE_BASE}/health`, {
       cache: 'no-store',
       signal: AbortSignal.timeout(GPU_HEALTH_CHECK_MS),
@@ -75,30 +83,29 @@ async function checkGPUHealth(): Promise<GPUHealthResult> {
     if (!healthRes.ok) {
       result.error = `/health retornou HTTP ${healthRes.status}`
       gpuHealthStatus = 'offline'
-      return result
+    } else {
+      const healthData = await healthRes.json()
+
+      if (healthData.status !== 'ok' || !healthData.model_loaded) {
+        result.error = healthData.error || 'GPU reportou status offline'
+        gpuHealthStatus = 'offline'
+      } else {
+        result.gpuOnline = true
+        result.wireGuardAlive = true
+        result.gpuUrl = ORACLE_BASE
+        result.responseTime = Date.now() - startTime
+        gpuHealthStatus = 'online'
+        lastGPUContact = Date.now()
+      }
     }
-
-    const healthData = await healthRes.json()
-
-    if (healthData.status !== 'ok' || !healthData.model_loaded) {
-      result.error = healthData.error || 'GPU reportou status offline'
-      gpuHealthStatus = 'offline'
-      return result
-    }
-
-    result.gpuOnline = true
-    result.wireGuardAlive = true
-    result.gpuUrl = ORACLE_BASE
-    result.responseTime = Date.now() - startTime
-    gpuHealthStatus = 'online'
-    lastGPUContact = Date.now()
-    return result
-
   } catch (err) {
     result.error = err instanceof Error ? err.message : String(err)
     gpuHealthStatus = 'offline'
-    return result
   }
+
+  // Salvar no cache
+  healthCache = { result, timestamp: Date.now() }
+  return result
 }
 
 // ============================================================
@@ -106,7 +113,6 @@ async function checkGPUHealth(): Promise<GPUHealthResult> {
 // ============================================================
 async function unstickProcessing(): Promise<{ released: number; reason: string }> {
   try {
-    // Buscar TODOS os itens em processing (sem filtro de tempo)
     const processingItems = await db.generationQueue.findMany({
       where: { status: 'processing' },
       select: { id: true, startedAt: true, createdAt: true },
@@ -116,33 +122,33 @@ async function unstickProcessing(): Promise<{ released: number; reason: string }
       return { released: 0, reason: 'no_processing_items' }
     }
 
-    // Verificar saúde da GPU em tempo real
+    // Se tem processing items, invalidar cache e fazer health check fresco
+    healthCache = null
     const health = await checkGPUHealth()
-    const elapsedMs = Date.now() - processingItems[0].startedAt.getTime()
-    const elapsedSec = Math.floor(elapsedMs / 1000)
-
-    console.log(`[Queue Premium] ${processingItems.length} processing há ${elapsedSec}s | GPU: ${health.gpuOnline ? 'ONLINE' : 'OFFLINE'} | WireGuard: ${health.wireGuardAlive ? 'VIVO' : 'MORTO'}`)
-
-    // LÓGICA INTELIGENTE:
-    // 1. GPU OFFLINE ou WireGuard MORTO → LIBERA IMEDIATAMENTE (0s de espera)
-    // 2. GPU online E WireGuard vivo E < 1min → mantém (processamento normal)
-    // 3. GPU online mas > 1min → libera por timeout absoluto
-
-    if (!health.gpuOnline || !health.wireGuardAlive) {
-      console.log(`[Queue Premium] ⚡ GPU OFFLINE/WireGuard morto → LIBERA IMEDIATAMENTE | Motivo: ${health.error}`)
+    const startedAt = processingItems[0].startedAt
+    if (!startedAt) {
+      console.log(`[Queue] Item processing sem startedAt → LIBERA`)
       const result = await db.generationQueue.updateMany({
         where: { status: 'processing' },
         data: { status: 'failed', completedAt: new Date() },
       })
-      if (result.count > 0) {
-        console.log(`[Queue Premium] ✅ Liberou ${result.count} item(s) preso(s) | gpu_offline`)
-      }
+      return { released: result.count, reason: 'no_started_at' }
+    }
+
+    const elapsedMs = Date.now() - startedAt.getTime()
+    const elapsedSec = Math.floor(elapsedMs / 1000)
+
+    if (!health.gpuOnline || !health.wireGuardAlive) {
+      console.log(`[Queue] GPU OFFLINE → LIBERA | Motivo: ${health.error}`)
+      const result = await db.generationQueue.updateMany({
+        where: { status: 'processing' },
+        data: { status: 'failed', completedAt: new Date() },
+      })
       return { released: result.count, reason: 'gpu_offline' }
     }
 
-    // GPU tá online = pode estar processando de verdade, só libera se excedeu 1min
     if (elapsedMs > PROCESSING_TIMEOUT_MS) {
-      console.log(`[Queue Premium] GPU online mas ${elapsedSec}s > 1min → LIBERA por timeout`)
+      console.log(`[Queue] GPU online mas ${elapsedSec}s > ${PROCESSING_TIMEOUT_MS / 1000}s → LIBERA por timeout`)
       const result = await db.generationQueue.updateMany({
         where: { status: 'processing' },
         data: { status: 'failed', completedAt: new Date() },
@@ -150,12 +156,10 @@ async function unstickProcessing(): Promise<{ released: number; reason: string }
       return { released: result.count, reason: 'timeout' }
     }
 
-    // GPU online + < 1min = processamento normal, manter
-    console.log(`[Queue Premium] GPU online + ${elapsedSec}s < 1min → MANTÉM (processando normal)`)
     return { released: 0, reason: 'processing_normal' }
 
   } catch (err) {
-    console.error(`[Queue Premium] Erro no unstick:`, err)
+    console.error(`[Queue] Erro no unstick:`, err)
     return { released: 0, reason: 'error' }
   }
 }
@@ -178,12 +182,12 @@ async function promoteNext(): Promise<boolean> {
         where: { id: nextWaiting.id },
         data: { status: 'processing', startedAt: new Date() },
       })
-      console.log('[Queue Premium] 🚀 Promoted:', nextWaiting.id)
+      console.log('[Queue] Promoted:', nextWaiting.id)
       return true
     }
     return false
   } catch (err) {
-    console.error('[Queue Premium] Erro promoteNext:', err)
+    console.error('[Queue] Erro promoteNext:', err)
     return false
   }
 }
@@ -208,8 +212,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
     }
 
-    // SISTEMA PREMIUM: desbloquear com health check inteligente
-    const { released, reason } = await unstickProcessing()
+    // Desbloquear itens presos (usa cache, rapido)
+    const { released } = await unstickProcessing()
     if (released > 0) {
       await promoteNext()
     }
@@ -238,17 +242,14 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // Contar quantos estão processando
     const processingCount = await db.generationQueue.count({
       where: { status: 'processing' },
     })
 
-    // Contar posição na fila
     const waitingCount = await db.generationQueue.count({
       where: { status: 'waiting' },
     })
 
-    // Criar entrada na fila
     const queueItem = await db.generationQueue.create({
       data: {
         userId: session.userId,
@@ -265,12 +266,12 @@ export async function POST(req: NextRequest) {
       gpuHealth: getGPUHealthInfo(),
     })
   } catch (error) {
-    console.error('[Queue Premium] Join error:', error)
+    console.error('[Queue] Join error:', error)
     return NextResponse.json({ error: 'Erro ao entrar na fila' }, { status: 500 })
   }
 }
 
-// GET /api/queue/status?id=xxx - Verificar posição na fila (COM HEALTH CHECK)
+// GET /api/queue/join?id=xxx - Verificar posição na fila
 export async function GET(req: NextRequest) {
   try {
     const session = await getSession()
@@ -285,8 +286,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'ID da fila não informado' }, { status: 400 })
     }
 
-    // SISTEMA PREMIUM: health check + unstick inteligente a cada poll
-    const { released, reason } = await unstickProcessing()
+    // Unstick leve (usa cache, quase instantâneo)
+    const { released } = await unstickProcessing()
     if (released > 0) {
       await promoteNext()
     }
@@ -300,7 +301,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Item não encontrado' }, { status: 404 })
     }
 
-    // Calcular posição atual
     let position = 0
     if (item.status === 'waiting') {
       position = await db.generationQueue.count({
@@ -311,7 +311,6 @@ export async function GET(req: NextRequest) {
       }) + 1
     }
 
-    // Se item foi liberado (failed), informar o cliente
     const wasReleased = item.status === 'failed'
 
     return NextResponse.json({
@@ -322,7 +321,7 @@ export async function GET(req: NextRequest) {
       ...(wasReleased ? { released: true, reason: 'gpu_offline_or_timeout' } : {}),
     })
   } catch (error) {
-    console.error('[Queue Premium] Status error:', error)
+    console.error('[Queue] Status error:', error)
     return NextResponse.json({ error: 'Erro ao verificar fila' }, { status: 500 })
   }
 }

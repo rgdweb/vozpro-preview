@@ -22,6 +22,10 @@ export const maxDuration = 300
 // Zero tunnel, zero Cloudflare, IP fixo permanente
 const ORACLE_BASE = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
 
+// Cache do health check — evita consultar GPU a cada requisicao
+let _gpuHealthCache: { online: boolean; url: string; timestamp: number } | null = null
+const _GPU_CACHE_MS = 30000 // 30 segundos
+
 function createDebug() {
   const steps: { time: string; step: string; status: string; detail?: string; duration?: number }[] = []
   const start = Date.now()
@@ -37,6 +41,12 @@ function createDebug() {
 // ============================================================
 
 async function checkGpuOnline(debug: ReturnType<typeof createDebug>): Promise<string> {
+  // Usar cache se disponível e recente (< 30s)
+  if (_gpuHealthCache && _gpuHealthCache.online && (Date.now() - _gpuHealthCache.timestamp) < _GPU_CACHE_MS) {
+    debug.log('WireGuard VPN', 'ok', 'GPU online via cache (IP fixo)')
+    return _gpuHealthCache.url
+  }
+
   try {
     const res = await fetch(`${ORACLE_BASE}/health`, { cache: 'no-store', signal: AbortSignal.timeout(10000) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -44,9 +54,12 @@ async function checkGpuOnline(debug: ReturnType<typeof createDebug>): Promise<st
     if (data.status !== 'ok' || !data.model_loaded) {
       throw new Error('GPU offline (modelo nao carregado)')
     }
+    // Salvar no cache
+    _gpuHealthCache = { online: true, url: ORACLE_BASE, timestamp: Date.now() }
     debug.log('WireGuard VPN', 'ok', 'GPU online via WireGuard (IP fixo)')
     return ORACLE_BASE
   } catch (err) {
+    _gpuHealthCache = { online: false, url: '', timestamp: Date.now() }
     throw new Error('GPU offline: ' + (err instanceof Error ? err.message : String(err)))
   }
 }

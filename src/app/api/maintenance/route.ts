@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 const ORACLE_URL = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
-const ORACLE_API_KEY = process.env.AUDIO_SERVER_API_KEY || 'omnivoice_api_key_2026_secure'
+const ORACLE_API_KEY = process.env.AUDIO_SERVER_API_KEY || 'omnivoice_sk_2024_secure_key_v4'
 
 /**
  * Maintenance API - Live repair tools

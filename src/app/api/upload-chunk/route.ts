@@ -6,7 +6,7 @@ function getAudioServerUrl(): string {
   return process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
 }
 function getAudioServerApiKey(): string {
-  return process.env.AUDIO_SERVER_API_KEY || ''
+  return process.env.AUDIO_SERVER_API_KEY || 'omnivoice_sk_2024_secure_key_v4'
 }
 
 export const maxDuration = 60

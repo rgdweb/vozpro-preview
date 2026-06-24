@@ -13,7 +13,7 @@ function getAudioServerUrl(): string {
 }
 
 function getAudioServerApiKey(): string {
-  return process.env.AUDIO_SERVER_API_KEY || ''
+  return process.env.AUDIO_SERVER_API_KEY || 'omnivoice_sk_2024_secure_key_v4'
 }
 
 export interface AudioUploadResult {

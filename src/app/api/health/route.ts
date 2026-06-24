@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
 const AUDIO_SERVER_URL = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
-const AUDIO_SERVER_API_KEY = process.env.AUDIO_SERVER_API_KEY || 'omnivoice_api_key_2026_secure'
+const AUDIO_SERVER_API_KEY = process.env.AUDIO_SERVER_API_KEY || 'omnivoice_sk_2024_secure_key_v4'
 
 // GET /api/health — Diagnóstico completo do sistema
 export async function GET() {

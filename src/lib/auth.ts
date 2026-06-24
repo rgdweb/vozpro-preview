@@ -192,10 +192,6 @@ export async function getAdminSession(): Promise<boolean> {
   try {
     const cookieStore = await cookies()
 
-    const hasNewCookie = !!cookieStore.get(NEW_SESSION_KEY)?.value
-    const hasLegacyCookie = !!cookieStore.get(LEGACY_SESSION_KEY)?.value
-    console.log('[Auth] getAdminSession cookies:', { hasNewCookie, hasLegacyCookie })
-
     // Garantir que existe pelo menos um admin no banco (não bloqueia se falhar)
     try {
       await ensureAdminExists()
@@ -207,7 +203,6 @@ export async function getAdminSession(): Promise<boolean> {
     const newToken = cookieStore.get(NEW_SESSION_KEY)?.value
     if (newToken) {
       const session = await verifySession(newToken)
-      console.log('[Auth] getAdminSession verifySession:', { authenticated: session.authenticated, role: session.role })
       if (session.authenticated) return true
     }
 

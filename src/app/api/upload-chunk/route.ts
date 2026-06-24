@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminSession } from '@/lib/auth'
 
-const AUDIO_SERVER_URL = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
-const AUDIO_SERVER_API_KEY = process.env.AUDIO_SERVER_API_KEY || ''
+// Ler env vars em tempo de execução (não em tempo de build)
+function getAudioServerUrl(): string {
+  return process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
+}
+function getAudioServerApiKey(): string {
+  return process.env.AUDIO_SERVER_API_KEY || ''
+}
 
 export const maxDuration = 60
 
@@ -39,10 +44,10 @@ export async function POST(req: NextRequest) {
     phpFormData.append('fileId', fileId)
     phpFormData.append('tipo', tipo || 'track')
 
-    const phpRes = await fetch(`${AUDIO_SERVER_URL}/upload.php`, {
+    const phpRes = await fetch(`${getAudioServerUrl()}/upload.php`, {
       method: 'POST',
       headers: {
-        ...(AUDIO_SERVER_API_KEY ? { 'Authorization': `Bearer ${AUDIO_SERVER_API_KEY}` } : {}),
+        ...(getAudioServerApiKey() ? { 'Authorization': `Bearer ${getAudioServerApiKey()}` } : {}),
       },
       body: phpFormData,
     })

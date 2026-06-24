@@ -6,8 +6,15 @@
  * fetch from server → re-upload to HuggingFace Space → generate speech.
  */
 
-const AUDIO_SERVER_URL = process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
-const AUDIO_SERVER_API_KEY = process.env.AUDIO_SERVER_API_KEY || 'omnivoice_api_key_2026_secure'
+// NÃO usar fallback com valor hardcoded — Next.js bakes defaults into the build.
+// Ler sempre do process.env em tempo de execução.
+function getAudioServerUrl(): string {
+  return process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
+}
+
+function getAudioServerApiKey(): string {
+  return process.env.AUDIO_SERVER_API_KEY || ''
+}
 
 export interface AudioUploadResult {
   success: boolean
@@ -27,11 +34,11 @@ export function fixAudioServerUrl(url: string): string {
   // Se aponta pro sorteiomax (morto), extrair path e remontar com Oracle
   const oldDomainMatch = url.match(/sorteiomax\.com\.br\/omnivoice\/(.+)/i)
   if (oldDomainMatch) {
-    return `${AUDIO_SERVER_URL}/${oldDomainMatch[1]}`
+    return `${getAudioServerUrl()}/${oldDomainMatch[1]}`
   }
   // Se e caminho relativo (comeca com /), prefixar com Oracle base
   if (url.startsWith('/') && !url.startsWith('//')) {
-    return `${AUDIO_SERVER_URL}${url}`
+    return `${getAudioServerUrl()}${url}`
   }
   return url
 }
@@ -48,10 +55,13 @@ export async function uploadToAudioServer(
   formData.append('arquivo', file, filename)
   formData.append('tipo', tipo)
 
-  const res = await fetch(`${AUDIO_SERVER_URL}/upload.php`, {
+  const uploadUrl = `${getAudioServerUrl()}/upload.php`
+  const apiKey = getAudioServerApiKey()
+
+  const res = await fetch(uploadUrl, {
     method: 'POST',
     headers: {
-      ...(AUDIO_SERVER_API_KEY ? { 'Authorization': `Bearer ${AUDIO_SERVER_API_KEY}` } : {}),
+      ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}),
     },
     body: formData,
   })
@@ -86,11 +96,11 @@ export async function deleteFromAudioServer(
   tipo: string = 'ref'
 ): Promise<void> {
   try {
-    await fetch(`${AUDIO_SERVER_URL}/delete.php`, {
+    await fetch(`${getAudioServerUrl()}/delete.php`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(AUDIO_SERVER_API_KEY ? { 'Authorization': `Bearer ${AUDIO_SERVER_API_KEY}` } : {}),
+        ...(getAudioServerApiKey() ? { 'Authorization': `Bearer ${getAudioServerApiKey()}` } : {}),
       },
       body: JSON.stringify({ tipo, arquivo: filename }),
     })
@@ -105,10 +115,10 @@ export async function deleteFromAudioServer(
  */
 export async function cleanupAudioServer(): Promise<void> {
   try {
-    await fetch(`${AUDIO_SERVER_URL}/cleanup.php`, {
+    await fetch(`${getAudioServerUrl()}/cleanup.php`, {
       method: 'GET',
       headers: {
-        ...(AUDIO_SERVER_API_KEY ? { 'Authorization': `Bearer ${AUDIO_SERVER_API_KEY}` } : {}),
+        ...(getAudioServerApiKey() ? { 'Authorization': `Bearer ${getAudioServerApiKey()}` } : {}),
       },
     })
   } catch (error) {
@@ -121,5 +131,5 @@ export async function cleanupAudioServer(): Promise<void> {
  * Check if a URL is from our audio server.
  */
 export function isAudioServerUrl(url: string): boolean {
-  return url.includes(AUDIO_SERVER_URL.replace('https://', '').replace('http://', ''))
+  return url.includes(getAudioServerUrl().replace('https://', '').replace('http://', ''))
 }

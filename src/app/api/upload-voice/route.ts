@@ -10,11 +10,8 @@ const HF_SPACE_URL = process.env.HF_SPACE_URL || 'https://k2-fsa-omnivoice.hf.sp
 export async function POST(req: NextRequest) {
   try {
     // Verificar se é admin
-    console.log('[UploadVoice] Checking admin session...')
     const isAdmin = await getAdminSession()
-    console.log('[UploadVoice] Admin check result:', isAdmin)
     if (!isAdmin) {
-      console.log('[UploadVoice] DENIED - not admin')
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
     }
     const formData = await req.formData()

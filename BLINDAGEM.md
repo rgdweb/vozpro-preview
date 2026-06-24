@@ -148,3 +148,18 @@ ERRO #6 — "Selecione uma variação de voz"
 ERRO #7 — Áudio referência misturado com texto
   CAUSA: gpu-proxy enviando camelCase, GPU espera snake_case
   CORREÇÃO: Converter camelCase → snake_case no gpu-proxy
+
+ERRO #8 — Vozes "falando em línguas" / vozes "locas"
+  CAUSA: refText vazio no banco → F5-TTS não tem referência textual do áudio → ASR automático do GPU pode errar
+  CORREÇÃO: Auto-transcrever áudio ao fazer upload/editar/salvar vozes usando Whisper ASR
+  ARQUIVOS ENVOLVIDOS:
+    ✅ src/lib/asr-transcriber.ts — implementação real (ANTES era stub que retornava vazio)
+    ✅ src/app/api/asr-transcribe/route.ts — proxy para GPU ASR
+    ✅ src/app/api/upload-voice/route.ts — auto-transcreve após upload
+    ✅ src/app/api/admin/voices/bulk-upload/route.ts — auto-transcreve no bulk
+    ✅ src/app/admin/page.tsx — botão Transcrever + auto-transcrição ao editar
+    ✅ gpu/omnivoice_gpu.py — endpoint /api/asr-transcribe usando _model.transcribe()
+
+⚠️ PROIBIDO: Reverter asr-transcriber.ts para stub (retorna texto vazio)
+⚠️ PROIBIDO: Remover auto-transcrição do upload-voice
+⚠️ PROIBIDO: Remover o botão "Transcrever" do painel admin

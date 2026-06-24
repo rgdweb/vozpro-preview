@@ -1065,6 +1065,7 @@ export default function AdminDashboard() {
   const [addingVariationTo, setAddingVariationTo] = useState<string | null>(null)
   const [variationDialogOpen, setVariationDialogOpen] = useState(false)
   const [uploadingRef, setUploadingRef] = useState(false)
+  const [transcribing, setTranscribing] = useState(false)
 
   // Pending files (not uploaded yet, waiting for save)
   const [pendingVoiceFile, setPendingVoiceFile] = useState<{ blob: Blob; name: string; info: string } | null>(null)
@@ -1725,6 +1726,15 @@ export default function AdminDashboard() {
         silenceRegions: silRegions,
       })
       toast.success(`Áudio carregado: ${audioBuf.duration.toFixed(1)}s — voz detectada: ${(range.end - range.start).toFixed(1)}s`)
+
+      // 🆕 Auto-transcrever se refText está vazio — evita vozes "falando em línguas"
+      if (!variation.refText || variation.refText.trim() === '') {
+        const transcribeUrl = variation.refAudioServerUrl || variation.refAudioPath
+        if (transcribeUrl) {
+          // Transcrever em background (não bloqueia o editor)
+          handleTranscribeAudio(transcribeUrl)
+        }
+      }
     } catch (err) {
       console.error('[EditVoiceAudio] Erro ao carregar audio:', err)
       toast.error('Erro ao carregar áudio existente. Tente novamente.')
@@ -1810,6 +1820,70 @@ export default function AdminDashboard() {
     }
   }
 
+  // --- AUTO-TRANSCREVER ÁUDIO ---
+  // 🛡️ BLINDAGEM: refText vazio causa vozes "falando em línguas". Erro #14. Ver BLINDAGEM.md.
+  const handleTranscribeAudio = async (audioUrl?: string) => {
+    const url = audioUrl || variationForm.serverUrl
+    if (!url) {
+      // Tentar transcrever do blob pendente (base64)
+      if (pendingVoiceFile?.blob) {
+        try {
+          setTranscribing(true)
+          toast.info('Transcrevendo áudio...')
+          const reader = new FileReader()
+          const base64Promise = new Promise<string>((resolve) => {
+            reader.onloadend = () => resolve(reader.result as string)
+          })
+          reader.readAsDataURL(pendingVoiceFile.blob)
+          const base64Audio = await base64Promise
+
+          const res = await fetch('/api/asr-transcribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ audioBase64: base64Audio }),
+          })
+          const data = await res.json()
+          if (data.text) {
+            setVariationForm(p => ({ ...p, refText: data.text }))
+            toast.success(`Transcrito: "${data.text.substring(0, 60)}${data.text.length > 60 ? '...' : ''}"`)
+          } else {
+            toast.warn('Não foi possível transcrever. Preencha manualmente.')
+          }
+        } catch (err) {
+          console.error('[TranscribeAudio] Erro:', err)
+          toast.warn('Erro na transcrição. Preencha o texto manualmente.')
+        } finally {
+          setTranscribing(false)
+        }
+        return
+      }
+      toast.warn('Nenhum áudio disponível para transcrever')
+      return
+    }
+
+    try {
+      setTranscribing(true)
+      toast.info('Transcrevendo áudio...')
+      const res = await fetch('/api/asr-transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioUrl: url }),
+      })
+      const data = await res.json()
+      if (data.text) {
+        setVariationForm(p => ({ ...p, refText: data.text }))
+        toast.success(`Transcrito: "${data.text.substring(0, 60)}${data.text.length > 60 ? '...' : ''}"`)
+      } else {
+        toast.warn('Não foi possível transcrever. Preencha manualmente.')
+      }
+    } catch (err) {
+      console.error('[TranscribeAudio] Erro:', err)
+      toast.warn('Erro na transcrição. Preencha o texto manualmente.')
+    } finally {
+      setTranscribing(false)
+    }
+  }
+
   const handleSaveVariation = async () => {
     if (!variationForm.label.trim()) {
       toast.error('Nome da variação é obrigatório')
@@ -1817,7 +1891,7 @@ export default function AdminDashboard() {
     }
 
     const instructValue = variationForm.instruct === 'none' ? '' : variationForm.instruct
-    let pendingVoiceFileData: { serverUrl: string; filename: string; refAudioName: string; refAudioPath: string } | null = null
+    let pendingVoiceFileData: { serverUrl: string; filename: string; refAudioName: string; refAudioPath: string; refText?: string } | null = null
 
     console.log('[handleSaveVariation] Iniciando. editingVariationId:', editingVariationId, 'pendingVoiceFile:', !!pendingVoiceFile, 'label:', variationForm.label)
 
@@ -1870,6 +1944,8 @@ export default function AdminDashboard() {
             serverUrl: uploadedServerUrl,
             filename: uploadedFilename,
             refAudioName: uploadedName,
+            // 🆕 Auto-preencher refText com transcrição do upload (se veio e se o campo está vazio)
+            ...(data.refText && !prev.refText ? { refText: data.refText as string } : {}),
           }))
 
           // Atualizar o pendingVoiceFile com os dados do upload
@@ -1879,6 +1955,7 @@ export default function AdminDashboard() {
             filename: uploadedFilename,
             refAudioName: uploadedName,
             refAudioPath: uploadedPath,
+            refText: (data.refText as string) || '',
           }
         } else {
           toast.error(data.error || 'Falha no upload do áudio')
@@ -1891,10 +1968,12 @@ export default function AdminDashboard() {
 
       if (editingVariationId) {
         // UPDATE existing variation
+        // 🛡️ BLINDAGEM: Se upload retornou refText e o campo estava vazio, usar o do upload
+        const finalRefText = variationForm.refText || pendingVoiceFileData?.refText || ''
         const updateBody: Record<string, unknown> = {
           label: variationForm.label.trim(),
           emoji: variationForm.emoji,
-          refText: variationForm.refText,
+          refText: finalRefText,
           instruct: instructValue,
         }
         // So atualizar campos de audio se um novo arquivo foi carregado
@@ -1929,10 +2008,12 @@ export default function AdminDashboard() {
         if (!addingVariationTo) return
 
         // Construir body explicitamente para nao depender do estado async do React
+        // 🛡️ BLINDAGEM: Se upload retornou refText e o campo estava vazio, usar o do upload
+        const createRefText = variationForm.refText || pendingVoiceFileData?.refText || ''
         const createBody: Record<string, unknown> = {
           label: variationForm.label.trim(),
           emoji: variationForm.emoji,
-          refText: variationForm.refText,
+          refText: createRefText,
           instruct: instructValue,
           refAudioPath: variationForm.refAudioPath,
           serverUrl: variationForm.serverUrl,
@@ -1945,6 +2026,9 @@ export default function AdminDashboard() {
           createBody.serverUrl = pendingVoiceFileData.serverUrl
           createBody.filename = pendingVoiceFileData.filename
           createBody.refAudioName = pendingVoiceFileData.refAudioName
+          if (pendingVoiceFileData.refText && !createBody.refText) {
+            createBody.refText = pendingVoiceFileData.refText
+          }
         }
 
         await fetch(`/api/voices/${addingVariationTo}/variations`, {
@@ -2026,6 +2110,8 @@ export default function AdminDashboard() {
             refAudioServerUrl: data.serverUrl || '',
             refAudioFilename: data.filename || '',
             refAudioName: data.name || file.name,
+            // 🆕 Salvar refText auto-transcrito pelo upload
+            ...(data.refText ? { refText: data.refText } : {}),
           }),
         })
         toast.success('Áudio atualizado!')
@@ -2442,7 +2528,8 @@ export default function AdminDashboard() {
               serverUrl: uploadData.serverUrl || uploadData.url || '',
               filename: uploadData.filename || '',
               refAudioName: file.name,
-              refText: '',
+              // 🆕 refText auto-transcrito pelo upload-voice (GPU Whisper ASR)
+              refText: uploadData.refText || '',
               instruct: '',
             }),
           })
@@ -3467,11 +3554,29 @@ export default function AdminDashboard() {
                 )}
 
                 <div className="space-y-2">
-                  <Label className="text-slate-300">Texto da Referência <span className="text-slate-500">(opcional)</span></Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-slate-300">Texto da Referência <span className="text-slate-500">(auto-transcrito pelo Whisper)</span></Label>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleTranscribeAudio()}
+                      disabled={transcribing || (!variationForm.serverUrl && !pendingVoiceFile)}
+                      className="border-violet-600 text-violet-400 hover:bg-violet-900/30 gap-1 text-xs h-7"
+                    >
+                      {transcribing ? (
+                        <>
+                          <span className="animate-spin">↻</span>
+                          Transcrevendo...
+                        </>
+                      ) : (
+                        '🎤 Transcrever'
+                      )}
+                    </Button>
+                  </div>
                   <Textarea
                     value={variationForm.refText}
                     onChange={(e) => setVariationForm(p => ({ ...p, refText: e.target.value }))}
-                    placeholder="Cole aqui o que o locutor fala no áudio de referência. Melhora muito a clonagem."
+                    placeholder="O que o locutor fala no áudio de referência. Clique em Transcrever ou cole manualmente. Sem isso, vozes podem sair erradas."
                     className="bg-slate-900/50 border-slate-600 text-white resize-none"
                     rows={2}
                   />

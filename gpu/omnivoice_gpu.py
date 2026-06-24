@@ -485,6 +485,7 @@ async def index(request):
             "health": "GET /health",
             "status": "GET /api/maint/status",
             "cleanup": "POST /api/maint/cleanup",
+            "asr": "POST /api/asr-transcribe",
             "generate": "POST /api/native-generate",
         },
     })
@@ -525,6 +526,111 @@ async def maint_cleanup(request):
 # ============================================================
 # ENDPOINT PRINCIPAL: native_generate
 # ============================================================
+async def asr_transcribe(request):
+    """POST /api/asr-transcribe — Transcreve audio via Whisper (ASR do OmniVoice).
+    Recebe ref_audio_url ou ref_audio_base64, retorna texto transcrito.
+    """
+    import urllib.request
+    import ssl
+    import soundfile as _sf
+
+    try:
+        body = await request.json()
+        ref_audio_url = body.get("ref_audio_url", "")
+        ref_audio_base64 = body.get("ref_audio_base64", "")
+
+        if not ref_audio_url and not ref_audio_base64:
+            return JSONResponse({"status": "error", "error": "ref_audio_url ou ref_audio_base64 obrigatorio"}, status_code=400)
+
+        if _model is None:
+            return JSONResponse({"status": "error", "error": "Modelo nao carregado"}, status_code=503)
+
+        # Baixar/decodificar audio
+        audio_data = None
+        ref_audio_path = ""
+
+        try:
+            if ref_audio_base64 and str(ref_audio_base64).strip():
+                b64 = str(ref_audio_base64).strip()
+                if ',' in b64 and b64.startswith('data:'):
+                    b64 = b64.split(',', 1)[1]
+                audio_data = base64.b64decode(b64)
+                print(f"[ASR] Decodificando Base64: {len(audio_data)} bytes")
+            elif ref_audio_url and str(ref_audio_url).strip():
+                req = urllib.request.Request(ref_audio_url, headers={'User-Agent': 'OmniVoice/1.0'})
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
+                    audio_data = resp.read()
+                print(f"[ASR] Baixando audio: {len(audio_data)} bytes")
+
+            if not audio_data:
+                return JSONResponse({"status": "error", "error": "Falha ao obter audio"}, status_code=400)
+
+            # Validar que e audio real
+            if len(audio_data) < 44:
+                return JSONResponse({"status": "error", "error": "Audio muito curto"}, status_code=400)
+            if audio_data[:5] == b'<?xml' or audio_data[:1] == b'<' or audio_data[:9] == b'<!DOCTYPE':
+                return JSONResponse({"status": "error", "error": "URL retornou HTML, nao audio"}, status_code=400)
+
+            # Salvar temporario
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                f.write(audio_data)
+                ref_audio_path = f.name
+
+            # Carregar e resample se necessario
+            info = _sf.info(ref_audio_path)
+            audio_array, sr = _sf.read(ref_audio_path)
+            print(f"[ASR] Audio: {info.duration:.1f}s {sr}Hz")
+
+            if len(audio_array.shape) > 1:
+                audio_array = audio_array[:, 0]
+
+            if sr != SAMPLE_RATE:
+                import torchaudio
+                tensor_audio = torch.from_numpy(audio_array.astype(np.float32)).unsqueeze(0)
+                resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=SAMPLE_RATE)
+                tensor_audio = resampler(tensor_audio)
+                audio_array = tensor_audio.squeeze(0).detach().numpy()
+
+            # Transcrever usando o modelo OmniVoice (Whisper-large-v3-turbo)
+            loop = asyncio.get_event_loop()
+            transcription = await loop.run_in_executor(
+                None,
+                lambda: _model.transcribe((audio_array, SAMPLE_RATE))
+            )
+
+            print(f"[ASR] Transcricao: '{str(transcription)[:100]}'")
+
+            # Limpar temp
+            if ref_audio_path and os.path.exists(ref_audio_path):
+                try:
+                    os.unlink(ref_audio_path)
+                except Exception:
+                    pass
+
+            return JSONResponse({
+                "status": "ok",
+                "text": str(transcription),
+                "duration": round(info.duration, 2),
+            })
+
+        except Exception as e:
+            # Limpar temp em caso de erro
+            if ref_audio_path and os.path.exists(ref_audio_path):
+                try:
+                    os.unlink(ref_audio_path)
+                except Exception:
+                    pass
+            raise
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
+
+
 async def native_generate(request):
     import urllib.request
     import ssl
@@ -881,6 +987,7 @@ app = Starlette(
         Route("/health", health, methods=["GET"]),
         Route("/api/maint/status", maint_status, methods=["GET"]),
         Route("/api/maint/cleanup", maint_cleanup, methods=["POST"]),
+        Route("/api/asr-transcribe", asr_transcribe, methods=["POST"]),
         Route("/api/native-generate", native_generate, methods=["POST"]),
     ],
     middleware=[
@@ -922,6 +1029,7 @@ if __name__ == '__main__':
     print(f"  GET  /api/maint/status    (VRAM + info)")
     print(f"  POST /api/maint/cleanup   (forcar cleanup)")
     print(f"  POST /api/native-generate (geracao nativa)")
+    print(f"  POST /api/asr-transcribe (transcricao ASR)")
     print("=" * 55)
 
     uvicorn.run(app, host=args.ip, port=args.port, log_level="warning")

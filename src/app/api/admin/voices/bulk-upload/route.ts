@@ -26,6 +26,26 @@ import { uploadToAudioServer } from '@/lib/audio-server'
 export const maxDuration = 120
 
 const HF_SPACE_URL = process.env.HF_SPACE_URL || 'https://k2-fsa-omnivoice.hf.space'
+const GPU_DIRECT_URL = process.env.GPU_DIRECT_URL || 'http://10.99.0.2:7860'
+
+/**
+ * Auto-transcreve audio usando GPU ASR (Whisper). Falha silenciosamente.
+ */
+async function autoTranscribe(serverUrl: string): Promise<string> {
+  try {
+    const res = await fetch(`${GPU_DIRECT_URL}/api/asr-transcribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ref_audio_url: serverUrl }),
+      signal: AbortSignal.timeout(30000),
+    })
+    const data = await res.json()
+    if (data.status === 'ok' && data.text) return data.text
+    return ''
+  } catch {
+    return ''
+  }
+}
 
 /**
  * POST /api/admin/voices/bulk-upload
@@ -117,7 +137,10 @@ export async function POST(req: NextRequest) {
           },
         })
 
-        // 4. Criar VoiceVariation com o áudio
+        // 4. Auto-transcrever o audio
+        const refText = await autoTranscribe(audioServerResult.url)
+
+        // 5. Criar VoiceVariation com o áudio + refText
         await db.voiceVariation.create({
           data: {
             voiceId: voice.id,
@@ -127,7 +150,7 @@ export async function POST(req: NextRequest) {
             refAudioServerUrl: audioServerResult.url,
             refAudioFilename: audioServerResult.filename,
             refAudioName: file.name,
-            refText: '',
+            refText,  // 🆕 Auto-transcrito pelo Whisper ASR
             instruct: '',
             order: 0,
             active: true,

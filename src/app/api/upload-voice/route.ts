@@ -18,6 +18,20 @@
  * ─────────────────────────────────────────────────────────────
  */
 
+/**
+ * Upload Voice — Faz upload do áudio de referência e AUTO-TRANSCREVE.
+ *
+ * 🛡️ BLINDAGEM: O refText é ESSENCIAL para que o F5-TTS clone a voz
+ * corretamente. Sem refText, vozes "falam em línguas" e ficam "locas".
+ * Erro #14 documentado. NÃO remova a transcrição automática.
+ * Ver BLINDAGEM.md.
+ *
+ * Fluxo:
+ * 1. Upload do arquivo para PHP server (armazenamento permanente)
+ * 2. Upload para HuggingFace Space (cache temporário)
+ * 3. Auto-transcrição via GPU ASR (Whisper-large-v3-turbo)
+ * 4. Retorna URLs + refText transcrito
+ */
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminSession } from '@/lib/auth'
 import { uploadToAudioServer } from '@/lib/audio-server'
@@ -25,8 +39,36 @@ import { uploadToAudioServer } from '@/lib/audio-server'
 export const maxDuration = 60
 
 const HF_SPACE_URL = process.env.HF_SPACE_URL || 'https://k2-fsa-omnivoice.hf.space'
+const GPU_DIRECT_URL = process.env.GPU_DIRECT_URL || 'http://10.99.0.2:7860'
 
-// POST /api/upload-voice - Upload reference audio to PHP hosting AND HuggingFace Space
+/**
+ * Chama o GPU ASR para transcrever o áudio a partir de uma URL.
+ * Falha silenciosamente — não deve bloquear o upload.
+ */
+async function autoTranscribe(serverUrl: string): Promise<string> {
+  try {
+    console.log(`[UploadVoice] Auto-transcrevendo: ${serverUrl.substring(0, 80)}`)
+    const res = await fetch(`${GPU_DIRECT_URL}/api/asr-transcribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ref_audio_url: serverUrl }),
+      signal: AbortSignal.timeout(45000),
+    })
+
+    const data = await res.json()
+    if (data.status === 'ok' && data.text) {
+      console.log(`[UploadVoice] Transcrito: "${String(data.text).substring(0, 80)}"`)
+      return data.text
+    }
+    console.warn('[UploadVoice] ASR retornou vazio ou erro:', data.error || 'sem texto')
+    return ''
+  } catch (err) {
+    console.warn('[UploadVoice] Auto-transcrição falhou (não bloqueia upload):', err)
+    return ''
+  }
+}
+
+// POST /api/upload-voice - Upload reference audio to PHP hosting AND HuggingFace Space + auto-transcribe
 export async function POST(req: NextRequest) {
   try {
     // Verificar se é admin
@@ -72,13 +114,17 @@ export async function POST(req: NextRequest) {
       console.error('[UploadVoice] HF upload failed, will re-upload on generate:', err)
     }
 
-    // Return success with both URLs
+    // Step 3: Auto-transcrever o áudio usando GPU ASR (Whisper)
+    const refText = await autoTranscribe(audioServerResult.url)
+
+    // Return success with both URLs + transcription
     return NextResponse.json({
       path: hfPath,                                // HF Space path (temporary, may expire)
       serverUrl: audioServerResult.url,            // PHP hosting URL (permanent)
       filename: audioServerResult.filename,        // filename on server (for deletion)
       url: audioServerResult.url,                  // permanent URL for reference
       name: file.name,
+      refText,                                     // 🆕 Texto transcrito automaticamente
     })
   } catch (error) {
     console.error('[UploadVoice] Error:', error)

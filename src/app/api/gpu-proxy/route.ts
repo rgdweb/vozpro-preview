@@ -1,3 +1,23 @@
+/** 
+ * 🛡️ GOVERNANÇA OBRIGATÓRIA — LEIA ANTES DE ALTERAR ESTE ARQUIVO
+ * ─────────────────────────────────────────────────────────────
+ * ⚠️ REGRAS ABSOLUTAS (já causaram DOWNTIME real):
+ *
+ * 1. NUNCA: git reset --hard | rm -rf | git checkout -- .env
+ * 2. NUNCA: altere .env de produção, git remote, DATABASE_URL, API keys
+ * 3. NUNCA: crie scripts de deploy alternativos, arquivos temp no root
+ * 4. SEMPRE: use deploy-seguro.py para deploy, vozpro-preview para commits
+ * 5. SEMPRE: verifique next build passa, .env tem PostgreSQL, token bate
+ *
+ * 📋 LEIA COMPLETO:
+ *    https://github.com/rgdweb/vozpro-preview/blob/main/REGRAS-ERROS-PROIBIDOS.md
+ *    https://github.com/rgdweb/vozpro-preview/blob/main/GOVERNANCE.md
+ *
+ * 13 erros já cometidos que derrubaram o sistema.
+ * Se você tocar em qualquer coisa sem ler as regras acima, vai quebrar.
+ * ─────────────────────────────────────────────────────────────
+ */
+
 /**
  * GPU Proxy — recebe body do frontend (camelCase), converte pro GPU (snake_case),
  * e repassa via WireGuard. Com retry em caso de falha.
@@ -9,6 +29,7 @@ const GPU_DIRECT_URL = process.env.GPU_DIRECT_URL || 'http://10.99.0.2:7860'
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
+    console.log('[gpu-proxy] RECEIVED:', { text: (body.text || '').substring(0, 60), voiceMode: body.voiceMode, refAudioUrl: (body.referenceAudioUrl || body.refAudioUrl || '').substring(0, 80), refText: (body.refText || '').substring(0, 40) })
 
     // Converter camelCase do frontend → snake_case do GPU
     const gpuBody: Record<string, unknown> = {
@@ -31,6 +52,7 @@ export async function POST(req: NextRequest) {
       gpuBody.target_duration = body.targetDuration
     }
 
+    console.log('[gpu-proxy] SENDING to GPU:', { text_len: String(gpuBody.text).length, voice_mode: gpuBody.voice_mode, ref_audio_url: String(gpuBody.ref_audio_url).substring(0, 80), ref_text: String(gpuBody.ref_text).substring(0, 40) })
     const gpuUrl = `${GPU_DIRECT_URL}/api/native-generate`
 
     // Tentar até 2x (1 retry)

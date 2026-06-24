@@ -1033,15 +1033,11 @@ export default function VozProClient() {
 
     try {
       toast.info(`Regenerando parte ${segIdx + 1}...`, { duration: 2000 })
-      const tokenRes = await fetch('/api/generate-token')
-      if (!tokenRes.ok) { toast.error('Erro ao obter token'); return }
-      const { token: tunnelToken } = await tokenRes.json()
-      if (!tunnelToken) { toast.error('Servidor nao configurado'); return }
 
-      const oracleApi = process.env.NEXT_PUBLIC_AUDIO_SERVER_URL || 'https://api.cvmnews.com.br'
-      const res = await fetch(`${oracleApi}/api/native-generate`, {
+      // Usar o mesmo proxy que a geração principal (converte camelCase→snake_case)
+      const res = await fetch('/api/gpu-proxy', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Generate-Token': tunnelToken },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(tunnelBody),
       })
 
@@ -1133,6 +1129,11 @@ export default function VozProClient() {
       toast.error('Selecione uma voz ou faça upload de um áudio de referência')
       return
     }
+    // Validar que a variação tem áudio de referência
+    if (voiceMode === 'clone' && !uploadedVoiceUrl && selectedVariation && !selectedVariation.refAudioServerUrl) {
+      toast.error('Esta variação não possui áudio de referência. Selecione outra ou faça upload.')
+      return
+    }
     // Verificar se a variação selecionada realmente existe na voz selecionada
     if (selectedVariationId && selectedVoice) {
       const variationExists = selectedVoice.variations.some(v => v.id === selectedVariationId)
@@ -1167,7 +1168,12 @@ export default function VozProClient() {
       const queueData = await queueRes.json()
 
       if (!queueRes.ok) {
-        toast.error(queueData.error || 'Erro ao entrar na fila')
+        if (queueRes.status === 401) {
+          toast.error('Sessão expirada. Faça login novamente.')
+          window.location.href = '/login'
+        } else {
+          toast.error(queueData.error || 'Erro ao entrar na fila')
+        }
         setIsGenerating(false)
         return
       }
@@ -1305,11 +1311,9 @@ export default function VozProClient() {
         // CORPO DA REQUISICAO
         const body: Record<string, unknown> = {
           text: textToSend,
-          variationId: selectedVariationId || undefined,
-          voiceMode: voiceMode === 'clone_fast' ? 'clone_fast' : undefined,
-          speakerFile: voiceMode === 'clone_fast' ? (selectedVoice?.speakerFile || undefined) : undefined,
         language,
-        refAudioUrl: selectedVariation?.refAudioServerUrl || '',
+          voiceMode,
+          refAudioUrl: fixAudioServerUrl(selectedVariation?.refAudioServerUrl || ''),
         refAudioPath: selectedVariation?.refAudioPath || '',
         refText: uploadedVoiceRefText || selectedVariation?.refText || '',
         instruct: instructStr,

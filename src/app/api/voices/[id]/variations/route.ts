@@ -1,26 +1,13 @@
-/** 
- * 🛡️ GOVERNANÇA OBRIGATÓRIA — LEIA ANTES DE ALTERAR ESTE ARQUIVO
- * ─────────────────────────────────────────────────────────────
- * ⚠️ REGRAS ABSOLUTAS (já causaram DOWNTIME real):
- *
- * 1. NUNCA: git reset --hard | rm -rf | git checkout -- .env
- * 2. NUNCA: altere .env de produção, git remote, DATABASE_URL, API keys
- * 3. NUNCA: crie scripts de deploy alternativos, arquivos temp no root
- * 4. SEMPRE: use deploy-seguro.py para deploy, vozpro-preview para commits
- * 5. SEMPRE: verifique next build passa, .env tem PostgreSQL, token bate
- *
- * 📋 LEIA COMPLETO:
- *    https://github.com/rgdweb/vozpro-preview/blob/main/REGRAS-ERROS-PROIBIDOS.md
- *    https://github.com/rgdweb/vozpro-preview/blob/main/GOVERNANCE.md
- *
- * 13 erros já cometidos que derrubaram o sistema.
- * Se você tocar em qualquer coisa sem ler as regras acima, vai quebrar.
- * ─────────────────────────────────────────────────────────────
+/**
+ * 🛡️ BLINDAGEM — Voice Variations API
+ * ⚠️ Se refText vier como '__AUTO_TRANSCRIBE__', transcreve automaticamente.
+ * Sem refText, o F5-TTS gera áudio "falando em línguas". Ver BLINDAGEM.md.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminSession } from '@/lib/auth'
 import { db } from '@/lib/db'
+import { transcribeFromUrl } from '@/lib/asr-transcriber'
 
 // GET /api/voices/[id]/variations - List variations for a voice
 export async function GET(
@@ -69,6 +56,24 @@ export async function POST(
       return NextResponse.json({ error: 'Voz não encontrada' }, { status: 404 })
     }
 
+    // 🛡️ Auto-transcrição: se refText for '__AUTO_TRANSCRIBE__', transcrever via ASR
+    let finalRefText = refText || ''
+    if (finalRefText === '__AUTO_TRANSCRIBE__') {
+      finalRefText = ''
+      const audioUrl = serverUrl || ''
+      if (audioUrl) {
+        try {
+          const result = await transcribeFromUrl(audioUrl)
+          if (result.success && result.text) {
+            finalRefText = result.text
+            console.log(`[Variations] Auto-transcrito para "${voice.name}": "${finalRefText.substring(0, 60)}"`)
+          }
+        } catch {
+          console.warn(`[Variations] Auto-transcrição falhou para "${voice.name}"`)
+        }
+      }
+    }
+
     const variation = await db.voiceVariation.create({
       data: {
         voiceId: id,
@@ -78,7 +83,7 @@ export async function POST(
         refAudioServerUrl: serverUrl || '',
         refAudioFilename: filename || '',
         refAudioName: refAudioName || '',
-        refText: refText || '',
+        refText: finalRefText,
         instruct: instruct || '',
         order: order || 0,
       },

@@ -1065,7 +1065,7 @@ export default function AdminDashboard() {
   const [addingVariationTo, setAddingVariationTo] = useState<string | null>(null)
   const [variationDialogOpen, setVariationDialogOpen] = useState(false)
   const [uploadingRef, setUploadingRef] = useState(false)
-  const [transcribing, setTranscribing] = useState(false)
+  const [transcribingRef, setTranscribingRef] = useState(false)
 
   // Pending files (not uploaded yet, waiting for save)
   const [pendingVoiceFile, setPendingVoiceFile] = useState<{ blob: Blob; name: string; info: string } | null>(null)
@@ -1822,67 +1822,7 @@ export default function AdminDashboard() {
 
   // --- AUTO-TRANSCREVER ÁUDIO ---
   // 🛡️ BLINDAGEM: refText vazio causa vozes "falando em línguas". Erro #14. Ver BLINDAGEM.md.
-  const handleTranscribeAudio = async (audioUrl?: string) => {
-    const url = audioUrl || variationForm.serverUrl
-    if (!url) {
-      // Tentar transcrever do blob pendente (base64)
-      if (pendingVoiceFile?.blob) {
-        try {
-          setTranscribing(true)
-          toast.info('Transcrevendo áudio...')
-          const reader = new FileReader()
-          const base64Promise = new Promise<string>((resolve) => {
-            reader.onloadend = () => resolve(reader.result as string)
-          })
-          reader.readAsDataURL(pendingVoiceFile.blob)
-          const base64Audio = await base64Promise
-
-          const res = await fetch('/api/asr-transcribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ audioBase64: base64Audio }),
-          })
-          const data = await res.json()
-          if (data.text) {
-            setVariationForm(p => ({ ...p, refText: data.text }))
-            toast.success(`Transcrito: "${data.text.substring(0, 60)}${data.text.length > 60 ? '...' : ''}"`)
-          } else {
-            toast.warn('Não foi possível transcrever. Preencha manualmente.')
-          }
-        } catch (err) {
-          console.error('[TranscribeAudio] Erro:', err)
-          toast.warn('Erro na transcrição. Preencha o texto manualmente.')
-        } finally {
-          setTranscribing(false)
-        }
-        return
-      }
-      toast.warn('Nenhum áudio disponível para transcrever')
-      return
-    }
-
-    try {
-      setTranscribing(true)
-      toast.info('Transcrevendo áudio...')
-      const res = await fetch('/api/asr-transcribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audioUrl: url }),
-      })
-      const data = await res.json()
-      if (data.text) {
-        setVariationForm(p => ({ ...p, refText: data.text }))
-        toast.success(`Transcrito: "${data.text.substring(0, 60)}${data.text.length > 60 ? '...' : ''}"`)
-      } else {
-        toast.warn('Não foi possível transcrever. Preencha manualmente.')
-      }
-    } catch (err) {
-      console.error('[TranscribeAudio] Erro:', err)
-      toast.warn('Erro na transcrição. Preencha o texto manualmente.')
-    } finally {
-      setTranscribing(false)
-    }
-  }
+  // NOTA: A função autoTranscribeAudio está definida mais abaixo e usa GPU Whisper + fallback
 
   const handleSaveVariation = async () => {
     if (!variationForm.label.trim()) {
@@ -1966,6 +1906,21 @@ export default function AdminDashboard() {
         setUploadingRef(false)
       }
 
+      // Auto-transcrever se refText está vazio E temos URL de áudio
+      let autoRefText = variationForm.refText
+      if (!autoRefText.trim()) {
+        const audioUrlToTranscribe = pendingVoiceFileData?.serverUrl || variationForm.serverUrl
+        if (audioUrlToTranscribe) {
+          toast.info('Transcrevendo áudio automaticamente...')
+          const transcribed = await autoTranscribeAudio(audioUrlToTranscribe)
+          if (transcribed) {
+            autoRefText = transcribed
+            setVariationForm(prev => ({ ...prev, refText: transcribed }))
+            toast.success('Transcrição: ' + transcribed.substring(0, 50) + (transcribed.length > 50 ? '...' : ''))
+          }
+        }
+      }
+
       if (editingVariationId) {
         // UPDATE existing variation
         // 🛡️ BLINDAGEM: Se upload retornou refText e o campo estava vazio, usar o do upload
@@ -1973,7 +1928,7 @@ export default function AdminDashboard() {
         const updateBody: Record<string, unknown> = {
           label: variationForm.label.trim(),
           emoji: variationForm.emoji,
-          refText: finalRefText,
+          refText: autoRefText,
           instruct: instructValue,
         }
         // So atualizar campos de audio se um novo arquivo foi carregado
@@ -2013,7 +1968,7 @@ export default function AdminDashboard() {
         const createBody: Record<string, unknown> = {
           label: variationForm.label.trim(),
           emoji: variationForm.emoji,
-          refText: createRefText,
+          refText: autoRefText,
           instruct: instructValue,
           refAudioPath: variationForm.refAudioPath,
           serverUrl: variationForm.serverUrl,
@@ -2080,7 +2035,45 @@ export default function AdminDashboard() {
     }
   }
 
+  // Auto-transcribe audio URL and return the transcribed text
+  const autoTranscribeAudio = async (audioUrl: string): Promise<string> => {
+    if (!audioUrl) return ''
+    try {
+      setTranscribingRef(true)
+      // Tentar GPU Whisper primeiro (mais preciso para vozes PT-BR)
+      const res = await fetch('/api/asr-transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioUrl }),
+      })
+      const data = await res.json()
+      setTranscribingRef(false)
+      if (data.text) {
+        console.log('[autoTranscribe] GPU Whisper:', data.text.substring(0, 80))
+        return data.text
+      }
+      // Fallback: tentar endpoint alternativo (z-ai-web-dev-sdk)
+      const res2 = await fetch('/api/admin/transcribe-audio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioUrl }),
+      })
+      const data2 = await res2.json()
+      if (data2.success && data2.text) {
+        console.log('[autoTranscribe] Fallback ASR:', data2.text.substring(0, 80))
+        return data2.text
+      }
+      console.warn('[autoTranscribe] Ambos falharam')
+      return ''
+    } catch (err) {
+      setTranscribingRef(false)
+      console.warn('[autoTranscribe] Erro:', err)
+      return ''
+    }
+  }
+
   // Quick audio-only update for a variation (kept as-is — convenience feature for inline updates)
+  // 🛡️ AGORA com auto-transcrição: preenche refText automaticamente via ASR
   const handleQuickUploadAudio = async (variationId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -2102,16 +2095,30 @@ export default function AdminDashboard() {
         return
       }
       if (data.serverUrl || data.path) {
+        const serverUrl = (data.serverUrl || '') as string
+
+        // Auto-transcrever o áudio para preencher refText
+        let transcribedText = ''
+        if (serverUrl) {
+          toast.info('Transcrevendo áudio...')
+          transcribedText = await autoTranscribeAudio(serverUrl)
+          if (transcribedText) {
+            toast.success('Transcrição automática: ' + transcribedText.substring(0, 50) + (transcribedText.length > 50 ? '...' : ''))
+          }
+        }
+
         await fetch(`/api/variations/${variationId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             refAudioPath: data.path || '',
-            refAudioServerUrl: data.serverUrl || '',
+            refAudioServerUrl: serverUrl,
             refAudioFilename: data.filename || '',
             refAudioName: data.name || file.name,
-            // 🆕 Salvar refText auto-transcrito pelo upload
-            ...(data.refText ? { refText: data.refText } : {}),
+            // 🛡️ Auto-transcrição: usa transcribedText do nosso endpoint dedicado
+            // Se o upload-voice tb retornou refText, priorizar o nosso (mais confiável)
+            ...(transcribedText ? { refText: transcribedText } : {}),
+            ...( !transcribedText && data.refText ? { refText: data.refText } : {}),
           }),
         })
         toast.success('Áudio atualizado!')
@@ -2528,8 +2535,9 @@ export default function AdminDashboard() {
               serverUrl: uploadData.serverUrl || uploadData.url || '',
               filename: uploadData.filename || '',
               refAudioName: file.name,
-              // 🆕 refText auto-transcrito pelo upload-voice (GPU Whisper ASR)
-              refText: uploadData.refText || '',
+              // 🛡️ Usa __AUTO_TRANSCRIBE__ para o backend transcrever via ASR
+              // Se o upload-voice já retornou refText, usa esse como fallback
+              refText: uploadData.refText || '__AUTO_TRANSCRIBE__',
               instruct: '',
             }),
           })
@@ -3559,18 +3567,26 @@ export default function AdminDashboard() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleTranscribeAudio()}
-                      disabled={transcribing || (!variationForm.serverUrl && !pendingVoiceFile)}
-                      className="border-violet-600 text-violet-400 hover:bg-violet-900/30 gap-1 text-xs h-7"
+                      onClick={async () => {
+                        const audioUrl = variationForm.serverUrl
+                        if (!audioUrl) {
+                          toast.error('Faça upload do áudio primeiro para transcrever')
+                          return
+                        }
+                        toast.info('Transcrevendo áudio...')
+                        const text = await autoTranscribeAudio(audioUrl)
+                        if (text) {
+                          setVariationForm(p => ({ ...p, refText: text }))
+                          toast.success('Transcrição concluída!')
+                        } else {
+                          toast.warning('Não foi possível transcrever. Digite manualmente.')
+                        }
+                      }}
+                      disabled={transcribingRef || !variationForm.serverUrl}
+                      className="h-6 px-2 text-xs gap-1 border-violet-600 text-violet-400 hover:bg-violet-900/30"
                     >
-                      {transcribing ? (
-                        <>
-                          <span className="animate-spin">↻</span>
-                          Transcrevendo...
-                        </>
-                      ) : (
-                        '🎤 Transcrever'
-                      )}
+                      {transcribingRef ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
+                      Transcrever
                     </Button>
                   </div>
                   <Textarea

@@ -1,51 +1,12 @@
-/** 
- * 🛡️ GOVERNANÇA OBRIGATÓRIA — LEIA ANTES DE ALTERAR ESTE ARQUIVO
- * ─────────────────────────────────────────────────────────────
- * ⚠️ REGRAS ABSOLUTAS (já causaram DOWNTIME real):
- *
- * 1. NUNCA: git reset --hard | rm -rf | git checkout -- .env
- * 2. NUNCA: altere .env de produção, git remote, DATABASE_URL, API keys
- * 3. NUNCA: crie scripts de deploy alternativos, arquivos temp no root
- * 4. SEMPRE: use deploy-seguro.py para deploy, vozpro-preview para commits
- * 5. SEMPRE: verifique next build passa, .env tem PostgreSQL, token bate
- *
- * 📋 LEIA COMPLETO:
- *    https://github.com/rgdweb/vozpro-preview/blob/main/REGRAS-ERROS-PROIBIDOS.md
- *    https://github.com/rgdweb/vozpro-preview/blob/main/GOVERNANCE.md
- *
- * 13 erros já cometidos que derrubaram o sistema.
- * Se você tocar em qualquer coisa sem ler as regras acima, vai quebrar.
- * ─────────────────────────────────────────────────────────────
- */
-
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminSession } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { uploadToAudioServer } from '@/lib/audio-server'
+import { transcribeFromUrl } from '@/lib/asr-transcriber'
 
 export const maxDuration = 120
 
 const HF_SPACE_URL = process.env.HF_SPACE_URL || 'https://k2-fsa-omnivoice.hf.space'
-const GPU_DIRECT_URL = process.env.GPU_DIRECT_URL || 'http://10.99.0.2:7860'
-
-/**
- * Auto-transcreve audio usando GPU ASR (Whisper). Falha silenciosamente.
- */
-async function autoTranscribe(serverUrl: string): Promise<string> {
-  try {
-    const res = await fetch(`${GPU_DIRECT_URL}/api/asr-transcribe`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ref_audio_url: serverUrl }),
-      signal: AbortSignal.timeout(30000),
-    })
-    const data = await res.json()
-    if (data.status === 'ok' && data.text) return data.text
-    return ''
-  } catch {
-    return ''
-  }
-}
 
 /**
  * POST /api/admin/voices/bulk-upload
@@ -137,10 +98,21 @@ export async function POST(req: NextRequest) {
           },
         })
 
-        // 4. Auto-transcrever o audio
-        const refText = await autoTranscribe(audioServerResult.url)
+        // 4. Auto-transcrever o áudio para preencher refText
+        // 🛡️ Sem refText, o F5-TTS gera áudio "falando em línguas"
+        let refText = ''
+        try {
+          const transcribeResult = await transcribeFromUrl(audioServerResult.url)
+          if (transcribeResult.success && transcribeResult.text) {
+            refText = transcribeResult.text
+            console.log(`[BulkUpload] Transcrito ${baseName}: "${refText.substring(0, 60)}"`)
+          }
+        } catch {
+          // Transcrição falhou — refText fica vazio, admin pode preencher depois
+          console.warn(`[BulkUpload] Transcrição falhou para ${baseName}`)
+        }
 
-        // 5. Criar VoiceVariation com o áudio + refText
+        // 5. Criar VoiceVariation com o áudio e refText
         await db.voiceVariation.create({
           data: {
             voiceId: voice.id,
@@ -150,7 +122,7 @@ export async function POST(req: NextRequest) {
             refAudioServerUrl: audioServerResult.url,
             refAudioFilename: audioServerResult.filename,
             refAudioName: file.name,
-            refText,  // 🆕 Auto-transcrito pelo Whisper ASR
+            refText: refText,
             instruct: '',
             order: 0,
             active: true,

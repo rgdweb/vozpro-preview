@@ -11,7 +11,13 @@ export async function PUT(
   try {
     const isAdmin = await getAdminSession()
     if (!isAdmin) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+      // Debug: qual cookie existe?
+      const { cookies } = await import('next/headers')
+      const cs = await cookies()
+      const hasSession = !!cs.get('vozpro_session')?.value
+      const hasLegacy = !!cs.get('vozpro_admin')?.value
+      console.error('[Auth] Não autorizado. vozpro_session:', hasSession, 'vozpro_admin:', hasLegacy)
+      return NextResponse.json({ error: 'Não autorizado', _debug: { hasSession, hasLegacy } }, { status: 401 })
     }
 
     const { id } = await params

@@ -51,11 +51,10 @@ export async function POST(req: NextRequest) {
 
         response.cookies.set(NEW_SESSION_KEY, token, {
           httpOnly: true,
-          secure: true,
+          secure: process.env.NODE_ENV === 'production',
           sameSite: 'lax',
           maxAge: 60 * 60 * 24, // 24 hours
           path: '/',
-          domain: '.cvmnews.com.br',
         })
 
         return response
@@ -72,11 +71,10 @@ export async function POST(req: NextRequest) {
 
       response.cookies.set(LEGACY_SESSION_KEY, legacyResult.token, {
         httpOnly: true,
-        secure: true,
+        secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
         maxAge: 60 * 60 * 24,
         path: '/',
-        domain: '.cvmnews.com.br',
       })
 
       return response
@@ -104,19 +102,17 @@ export async function DELETE(req: NextRequest) {
     // Limpar ambos os cookies
     response.cookies.set(NEW_SESSION_KEY, '', {
       httpOnly: true,
-      secure: true,
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 0,
       path: '/',
-      domain: '.cvmnews.com.br',
     })
     response.cookies.set(LEGACY_SESSION_KEY, '', {
       httpOnly: true,
-      secure: true,
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 0,
       path: '/',
-      domain: '.cvmnews.com.br',
     })
 
     return response

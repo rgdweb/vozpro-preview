@@ -71,11 +71,10 @@ export async function POST(req: NextRequest) {
     // Set cookie de sessão
     response.cookies.set('vozpro_session', sessionToken, {
       httpOnly: true,
-      secure: true,
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 24 * 60 * 60, // 24 horas
       path: '/',
-      domain: '.cvmnews.com.br',
     })
 
     return response

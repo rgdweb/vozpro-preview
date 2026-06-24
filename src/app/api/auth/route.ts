@@ -1,3 +1,20 @@
+/**
+ * 🛡️ BLINDAGEM — Auth Route (login + logout)
+ *
+ * ⚠️ NÃO ADICIONE `domain` NOS COOKIES. Já cometemos esse erro:
+ *   domain: '.cvmnews.com.br' → QUEBRA LOGOUT (cookie não é limpo).
+ *   Ver BLINDAGEM.md Bloco 2.
+ *
+ * ⚠️ NÃO hardcode `secure: true`. Use `process.env.NODE_ENV === 'production'`.
+ *   Hardcoded secure:true QUEBRA em ambiente dev.
+ *
+ * Cookie config CORRETA (NÃO MUDAR):
+ *   httpOnly: true
+ *   secure: process.env.NODE_ENV === 'production'
+ *   sameSite: 'lax'
+ *   path: '/'
+ *   SEM domain!
+ */
 import { NextRequest, NextResponse } from 'next/server'
 import { loginUser, loginLegacy, createSession, invalidateSession } from '@/lib/auth'
 

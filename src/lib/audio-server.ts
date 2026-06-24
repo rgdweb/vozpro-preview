@@ -1,17 +1,24 @@
 /**
- * Audio Server Client - uploads to Oracle VPS (147.15.77.137)
- * Replaces Vercel Blob for audio file storage.
+ * 🛡️ BLINDAGEM — Audio Server Client
+ * ⚠️ NÃO ALTERE O FALLBACK DA API KEY. O PHP server (config.php) usa
+ * 'omnivoice_sk_2024_secure_key_v4' — se mudar aqui, upload quebra com
+ * "Nao autorizado". Erro já cometido em 2026-06-24. Ver BLINDAGEM.md.
+ *
+ * ⚠️ NÃO mude module-level const para function getters — o Next.js bakes
+ * module-level const defaults no build. Se usar const, o valor fica
+ * congelado no build e ignora o .env em runtime.
  *
  * Flow: Upload audio → saved permanently on PHP server → when generating TTS,
  * fetch from server → re-upload to HuggingFace Space → generate speech.
  */
 
-// NÃO usar fallback com valor hardcoded — Next.js bakes defaults into the build.
-// Ler sempre do process.env em tempo de execução.
+// Ler sempre do process.env em tempo de execução (não const — Next.js bakes const defaults)
 function getAudioServerUrl(): string {
   return process.env.AUDIO_SERVER_URL || 'http://147.15.77.137'
 }
 
+// 🛡️ FALLBACK SAGRADO: 'omnivoice_sk_2024_secure_key_v4' — DEVE casar com PHP config.php
+// NUNCA usar 'omnivoice_api_key_2026_secure' (valor antigo, causa "Nao autorizado")
 function getAudioServerApiKey(): string {
   return process.env.AUDIO_SERVER_API_KEY || 'omnivoice_sk_2024_secure_key_v4'
 }

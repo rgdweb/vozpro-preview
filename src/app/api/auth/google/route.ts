@@ -1,3 +1,9 @@
+/**
+ * 🛡️ BLINDAGEM — Google OAuth Route
+ * ⚠️ Cookie DEVE seguir mesma config do auth/route.ts:
+ *   SEM domain, secure condicional, sameSite 'lax'.
+ *   Ver BLINDAGEM.md Bloco 2.
+ */
 import { NextRequest, NextResponse } from 'next/server'
 import { createSession } from '@/lib/auth'
 import { db } from '@/lib/db'

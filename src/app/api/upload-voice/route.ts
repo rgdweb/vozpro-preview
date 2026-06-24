@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getAdminSession } from '@/lib/auth'
 import { uploadToAudioServer } from '@/lib/audio-server'
 
 export const maxDuration = 60
@@ -8,6 +9,11 @@ const HF_SPACE_URL = process.env.HF_SPACE_URL || 'https://k2-fsa-omnivoice.hf.sp
 // POST /api/upload-voice - Upload reference audio to PHP hosting AND HuggingFace Space
 export async function POST(req: NextRequest) {
   try {
+    // Verificar se é admin
+    const isAdmin = await getAdminSession()
+    if (!isAdmin) {
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+    }
     const formData = await req.formData()
     const file = formData.get('file') as File | null
 

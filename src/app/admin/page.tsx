@@ -1907,16 +1907,18 @@ export default function AdminDashboard() {
       }
 
       // Auto-transcrever se refText está vazio E temos URL de áudio
-      let autoRefText = variationForm.refText
+      let autoRefText = variationForm.refText || pendingVoiceFileData?.refText || ''
       if (!autoRefText.trim()) {
         const audioUrlToTranscribe = pendingVoiceFileData?.serverUrl || variationForm.serverUrl
         if (audioUrlToTranscribe) {
-          toast.info('Transcrevendo áudio automaticamente...')
+          toast.info('Transcrevendo áudio via Whisper ASR...')
           const transcribed = await autoTranscribeAudio(audioUrlToTranscribe)
           if (transcribed) {
             autoRefText = transcribed
             setVariationForm(prev => ({ ...prev, refText: transcribed }))
             toast.success('Transcrição: ' + transcribed.substring(0, 50) + (transcribed.length > 50 ? '...' : ''))
+          } else {
+            toast.warning('GPU offline — refText não transcrita. Digite manualmente para melhor qualidade.', { duration: 5000 })
           }
         }
       }
@@ -2040,34 +2042,52 @@ export default function AdminDashboard() {
     if (!audioUrl) return ''
     try {
       setTranscribingRef(true)
-      // Tentar GPU Whisper primeiro (mais preciso para vozes PT-BR)
-      const res = await fetch('/api/asr-transcribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audioUrl }),
-      })
-      const data = await res.json()
+
+      // Tentar /api/asr-transcribe (GPU Whisper) — funciona quando GPU está online via WireGuard
+      try {
+        const res = await fetch('/api/asr-transcribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ audioUrl }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.text && data.text.trim()) {
+            setTranscribingRef(false)
+            console.log('[autoTranscribe] GPU Whisper OK:', data.text.substring(0, 80))
+            return data.text.trim()
+          }
+        }
+        console.warn('[autoTranscribe] GPU ASR falhou (status:', res.status, ') — provavelmente GPU offline')
+      } catch (gpuErr) {
+        console.warn('[autoTranscribe] GPU ASR erro:', gpuErr)
+      }
+
+      // Fallback: /api/admin/transcribe-audio (z-ai-web-dev-sdk)
+      try {
+        const res2 = await fetch('/api/admin/transcribe-audio', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ audioUrl }),
+        })
+        if (res2.ok) {
+          const data2 = await res2.json()
+          if (data2.success && data2.text && data2.text.trim()) {
+            setTranscribingRef(false)
+            console.log('[autoTranscribe] Fallback ASR OK:', data2.text.substring(0, 80))
+            return data2.text.trim()
+          }
+        }
+        console.warn('[autoTranscribe] Fallback ASR falhou (status:', res2.status, ')')
+      } catch (fallbackErr) {
+        console.warn('[autoTranscribe] Fallback ASR erro:', fallbackErr)
+      }
+
       setTranscribingRef(false)
-      if (data.text) {
-        console.log('[autoTranscribe] GPU Whisper:', data.text.substring(0, 80))
-        return data.text
-      }
-      // Fallback: tentar endpoint alternativo (z-ai-web-dev-sdk)
-      const res2 = await fetch('/api/admin/transcribe-audio', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audioUrl }),
-      })
-      const data2 = await res2.json()
-      if (data2.success && data2.text) {
-        console.log('[autoTranscribe] Fallback ASR:', data2.text.substring(0, 80))
-        return data2.text
-      }
-      console.warn('[autoTranscribe] Ambos falharam')
       return ''
     } catch (err) {
       setTranscribingRef(false)
-      console.warn('[autoTranscribe] Erro:', err)
+      console.warn('[autoTranscribe] Erro geral:', err)
       return ''
     }
   }
@@ -2098,13 +2118,21 @@ export default function AdminDashboard() {
         const serverUrl = (data.serverUrl || '') as string
 
         // Auto-transcrever o áudio para preencher refText
+        // O upload-voice já tenta transcrever via GPU — se retornou refText, usar ele
         let transcribedText = ''
-        if (serverUrl) {
-          toast.info('Transcrevendo áudio...')
+        const uploadRefText = data.refText as string || ''
+        if (uploadRefText) {
+          // Upload-voice já transcreveu com sucesso
+          transcribedText = uploadRefText
+          toast.success('Transcrição: ' + uploadRefText.substring(0, 50) + (uploadRefText.length > 50 ? '...' : ''))
+        } else if (serverUrl) {
+          // Upload-voice não transcreveu (GPU offline?) — tentar manualmente
+          toast.info('Tentando transcrever áudio...')
           transcribedText = await autoTranscribeAudio(serverUrl)
           if (transcribedText) {
-            toast.success('Transcrição automática: ' + transcribedText.substring(0, 50) + (transcribedText.length > 50 ? '...' : ''))
+            toast.success('Transcrição: ' + transcribedText.substring(0, 50) + (transcribedText.length > 50 ? '...' : ''))
           }
+          // Se não transcreveu, não mostrar erro aqui — o áudio foi atualizado com sucesso
         }
 
         await fetch(`/api/variations/${variationId}`, {
@@ -3563,7 +3591,7 @@ export default function AdminDashboard() {
 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <Label className="text-slate-300">Texto da Referência <span className="text-slate-500">(auto-transcrito pelo Whisper)</span></Label>
+                    <Label className="text-slate-300">Texto da Referência</Label>
                     <Button
                       size="sm"
                       variant="outline"
@@ -3573,13 +3601,13 @@ export default function AdminDashboard() {
                           toast.error('Faça upload do áudio primeiro para transcrever')
                           return
                         }
-                        toast.info('Transcrevendo áudio...')
+                        toast.info('Transcrevendo áudio via Whisper ASR...')
                         const text = await autoTranscribeAudio(audioUrl)
                         if (text) {
                           setVariationForm(p => ({ ...p, refText: text }))
-                          toast.success('Transcrição concluída!')
+                          toast.success('Transcrição: ' + text.substring(0, 60) + (text.length > 60 ? '...' : ''))
                         } else {
-                          toast.warning('Não foi possível transcrever. Digite manualmente.')
+                          toast.error('GPU offline ou ASR indisponível. Digite o refText manualmente.', { duration: 6000 })
                         }
                       }}
                       disabled={transcribingRef || !variationForm.serverUrl}
@@ -3592,7 +3620,7 @@ export default function AdminDashboard() {
                   <Textarea
                     value={variationForm.refText}
                     onChange={(e) => setVariationForm(p => ({ ...p, refText: e.target.value }))}
-                    placeholder="O que o locutor fala no áudio de referência. Clique em Transcrever ou cole manualmente. Sem isso, vozes podem sair erradas."
+                    placeholder="O que o locutor fala no áudio. Clique Transcrever (precisa GPU online) ou digite manualmente. Sem refText, a voz clonada pode sair errada."
                     className="bg-slate-900/50 border-slate-600 text-white resize-none"
                     rows={2}
                   />

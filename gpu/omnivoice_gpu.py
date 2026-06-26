@@ -898,57 +898,51 @@ async def native_generate(request):
             _ref_text = ref_text.strip() if ref_text and ref_text.strip() else None
 
             # ============================================================
-            # AUTO-TRANSCRICAO WHISPER quando ref_text vazio ou curto
-            # ref_text curto/generico (ex: "sim") causa delirio:
-            # o modelo nao tem guia de prosodia e "eco" o ref_audio.
-            # Whisper transcreve o ref_audio para dar o guia real.
-            # Limiar: < 15 chars = muito curto para guia confiavel.
+            # DECISAO DE ref_text: passar, omitir ou auto-transcrever
+            #
+            # Docs oficiais OmniVoice:
+            #   "If you don't want to input ref_text manually, you can
+            #    directly omit the ref_text. The model will use Whisper
+            #    ASR to auto-transcribe it."
+            #
+            # Regras:
+            # 1. ref_text longo e confiavel (>=15 chars) → PASSAR ao modelo
+            # 2. ref_text curto/ruim (<15 chars, ex: "sim") → OMITIR
+            #    O modelo usa Whisper INTERNO para transcrever.
+            #    Passar ref_text errado é PIOR que omitir.
+            # 3. Se o modelo nao suportar omitir (versao antiga),
+            #    fazemos AutoASR manual como fallback.
             # ============================================================
-            MIN_REFTEXT_LEN = 15  # caracteres minimos para ref_text confiavel
+            MIN_REFTEXT_LEN = 15  # chars minimos para ref_text confiavel
+            _omit_ref_text = False  # flag: true = NAO passar ref_text
+
             if not _ref_text or len(_ref_text) < MIN_REFTEXT_LEN:
                 _old_ref = _ref_text or '(vazio)'
-                try:
-                    if _model is not None and hasattr(_model, 'transcribe'):
-                        print(f"[AutoASR] ref_text='{_old_ref}' ({len(_ref_text or '')} chars) → transcrevendo ref_audio com Whisper...")
-                        asr_start = time.time()
-                        loop = asyncio.get_event_loop()
-                        asr_text = await loop.run_in_executor(
-                            None,
-                            lambda: _model.transcribe((ref_audio_array, SAMPLE_RATE))
-                        )
-                        asr_elapsed = time.time() - asr_start
-                        asr_str = str(asr_text).strip() if asr_text else ''
-                        if asr_str and len(asr_str) > len(_ref_text or ''):
-                            _ref_text = asr_str
-                            print(f"[AutoASR] Whisper OK em {asr_elapsed:.1f}s: '{asr_str[:80]}{'...' if len(asr_str) > 80 else ''}' (substituiu '{_old_ref}')")
-                        else:
-                            print(f"[AutoASR] Whisper retornou curto/vazio: '{asr_str}' — mantendo ref_text original")
-                    else:
-                        print("[AutoASR] Modelo sem transcribe() — mantendo ref_text original")
-                except Exception as e:
-                    print(f"[AutoASR] Falha: {e} — mantendo ref_text original")
+                # Estrategia 1: OMITIR ref_text — o modelo transcreve internamente
+                # Isso é o que a interface nativa faz e funciona perfeitamente.
+                _ref_text = None  # Limpar ref_text ruim
+                _omit_ref_text = True
+                print(f"[RefText] ref_text='{_old_ref}' ({len(_old_ref)} chars) → OMITIDO (modelo usa Whisper interno)")
 
             kw["ref_audio"] = (ref_audio_array, SAMPLE_RATE)
             if _ref_text:
                 kw["ref_text"] = _ref_text
-            print(f"[Native] Clone: ref_audio direto ref_text={'sim' if _ref_text else 'vazio (sem ASR)'}")
+                print(f"[Native] Clone: ref_audio + ref_text manual ('{_ref_text[:40]}{'...' if len(_ref_text) > 40 else ''}')")
+            else:
+                print(f"[Native] Clone: ref_audio SEM ref_text → modelo transcreve internamente via Whisper")
 
             # ============================================================
-            # AUMENTAR GUIDANCE_SCALE quando ref_text veio do AutoASR
-            # O modelo tende a "ecoar" o conteudo do ref_audio quando o
-            # ref_text nao foi escrito manualmente. Guidance mais alto
-            # força o modelo a seguir o TEXTO DIGITADO pelo usuario.
-            # 2.0 = padrao (pode ecoar ref), 3.0+ = segue texto fielmente
+            # GUIDANCE_SCALE: aumentar quando ref_text foi omitido
+            # Sem ref_text explicito, o modelo precisa de guidance maior
+            # para seguir o texto digitado e nao "ecoar" o ref_audio.
             # ============================================================
-            _used_autoasr = _ref_text and len(_ref_text) >= MIN_REFTEXT_LEN and (not ref_text or not ref_text.strip() or len(ref_text.strip()) < MIN_REFTEXT_LEN)
-            if _used_autoasr and guidance_scale < 3.0:
+            if _omit_ref_text and guidance_scale < 3.0:
                 old_gs = guidance_scale
                 guidance_scale = 3.0
-                # Atualizar no gen_config tambem
                 if gen_config is not None:
                     gen_config.guidance_scale = 3.0
                     kw["generation_config"] = gen_config
-                print(f"[AutoASR] guidance_scale {old_gs:.1f} → {guidance_scale:.1f} (forcar fidelidade ao texto digitado)")
+                print(f"[RefText] guidance_scale {old_gs:.1f} → {guidance_scale:.1f} (forcar fidelidade ao texto digitado)")
         elif voice_mode == 'auto':
             # Modo auto: sem instruct, sem referencia — modelo escolhe voz livre
             print(f"[Native] Modo auto: modelo escolhe a voz")
@@ -979,7 +973,7 @@ async def native_generate(request):
                 chunk_kw["ref_audio"] = (ref_audio_array, SAMPLE_RATE)
             
             chunk_label = f" [{chunk_idx+1}/{len(text_chunks)}]" if len(text_chunks) > 1 else ""
-            _ref_text_preview = _ref_text[:30] + '...' if _ref_text and len(_ref_text) > 30 else (_ref_text or 'vazio')
+            _ref_text_preview = (_ref_text[:30] + '...') if _ref_text and len(_ref_text) > 30 else (_ref_text if _ref_text else '(omitido - Whisper interno)')
             print(f"[Native] Gerando{chunk_label}: mode={voice_mode} lang={lang or 'Auto'} speed={speed} cfg={guidance_scale} steps={num_step} denoise={denoise} postprocess={postprocess_output} instruct='{instruct}' ref_text='{_ref_text_preview}' pitch_shift={pitch_shift_semitones:+.1f} text='{chunk_text[:40]}...'")
             
             start_chunk = time.time()

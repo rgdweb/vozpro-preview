@@ -844,7 +844,9 @@ async def native_generate(request):
         except ImportError:
             gen_config = None
 
-        lang = language if (language and language != "Auto") else None
+        # FORCAR idioma PT-BR — language=Auto causa confusao em vozes agudas
+        # O modelo detecta idioma errado e mistura fonemas de outros idiomas
+        lang = 'pt' if (not language or language == "Auto") else language
 
         if gen_config is not None:
             kw = dict(text=text.strip(), language=lang, generation_config=gen_config)
@@ -931,6 +933,23 @@ async def native_generate(request):
             if _ref_text:
                 kw["ref_text"] = _ref_text
             print(f"[Native] Clone: ref_audio direto ref_text={'sim' if _ref_text else 'vazio (sem ASR)'}")
+
+            # ============================================================
+            # AUMENTAR GUIDANCE_SCALE quando ref_text veio do AutoASR
+            # O modelo tende a "ecoar" o conteudo do ref_audio quando o
+            # ref_text nao foi escrito manualmente. Guidance mais alto
+            # força o modelo a seguir o TEXTO DIGITADO pelo usuario.
+            # 2.0 = padrao (pode ecoar ref), 3.0+ = segue texto fielmente
+            # ============================================================
+            _used_autoasr = _ref_text and len(_ref_text) >= MIN_REFTEXT_LEN and (not ref_text or not ref_text.strip() or len(ref_text.strip()) < MIN_REFTEXT_LEN)
+            if _used_autoasr and guidance_scale < 3.0:
+                old_gs = guidance_scale
+                guidance_scale = 3.0
+                # Atualizar no gen_config tambem
+                if gen_config is not None:
+                    gen_config.guidance_scale = 3.0
+                    kw["generation_config"] = gen_config
+                print(f"[AutoASR] guidance_scale {old_gs:.1f} → {guidance_scale:.1f} (forcar fidelidade ao texto digitado)")
         elif voice_mode == 'auto':
             # Modo auto: sem instruct, sem referencia — modelo escolhe voz livre
             print(f"[Native] Modo auto: modelo escolhe a voz")

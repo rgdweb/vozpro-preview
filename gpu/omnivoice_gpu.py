@@ -788,31 +788,31 @@ async def native_generate(request):
                 except Exception as e:
                     print(f"[Native] TRIM: falhou ({e}), mantendo original")
 
-                # TRUNCAR audio de referencia para max 10 segundos
-                # Audio muito longo faz o modelo misturar ref com geracao e acelerar a fala
-                # Truncamento inteligente: cortar em fronteira de silencio (nao hard cut)
-                MAX_REF_SECONDS = 10
+                # TRUNCAR audio de referencia — APENAS quando muito longo (>30s)
+                # Na interface local do OmniVoice, audios longos funcionam perfeitamente
+                # porque tem ref_text correto. O truncamento de 10s era um workaround
+                # para ref_text ruim ("sim"). Com AutoASR + guidance_scale 3.0, o modelo
+                # consegue separar timbre de conteudo corretamente.
+                # Limite de 30s por seguranca (VRAM + atencao), nao 10s.
+                MAX_REF_SECONDS = 30
                 max_samples = SAMPLE_RATE * MAX_REF_SECONDS
                 if len(ref_audio_array) > max_samples:
-                    # Tentar encontrar silencio perto do limite de 10s
-                    search_start = int(SAMPLE_RATE * 8)  # comecar a buscar a partir de 8s
-                    search_end = min(int(SAMPLE_RATE * 10.5), len(ref_audio_array))  # ate 10.5s
-                    cut_point = max_samples  # default: hard cut em 10s
+                    # Cortar em fronteira de silencio perto do limite
+                    search_start = int(SAMPLE_RATE * 25)
+                    search_end = min(int(SAMPLE_RATE * 30.5), len(ref_audio_array))
+                    cut_point = max_samples
 
                     if search_end > search_start:
                         try:
-                            import librosa
-                            # Buscar janela de silencio (-30dB) entre 8s e 10.5s
+                            frame_len = int(SAMPLE_RATE * 0.025)
                             window_samples = ref_audio_array[search_start:search_end]
-                            frame_len = int(SAMPLE_RATE * 0.025)  # 25ms frames
                             rms_vals = []
                             for i in range(0, len(window_samples) - frame_len, frame_len):
                                 rms = np.sqrt(np.mean(window_samples[i:i+frame_len] ** 2))
                                 rms_vals.append(rms)
                             if rms_vals:
                                 peak_rms = max(rms_vals) if max(rms_vals) > 0 else 1
-                                threshold = peak_rms * 0.05  # 5% do pico = silencio
-                                # Encontrar ultimo ponto de silencio antes do limite
+                                threshold = peak_rms * 0.05
                                 for i in range(len(rms_vals) - 1, -1, -1):
                                     if rms_vals[i] < threshold:
                                         cut_point = search_start + (i + 1) * frame_len
@@ -823,6 +823,8 @@ async def native_generate(request):
                     ref_audio_array = ref_audio_array[:cut_point]
                     new_dur = len(ref_audio_array) / SAMPLE_RATE
                     print(f"[Native] TRUNCADO: ref audio limitado a {new_dur:.1f}s (era {info.duration:.1f}s, corte em {'silencio' if cut_point != max_samples else 'hard cut'})")
+                else:
+                    print(f"[Native] Ref audio mantido integral: {len(ref_audio_array)/SAMPLE_RATE:.1f}s")
             except Exception as e:
                 print(f"[Native] Erro ao carregar audio: {e}")
                 return JSONResponse({"status": "error", "error": f"Falha ao carregar audio: {e}"}, status_code=500)

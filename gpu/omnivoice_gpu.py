@@ -861,7 +861,10 @@ async def native_generate(request):
         # O modelo OmniVoice usa speed para controlar ritmo — duration fixo
         # pode causar atropelo e artefatos.
 
-        if instruct and instruct.strip():
+        # NOTE: instruct é adicionado DENTRO do bloco clone abaixo
+        # (auto-detectado por F0 ou passado pelo admin)
+        # Fora do modo clone, instruct é passado normalmente
+        if voice_mode != 'clone' and instruct and instruct.strip():
             kw["instruct"] = instruct.strip()
 
         # ================================================================
@@ -898,51 +901,121 @@ async def native_generate(request):
             _ref_text = ref_text.strip() if ref_text and ref_text.strip() else None
 
             # ============================================================
-            # DECISAO DE ref_text: passar, omitir ou auto-transcrever
+            # AUTO-TRANSCRICAO com model.transcribe() quando ref_text ruim
             #
-            # Docs oficiais OmniVoice:
-            #   "If you don't want to input ref_text manually, you can
-            #    directly omit the ref_text. The model will use Whisper
-            #    ASR to auto-transcribe it."
+            # PROVADO pelos logs: omitir ref_text causou 50.3s de alucinacao
+            # (COVID no texto). Com ref_text correto: 29.2s perfeito.
             #
-            # Regras:
-            # 1. ref_text longo e confiavel (>=15 chars) → PASSAR ao modelo
-            # 2. ref_text curto/ruim (<15 chars, ex: "sim") → OMITIR
-            #    O modelo usa Whisper INTERNO para transcrever.
-            #    Passar ref_text errado é PIOR que omitir.
-            # 3. Se o modelo nao suportar omitir (versao antiga),
-            #    fazemos AutoASR manual como fallback.
+            # Docs OmniVoice: omitir ref_text funciona MAS causa instabilidade.
+            # model.transcribe() dedicado funciona MELHOR que o Whisper
+            # interno da geracao (é executado separadamente, com mais contexto).
+            #
+            # Regra: ref_text < 15 chars → transcrever com model.transcribe()
             # ============================================================
-            MIN_REFTEXT_LEN = 15  # chars minimos para ref_text confiavel
-            _omit_ref_text = False  # flag: true = NAO passar ref_text
-
+            MIN_REFTEXT_LEN = 15
             if not _ref_text or len(_ref_text) < MIN_REFTEXT_LEN:
                 _old_ref = _ref_text or '(vazio)'
-                # Estrategia 1: OMITIR ref_text — o modelo transcreve internamente
-                # Isso é o que a interface nativa faz e funciona perfeitamente.
-                _ref_text = None  # Limpar ref_text ruim
-                _omit_ref_text = True
-                print(f"[RefText] ref_text='{_old_ref}' ({len(_old_ref)} chars) → OMITIDO (modelo usa Whisper interno)")
+                try:
+                    if _model is not None and hasattr(_model, 'transcribe'):
+                        print(f"[AutoASR] ref_text='{_old_ref}' ({len(_ref_text or '')} chars) → transcrevendo com model.transcribe()...")
+                        asr_start = time.time()
+                        loop = asyncio.get_event_loop()
+                        asr_text = await loop.run_in_executor(
+                            None,
+                            lambda: _model.transcribe((ref_audio_array, SAMPLE_RATE))
+                        )
+                        asr_elapsed = time.time() - asr_start
+                        asr_str = str(asr_text).strip() if asr_text else ''
+                        if asr_str and len(asr_str) > len(_ref_text or ''):
+                            _ref_text = asr_str
+                            print(f"[AutoASR] OK em {asr_elapsed:.1f}s: '{asr_str[:80]}{'...' if len(asr_str) > 80 else ''}'")
+                        else:
+                            _ref_text = None  # Omitir se Whisper falhou
+                            print(f"[AutoASR] Whisper retornou vazio — gerando SEM ref_text")
+                    else:
+                        _ref_text = None
+                        print("[AutoASR] Modelo sem transcribe() — gerando SEM ref_text")
+                except Exception as e:
+                    _ref_text = None
+                    print(f"[AutoASR] Falha: {e} — gerando SEM ref_text")
 
             kw["ref_audio"] = (ref_audio_array, SAMPLE_RATE)
             if _ref_text:
                 kw["ref_text"] = _ref_text
-                print(f"[Native] Clone: ref_audio + ref_text manual ('{_ref_text[:40]}{'...' if len(_ref_text) > 40 else ''}')")
+                print(f"[Native] Clone: ref_audio + ref_text ('{_ref_text[:50]}{'...' if len(_ref_text) > 50 else ''}')")
             else:
-                print(f"[Native] Clone: ref_audio SEM ref_text → modelo transcreve internamente via Whisper")
+                print(f"[Native] Clone: ref_audio SEM ref_text (fallback)")
 
             # ============================================================
-            # GUIDANCE_SCALE: aumentar quando ref_text foi omitido
-            # Sem ref_text explicito, o modelo precisa de guidance maior
-            # para seguir o texto digitado e nao "ecoar" o ref_audio.
+            # INSTRUCT AUTOMATICO baseado no ref_audio
+            #
+            # Docs oficiais OmniVoice:
+            #   "When ref_audio and instruct are consistent, instruct
+            #    can improve cloning stability."
+            #
+            # Detectar F0 do ref_audio e gerar instruct que combina:
+            #   F0 < 140Hz → "male, low pitch" ou "male, very low pitch"
+            #   F0 140-200Hz → "male, moderate pitch" ou "female, low pitch"
+            #   F0 > 200Hz → "female, high pitch" ou "female, moderate pitch"
+            #
+            # Se o admin ja passou instruct, RESPEITAR (ele sabe melhor).
             # ============================================================
-            if _omit_ref_text and guidance_scale < 3.0:
-                old_gs = guidance_scale
-                guidance_scale = 3.0
-                if gen_config is not None:
-                    gen_config.guidance_scale = 3.0
-                    kw["generation_config"] = gen_config
-                print(f"[RefText] guidance_scale {old_gs:.1f} → {guidance_scale:.1f} (forcar fidelidade ao texto digitado)")
+            if not instruct or not instruct.strip():
+                try:
+                    _detected_f0 = None
+                    # Tentar pyin (alta precisao)
+                    try:
+                        import librosa
+                        f0_arr, voiced_flags, voiced_probs = librosa.pyin(
+                            ref_audio_array.astype(np.float32),
+                            fmin=60, fmax=500, sr=SAMPLE_RATE, frame_length=2048,
+                        )
+                        voiced_f0 = f0_arr[voiced_flags & (voiced_probs > 0.5)]
+                        if len(voiced_f0) > 5:
+                            _detected_f0 = float(np.median(voiced_f0))
+                    except ImportError:
+                        pass
+                    except Exception:
+                        pass
+
+                    # Fallback: autocorrelacao
+                    if _detected_f0 is None and len(ref_audio_array) > SAMPLE_RATE:
+                        try:
+                            window = ref_audio_array[int(SAMPLE_RATE*0.3):int(SAMPLE_RATE*0.7)].astype(np.float64)
+                            window = window - np.mean(window)
+                            corr = np.correlate(window, window, mode='full')
+                            corr = corr[len(corr)//2:]
+                            if corr[0] > 0:
+                                corr = corr / corr[0]
+                            min_lag = int(SAMPLE_RATE / 500)
+                            max_lag = int(SAMPLE_RATE / 60)
+                            if max_lag < len(corr):
+                                search = corr[min_lag:max_lag]
+                                if len(search) > 0 and np.max(search) > 0.3:
+                                    _detected_f0 = SAMPLE_RATE / (np.argmax(search) + min_lag)
+                        except Exception:
+                            pass
+
+                    # Gerar instruct baseado no F0
+                    if _detected_f0 is not None:
+                        if _detected_f0 < 120:
+                            instruct = 'male, very low pitch'
+                        elif _detected_f0 < 160:
+                            instruct = 'male, low pitch'
+                        elif _detected_f0 < 200:
+                            instruct = 'female, low pitch'
+                        elif _detected_f0 < 280:
+                            instruct = 'female, moderate pitch'
+                        else:
+                            instruct = 'female, high pitch'
+                        print(f"[Instruct] F0={_detected_f0:.0f}Hz → auto-instruct='{instruct}'")
+                    else:
+                        print("[Instruct] F0 nao detectado — sem auto-instruct")
+                except Exception as e:
+                    print(f"[Instruct] Deteccao falhou: {e}")
+
+            if instruct and instruct.strip():
+                kw["instruct"] = instruct.strip()
         elif voice_mode == 'auto':
             # Modo auto: sem instruct, sem referencia — modelo escolhe voz livre
             print(f"[Native] Modo auto: modelo escolhe a voz")
@@ -955,8 +1028,11 @@ async def native_generate(request):
         # ================================================================
         _pre_generate_cleanup()
 
-        # Split quando texto > 250 chars (sem split, F5-TTS embaralha a fala)
-        need_split = len(text) > 250
+        # Split apenas para textos MUITO longos (>1000 chars)
+        # O OmniVoice nativo cuida de textos normais sem split
+        # Split agressivo (250 chars) cortava frases no meio e causava
+        # pausas artificiais. Apenas split de segurança para >1000.
+        need_split = len(text) > 1000
         if need_split:
             text_chunks = _split_text_for_generation(text, max_chars=250)
         else:

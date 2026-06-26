@@ -897,17 +897,18 @@ async def native_generate(request):
             _ref_text = ref_text.strip() if ref_text and ref_text.strip() else None
 
             # ============================================================
-            # AUTO-TRANSCRICAO WHISPER quando ref_text vazio
-            # Vozes agudas/femininas sem ref_text DELIRAM (misturam ref,
-            # falam acelerado). O Whisper do proprio modelo transcreve
-            # o ref_audio para dar o guia de prosódia que o modelo precisa.
-            # Vozes graves funcionam sem ref_text, mas com ref_text ficam
-            # ainda mais consistentes.
+            # AUTO-TRANSCRICAO WHISPER quando ref_text vazio ou curto
+            # ref_text curto/generico (ex: "sim") causa delirio:
+            # o modelo nao tem guia de prosodia e "eco" o ref_audio.
+            # Whisper transcreve o ref_audio para dar o guia real.
+            # Limiar: < 15 chars = muito curto para guia confiavel.
             # ============================================================
-            if not _ref_text:
+            MIN_REFTEXT_LEN = 15  # caracteres minimos para ref_text confiavel
+            if not _ref_text or len(_ref_text) < MIN_REFTEXT_LEN:
+                _old_ref = _ref_text or '(vazio)'
                 try:
                     if _model is not None and hasattr(_model, 'transcribe'):
-                        print("[AutoASR] ref_text vazio → transcrevendo ref_audio com Whisper...")
+                        print(f"[AutoASR] ref_text='{_old_ref}' ({len(_ref_text or '')} chars) → transcrevendo ref_audio com Whisper...")
                         asr_start = time.time()
                         loop = asyncio.get_event_loop()
                         asr_text = await loop.run_in_executor(
@@ -916,15 +917,15 @@ async def native_generate(request):
                         )
                         asr_elapsed = time.time() - asr_start
                         asr_str = str(asr_text).strip() if asr_text else ''
-                        if asr_str and len(asr_str) > 2:
+                        if asr_str and len(asr_str) > len(_ref_text or ''):
                             _ref_text = asr_str
-                            print(f"[AutoASR] Whisper transcrito em {asr_elapsed:.1f}s: '{asr_str[:80]}{'...' if len(asr_str) > 80 else ''}'")
+                            print(f"[AutoASR] Whisper OK em {asr_elapsed:.1f}s: '{asr_str[:80]}{'...' if len(asr_str) > 80 else ''}' (substituiu '{_old_ref}')")
                         else:
-                            print(f"[AutoASR] Whisper retornou vazio ou muito curto: '{asr_str}' — gerando sem ref_text")
+                            print(f"[AutoASR] Whisper retornou curto/vazio: '{asr_str}' — mantendo ref_text original")
                     else:
-                        print("[AutoASR] Modelo nao tem transcribe() — gerando sem ref_text")
+                        print("[AutoASR] Modelo sem transcribe() — mantendo ref_text original")
                 except Exception as e:
-                    print(f"[AutoASR] Falha na transcricao: {e} — gerando sem ref_text")
+                    print(f"[AutoASR] Falha: {e} — mantendo ref_text original")
 
             kw["ref_audio"] = (ref_audio_array, SAMPLE_RATE)
             if _ref_text:
@@ -960,7 +961,8 @@ async def native_generate(request):
                 chunk_kw["ref_audio"] = (ref_audio_array, SAMPLE_RATE)
             
             chunk_label = f" [{chunk_idx+1}/{len(text_chunks)}]" if len(text_chunks) > 1 else ""
-            print(f"[Native] Gerando{chunk_label}: mode={voice_mode} lang={lang or 'Auto'} speed={speed} cfg={guidance_scale} steps={num_step} denoise={denoise} postprocess={postprocess_output} instruct='{instruct}' ref_text={'sim' if ref_text and ref_text.strip() else 'vazio'} pitch_shift={pitch_shift_semitones:+.1f} text='{chunk_text[:40]}...'")
+            _ref_text_preview = _ref_text[:30] + '...' if _ref_text and len(_ref_text) > 30 else (_ref_text or 'vazio')
+            print(f"[Native] Gerando{chunk_label}: mode={voice_mode} lang={lang or 'Auto'} speed={speed} cfg={guidance_scale} steps={num_step} denoise={denoise} postprocess={postprocess_output} instruct='{instruct}' ref_text='{_ref_text_preview}' pitch_shift={pitch_shift_semitones:+.1f} text='{chunk_text[:40]}...'")
             
             start_chunk = time.time()
             loop = asyncio.get_event_loop()

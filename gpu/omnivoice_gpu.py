@@ -790,12 +790,39 @@ async def native_generate(request):
 
                 # TRUNCAR audio de referencia para max 10 segundos
                 # Audio muito longo faz o modelo misturar ref com geracao e acelerar a fala
+                # Truncamento inteligente: cortar em fronteira de silencio (nao hard cut)
                 MAX_REF_SECONDS = 10
                 max_samples = SAMPLE_RATE * MAX_REF_SECONDS
                 if len(ref_audio_array) > max_samples:
-                    # Pegar os primeiros 10s (geralmente tem a fala mais clara)
-                    ref_audio_array = ref_audio_array[:max_samples]
-                    print(f"[Native] TRUNCADO: ref audio limitado a {MAX_REF_SECONDS}s (era {info.duration:.1f}s)")
+                    # Tentar encontrar silencio perto do limite de 10s
+                    search_start = int(SAMPLE_RATE * 8)  # comecar a buscar a partir de 8s
+                    search_end = min(int(SAMPLE_RATE * 10.5), len(ref_audio_array))  # ate 10.5s
+                    cut_point = max_samples  # default: hard cut em 10s
+
+                    if search_end > search_start:
+                        try:
+                            import librosa
+                            # Buscar janela de silencio (-30dB) entre 8s e 10.5s
+                            window_samples = ref_audio_array[search_start:search_end]
+                            frame_len = int(SAMPLE_RATE * 0.025)  # 25ms frames
+                            rms_vals = []
+                            for i in range(0, len(window_samples) - frame_len, frame_len):
+                                rms = np.sqrt(np.mean(window_samples[i:i+frame_len] ** 2))
+                                rms_vals.append(rms)
+                            if rms_vals:
+                                peak_rms = max(rms_vals) if max(rms_vals) > 0 else 1
+                                threshold = peak_rms * 0.05  # 5% do pico = silencio
+                                # Encontrar ultimo ponto de silencio antes do limite
+                                for i in range(len(rms_vals) - 1, -1, -1):
+                                    if rms_vals[i] < threshold:
+                                        cut_point = search_start + (i + 1) * frame_len
+                                        break
+                        except Exception as e:
+                            print(f"[Native] TRUNC smart: busca de silencio falhou ({e}), hard cut")
+
+                    ref_audio_array = ref_audio_array[:cut_point]
+                    new_dur = len(ref_audio_array) / SAMPLE_RATE
+                    print(f"[Native] TRUNCADO: ref audio limitado a {new_dur:.1f}s (era {info.duration:.1f}s, corte em {'silencio' if cut_point != max_samples else 'hard cut'})")
             except Exception as e:
                 print(f"[Native] Erro ao carregar audio: {e}")
                 return JSONResponse({"status": "error", "error": f"Falha ao carregar audio: {e}"}, status_code=500)
@@ -868,10 +895,41 @@ async def native_generate(request):
         # que tem bug de tuple unpacking em versoes antigas da biblioteca
         if voice_mode == 'clone' and ref_audio_array is not None:
             _ref_text = ref_text.strip() if ref_text and ref_text.strip() else None
+
+            # ============================================================
+            # AUTO-TRANSCRICAO WHISPER quando ref_text vazio
+            # Vozes agudas/femininas sem ref_text DELIRAM (misturam ref,
+            # falam acelerado). O Whisper do proprio modelo transcreve
+            # o ref_audio para dar o guia de prosódia que o modelo precisa.
+            # Vozes graves funcionam sem ref_text, mas com ref_text ficam
+            # ainda mais consistentes.
+            # ============================================================
+            if not _ref_text:
+                try:
+                    if _model is not None and hasattr(_model, 'transcribe'):
+                        print("[AutoASR] ref_text vazio → transcrevendo ref_audio com Whisper...")
+                        asr_start = time.time()
+                        loop = asyncio.get_event_loop()
+                        asr_text = await loop.run_in_executor(
+                            None,
+                            lambda: _model.transcribe((ref_audio_array, SAMPLE_RATE))
+                        )
+                        asr_elapsed = time.time() - asr_start
+                        asr_str = str(asr_text).strip() if asr_text else ''
+                        if asr_str and len(asr_str) > 2:
+                            _ref_text = asr_str
+                            print(f"[AutoASR] Whisper transcrito em {asr_elapsed:.1f}s: '{asr_str[:80]}{'...' if len(asr_str) > 80 else ''}'")
+                        else:
+                            print(f"[AutoASR] Whisper retornou vazio ou muito curto: '{asr_str}' — gerando sem ref_text")
+                    else:
+                        print("[AutoASR] Modelo nao tem transcribe() — gerando sem ref_text")
+                except Exception as e:
+                    print(f"[AutoASR] Falha na transcricao: {e} — gerando sem ref_text")
+
             kw["ref_audio"] = (ref_audio_array, SAMPLE_RATE)
             if _ref_text:
                 kw["ref_text"] = _ref_text
-            print(f"[Native] Clone: ref_audio direto ref_text={'sim' if _ref_text else 'ASR-auto'}")
+            print(f"[Native] Clone: ref_audio direto ref_text={'sim' if _ref_text else 'vazio (sem ASR)'}")
         elif voice_mode == 'auto':
             # Modo auto: sem instruct, sem referencia — modelo escolhe voz livre
             print(f"[Native] Modo auto: modelo escolhe a voz")

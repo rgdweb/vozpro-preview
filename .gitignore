@@ -100,3 +100,4 @@ vercel.json
 bun.lock
 test_migration.py
 src/app/page-backup.tsx
+.z-ai-config

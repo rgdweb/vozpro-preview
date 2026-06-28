@@ -895,6 +895,9 @@ async def native_generate(request):
             print(f"[PitchShift] ENTRADA: +{pitch_shift_semitones:.1f} semitons no ref_audio")
             ref_audio_array = _pitch_shift_audio(ref_audio_array, SAMPLE_RATE, pitch_shift_semitones)
 
+        # _ref_text inicializado para evitar NameError em modos nao-clone
+        _ref_text = None
+
         # Voice clone (so no modo clone) — passa ref_audio direto sem create_voice_clone_prompt
         # que tem bug de tuple unpacking em versoes antigas da biblioteca
         if voice_mode == 'clone' and ref_audio_array is not None:
@@ -1049,7 +1052,7 @@ async def native_generate(request):
                 chunk_kw["ref_audio"] = (ref_audio_array, SAMPLE_RATE)
             
             chunk_label = f" [{chunk_idx+1}/{len(text_chunks)}]" if len(text_chunks) > 1 else ""
-            _ref_text_preview = (_ref_text[:30] + '...') if _ref_text and len(_ref_text) > 30 else (_ref_text if _ref_text else '(omitido - Whisper interno)')
+            _ref_text_preview = (_ref_text[:30] + '...') if _ref_text and len(_ref_text) > 30 else (_ref_text if _ref_text else '(sem ref_text)')
             print(f"[Native] Gerando{chunk_label}: mode={voice_mode} lang={lang or 'Auto'} speed={speed} cfg={guidance_scale} steps={num_step} denoise={denoise} postprocess={postprocess_output} instruct='{instruct}' ref_text='{_ref_text_preview}' pitch_shift={pitch_shift_semitones:+.1f} text='{chunk_text[:40]}...'")
             
             start_chunk = time.time()

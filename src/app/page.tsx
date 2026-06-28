@@ -2359,7 +2359,7 @@ export default function VozProClient() {
               </CardHeader>
               <CardContent className="space-y-4">
                 {/* Mode buttons */}
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => setVoiceMode('clone')}
                     className={`p-3 rounded-xl border text-center transition-all duration-300 ${
@@ -2373,20 +2373,6 @@ export default function VozProClient() {
                       Clonar Voz
                     </div>
                     <div className="text-[10px] text-slate-600 mt-1">Usa áudio de referência</div>
-                  </button>
-                  <button
-                    onClick={() => setVoiceMode('design')}
-                    className={`p-3 rounded-xl border text-center transition-all duration-300 ${
-                      voiceMode === 'design'
-                        ? 'border-purple-500 bg-purple-500/20'
-                        : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
-                    }`}
-                  >
-                    <div className="text-lg mb-1">✨</div>
-                    <div className={`text-xs font-medium ${voiceMode === 'design' ? 'text-purple-200' : 'text-slate-400'}`}>
-                      Voice Design
-                    </div>
-                    <div className="text-[10px] text-slate-600 mt-1">Cria voz com descrição</div>
                   </button>
                   <button
                     onClick={() => setVoiceMode('auto')}
@@ -2403,22 +2389,6 @@ export default function VozProClient() {
                     <div className="text-[10px] text-slate-600 mt-1">Modelo escolhe sozinho</div>
                   </button>
                 </div>
-
-                {/* Voice Design input */}
-                {voiceMode === 'design' && (
-                  <div className="space-y-2 pt-2 border-t border-white/10">
-                    <label className="text-sm text-slate-400">Descreva a voz desejada</label>
-                    <Input
-                      value={voiceDesignInstruct}
-                      onChange={(e) => setVoiceDesignInstruct(e.target.value)}
-                      placeholder="female, young, low pitch, whisper, british accent"
-                      className="bg-white/5 border-white/10 text-white placeholder:text-slate-600 focus:border-violet-500"
-                    />
-                    <p className="text-[10px] text-slate-600">
-                      Atributos: <b>gender</b> (male/female), <b>age</b> (child/teen/young/old), <b>pitch</b> (low/moderate/high), <b>style</b> (whisper), <b>accent</b> (brazilian/british/american/japanese)
-                    </p>
-                  </div>
-                )}
 
                 {/* Auto mode hint */}
                 {voiceMode === 'auto' && (

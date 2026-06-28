@@ -3717,7 +3717,7 @@ export default function VozProClient() {
         onOpenChange={setPaymentDialogOpen}
         onPaymentApproved={handlePaymentApproved}
         onEmailSent={() => toast.success('Áudio enviado por e-mail!', { duration: 3000 })}
-        audioUrl={audioUrl || ''}
+        audioUrl={cleanMixedUrl || audioUrl || ''}
         amount={paymentAmount}
         isPaymentExempt={paymentExempt}
         freeDownloads={freeDownloads}

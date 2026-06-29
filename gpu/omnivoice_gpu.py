@@ -851,17 +851,42 @@ async def native_generate(request):
         _ref_text = None
 
         # Voice clone — MANDA TUDO CRU pro OmniVoice
-        # Sem AutoASR, sem auto-instruct, sem pre-processamento
-        # O modelo processa tudo naturalmente como na interface nativa
+        # EXCECAO: AutoASR com model.transcribe() quando ref_text vazio
+        # O Whisper INTERNO da geracao alucina (gera 70s de audio com COVID etc)
+        # O model.transcribe() dedicado roda separado e NAO alucina
         if voice_mode == 'clone' and ref_audio_array is not None:
             _ref_text = ref_text.strip() if ref_text and ref_text.strip() else None
+
+            # AutoASR: transcrever com model.transcribe() quando ref_text vazio
+            # PROVADO pelos logs: sem ref_text → 70s alucinacao; com ref_text → 29s correto
+            if not _ref_text:
+                try:
+                    if _model is not None and hasattr(_model, 'transcribe'):
+                        print("[AutoASR] ref_text vazio → transcrevendo com model.transcribe()...")
+                        asr_start = time.time()
+                        loop = asyncio.get_event_loop()
+                        asr_text = await loop.run_in_executor(
+                            None,
+                            lambda: _model.transcribe((ref_audio_array, SAMPLE_RATE))
+                        )
+                        asr_elapsed = time.time() - asr_start
+                        asr_str = str(asr_text).strip() if asr_text else ''
+                        if asr_str and len(asr_str) > 5:
+                            _ref_text = asr_str
+                            print(f"[AutoASR] OK em {asr_elapsed:.1f}s: '{asr_str[:80]}{'...' if len(asr_str) > 80 else ''}'")
+                        else:
+                            print(f"[AutoASR] Whisper retornou vazio — gerando SEM ref_text")
+                    else:
+                        print("[AutoASR] Modelo sem transcribe() — gerando SEM ref_text")
+                except Exception as e:
+                    print(f"[AutoASR] Falha: {e} — gerando SEM ref_text")
 
             kw["ref_audio"] = (ref_audio_array, SAMPLE_RATE)
             if _ref_text:
                 kw["ref_text"] = _ref_text
                 print(f"[Native] Clone: ref_audio + ref_text ('{_ref_text[:50]}{'...' if len(_ref_text) > 50 else ''}')")
             else:
-                print(f"[Native] Clone: ref_audio SEM ref_text (modelo transcreve internamente)")
+                print(f"[Native] Clone: ref_audio SEM ref_text (fallback)")
 
             # instruct passado direto do frontend/admin — sem auto-deteccao
             if instruct and instruct.strip():

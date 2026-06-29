@@ -773,55 +773,9 @@ async def native_generate(request):
                     ref_audio_array = tensor_audio.squeeze(0).detach().numpy()
                     print(f"[Native] Resampling: {ref_sr} -> {SAMPLE_RATE}")
 
-                # TRIM DE SILENCIO — remover silencio do inicio e fim do ref_audio
-                # Silencio no inicio faz o modelo gerar "preâmbulo" (fala fantasma antes do texto)
-                try:
-                    import librosa
-                    trimmed, _ = librosa.effects.trim(ref_audio_array, top_db=25)
-                    if len(trimmed) > SAMPLE_RATE * 0.3:  # pelo menos 0.3s apos trim
-                        removed_start = (len(ref_audio_array) - len(trimmed)) / SAMPLE_RATE
-                        ref_audio_array = trimmed
-                        if removed_start > 0.15:
-                            print(f"[Native] TRIM: removido {removed_start:.2f}s de silencio do ref_audio")
-                    else:
-                        print("[Native] TRIM: ref_audio muito curto apos trim, mantendo original")
-                except Exception as e:
-                    print(f"[Native] TRIM: falhou ({e}), mantendo original")
-
-                # TRUNCAR audio de referencia para max 10 segundos
-                # Docs oficiais OmniVoice: "Use a 3-10 seconds reference audio clip.
-                # Longer audio slows down inference and may degrade cloning quality."
-                # Truncamento inteligente: cortar em fronteira de silencio (nao hard cut)
-                MAX_REF_SECONDS = 10
-                max_samples = SAMPLE_RATE * MAX_REF_SECONDS
-                if len(ref_audio_array) > max_samples:
-                    # Tentar encontrar silencio perto do limite de 10s
-                    search_start = int(SAMPLE_RATE * 8)  # comecar a buscar a partir de 8s
-                    search_end = min(int(SAMPLE_RATE * 10.5), len(ref_audio_array))  # ate 10.5s
-                    cut_point = max_samples  # default: hard cut em 10s
-
-                    if search_end > search_start:
-                        try:
-                            frame_len = int(SAMPLE_RATE * 0.025)
-                            window_samples = ref_audio_array[search_start:search_end]
-                            rms_vals = []
-                            for i in range(0, len(window_samples) - frame_len, frame_len):
-                                rms = np.sqrt(np.mean(window_samples[i:i+frame_len] ** 2))
-                                rms_vals.append(rms)
-                            if rms_vals:
-                                peak_rms = max(rms_vals) if max(rms_vals) > 0 else 1
-                                threshold = peak_rms * 0.05  # 5% do pico = silencio
-                                # Encontrar ultimo ponto de silencio antes do limite
-                                for i in range(len(rms_vals) - 1, -1, -1):
-                                    if rms_vals[i] < threshold:
-                                        cut_point = search_start + (i + 1) * frame_len
-                                        break
-                        except Exception as e:
-                            print(f"[Native] TRUNC smart: busca de silencio falhou ({e}), hard cut")
-
-                    ref_audio_array = ref_audio_array[:cut_point]
-                    new_dur = len(ref_audio_array) / SAMPLE_RATE
-                    print(f"[Native] TRUNCADO: ref audio limitado a {new_dur:.1f}s (era {info.duration:.1f}s, corte em {'silencio' if cut_point != max_samples else 'hard cut'})")
+                # Resampling necessario (modelo exige 24kHz) — isso nao altera o audio,
+                # so converte o formato. Audio segue CRU para o OmniVoice.
+                # SEM trim de silencio, SEM truncamento — o modelo processa tudo.
             except Exception as e:
                 print(f"[Native] Erro ao carregar audio: {e}")
                 return JSONResponse({"status": "error", "error": f"Falha ao carregar audio: {e}"}, status_code=500)
@@ -843,9 +797,8 @@ async def native_generate(request):
         except ImportError:
             gen_config = None
 
-        # FORCAR idioma PT-BR — language=Auto causa confusao em vozes agudas
-        # O modelo detecta idioma errado e mistura fonemas de outros idiomas
-        lang = 'pt' if (not language or language == "Auto") else language
+        # Language: deixar o modelo detectar (Auto) — ele sabe fazer isso
+        lang = language if (language and language != "Auto") else None
 
         if gen_config is not None:
             kw = dict(text=text.strip(), language=lang, generation_config=gen_config)
@@ -861,10 +814,9 @@ async def native_generate(request):
         # O modelo OmniVoice usa speed para controlar ritmo — duration fixo
         # pode causar atropelo e artefatos.
 
-        # NOTE: instruct é adicionado DENTRO do bloco clone abaixo
-        # (auto-detectado por F0 ou passado pelo admin)
-        # Fora do modo clone, instruct é passado normalmente
-        if voice_mode != 'clone' and instruct and instruct.strip():
+        # NOTE: instruct é passado DIRETO do frontend/admin para o modelo
+        # Sem auto-deteccao — o OmniVoice processa tudo cru
+        if instruct and instruct.strip():
             kw["instruct"] = instruct.strip()
 
         # ================================================================
@@ -898,125 +850,20 @@ async def native_generate(request):
         # _ref_text inicializado para evitar NameError em modos nao-clone
         _ref_text = None
 
-        # Voice clone (so no modo clone) — passa ref_audio direto sem create_voice_clone_prompt
-        # que tem bug de tuple unpacking em versoes antigas da biblioteca
+        # Voice clone — MANDA TUDO CRU pro OmniVoice
+        # Sem AutoASR, sem auto-instruct, sem pre-processamento
+        # O modelo processa tudo naturalmente como na interface nativa
         if voice_mode == 'clone' and ref_audio_array is not None:
             _ref_text = ref_text.strip() if ref_text and ref_text.strip() else None
-
-            # ============================================================
-            # AUTO-TRANSCRICAO com model.transcribe() quando ref_text ruim
-            #
-            # PROVADO pelos logs: omitir ref_text causou 50.3s de alucinacao
-            # (COVID no texto). Com ref_text correto: 29.2s perfeito.
-            #
-            # Docs OmniVoice: omitir ref_text funciona MAS causa instabilidade.
-            # model.transcribe() dedicado funciona MELHOR que o Whisper
-            # interno da geracao (é executado separadamente, com mais contexto).
-            #
-            # Regra: ref_text < 15 chars → transcrever com model.transcribe()
-            # ============================================================
-            MIN_REFTEXT_LEN = 15
-            if not _ref_text or len(_ref_text) < MIN_REFTEXT_LEN:
-                _old_ref = _ref_text or '(vazio)'
-                try:
-                    if _model is not None and hasattr(_model, 'transcribe'):
-                        print(f"[AutoASR] ref_text='{_old_ref}' ({len(_ref_text or '')} chars) → transcrevendo com model.transcribe()...")
-                        asr_start = time.time()
-                        loop = asyncio.get_event_loop()
-                        asr_text = await loop.run_in_executor(
-                            None,
-                            lambda: _model.transcribe((ref_audio_array, SAMPLE_RATE))
-                        )
-                        asr_elapsed = time.time() - asr_start
-                        asr_str = str(asr_text).strip() if asr_text else ''
-                        if asr_str and len(asr_str) > len(_ref_text or ''):
-                            _ref_text = asr_str
-                            print(f"[AutoASR] OK em {asr_elapsed:.1f}s: '{asr_str[:80]}{'...' if len(asr_str) > 80 else ''}'")
-                        else:
-                            _ref_text = None  # Omitir se Whisper falhou
-                            print(f"[AutoASR] Whisper retornou vazio — gerando SEM ref_text")
-                    else:
-                        _ref_text = None
-                        print("[AutoASR] Modelo sem transcribe() — gerando SEM ref_text")
-                except Exception as e:
-                    _ref_text = None
-                    print(f"[AutoASR] Falha: {e} — gerando SEM ref_text")
 
             kw["ref_audio"] = (ref_audio_array, SAMPLE_RATE)
             if _ref_text:
                 kw["ref_text"] = _ref_text
                 print(f"[Native] Clone: ref_audio + ref_text ('{_ref_text[:50]}{'...' if len(_ref_text) > 50 else ''}')")
             else:
-                print(f"[Native] Clone: ref_audio SEM ref_text (fallback)")
+                print(f"[Native] Clone: ref_audio SEM ref_text (modelo transcreve internamente)")
 
-            # ============================================================
-            # INSTRUCT AUTOMATICO baseado no ref_audio
-            #
-            # Docs oficiais OmniVoice:
-            #   "When ref_audio and instruct are consistent, instruct
-            #    can improve cloning stability."
-            #
-            # Detectar F0 do ref_audio e gerar instruct que combina:
-            #   F0 < 140Hz → "male, low pitch" ou "male, very low pitch"
-            #   F0 140-200Hz → "male, moderate pitch" ou "female, low pitch"
-            #   F0 > 200Hz → "female, high pitch" ou "female, moderate pitch"
-            #
-            # Se o admin ja passou instruct, RESPEITAR (ele sabe melhor).
-            # ============================================================
-            if not instruct or not instruct.strip():
-                try:
-                    _detected_f0 = None
-                    # Tentar pyin (alta precisao)
-                    try:
-                        import librosa
-                        f0_arr, voiced_flags, voiced_probs = librosa.pyin(
-                            ref_audio_array.astype(np.float32),
-                            fmin=60, fmax=500, sr=SAMPLE_RATE, frame_length=2048,
-                        )
-                        voiced_f0 = f0_arr[voiced_flags & (voiced_probs > 0.5)]
-                        if len(voiced_f0) > 5:
-                            _detected_f0 = float(np.median(voiced_f0))
-                    except ImportError:
-                        pass
-                    except Exception:
-                        pass
-
-                    # Fallback: autocorrelacao
-                    if _detected_f0 is None and len(ref_audio_array) > SAMPLE_RATE:
-                        try:
-                            window = ref_audio_array[int(SAMPLE_RATE*0.3):int(SAMPLE_RATE*0.7)].astype(np.float64)
-                            window = window - np.mean(window)
-                            corr = np.correlate(window, window, mode='full')
-                            corr = corr[len(corr)//2:]
-                            if corr[0] > 0:
-                                corr = corr / corr[0]
-                            min_lag = int(SAMPLE_RATE / 500)
-                            max_lag = int(SAMPLE_RATE / 60)
-                            if max_lag < len(corr):
-                                search = corr[min_lag:max_lag]
-                                if len(search) > 0 and np.max(search) > 0.3:
-                                    _detected_f0 = SAMPLE_RATE / (np.argmax(search) + min_lag)
-                        except Exception:
-                            pass
-
-                    # Gerar instruct baseado no F0
-                    if _detected_f0 is not None:
-                        if _detected_f0 < 120:
-                            instruct = 'male, very low pitch'
-                        elif _detected_f0 < 160:
-                            instruct = 'male, low pitch'
-                        elif _detected_f0 < 200:
-                            instruct = 'female, low pitch'
-                        elif _detected_f0 < 280:
-                            instruct = 'female, moderate pitch'
-                        else:
-                            instruct = 'female, high pitch'
-                        print(f"[Instruct] F0={_detected_f0:.0f}Hz → auto-instruct='{instruct}'")
-                    else:
-                        print("[Instruct] F0 nao detectado — sem auto-instruct")
-                except Exception as e:
-                    print(f"[Instruct] Deteccao falhou: {e}")
-
+            # instruct passado direto do frontend/admin — sem auto-deteccao
             if instruct and instruct.strip():
                 kw["instruct"] = instruct.strip()
         elif voice_mode == 'auto':
@@ -1031,15 +878,8 @@ async def native_generate(request):
         # ================================================================
         _pre_generate_cleanup()
 
-        # Split apenas para textos MUITO longos (>1000 chars)
-        # O OmniVoice nativo cuida de textos normais sem split
-        # Split agressivo (250 chars) cortava frases no meio e causava
-        # pausas artificiais. Apenas split de segurança para >1000.
-        need_split = len(text) > 1000
-        if need_split:
-            text_chunks = _split_text_for_generation(text, max_chars=250)
-        else:
-            text_chunks = [text]
+        # Texto CRU — sem split, o OmniVoice processa texto inteiro
+        text_chunks = [text]
         
         all_audio = []
         total_gen_time = 0.0

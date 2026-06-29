@@ -52,9 +52,9 @@ import AudioPlayer from '@/components/audio-player'
  * - 80s stereo 192kbps = ~1.9MB — cabe facil no Vercel
  */
 
-const MAX_UPLOAD_SIZE = 3.5 * 1024 * 1024 // 3.5MB (margem segura do limite 4.5MB)
-const MAX_DURATION = 80 // segundos maximo para trilha de propaganda
-const MP3_BITRATE = 320 // kbps — qualidade maxima do MP3 (80s * 320kbps ≈ 3.0MB, dentro do limite)
+const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024 // 1GB — sem limite pratico (era 3.5MB)
+const MAX_DURATION = 3600 // 1h — sem limite pratico (era 80s)
+const MP3_BITRATE = 320 // kbps — qualidade maxima do MP3
 
 /**
  * Converte AudioBuffer para MP3 usando lamejs (alta qualidade, arquivo pequeno).
@@ -156,7 +156,7 @@ async function processTrackFile(file: File): Promise<{ blob: Blob; name: string;
 // ===================== VOICE AUDIO TRIMMER =====================
 // Corta audio de referencia com waveform visual: auto-trim (detecta voz) ou manual (slider).
 
-const VOICE_AUTO_TRIM_SECONDS = 10 // target de duracao apos auto-trim
+const VOICE_AUTO_TRIM_SECONDS = 3600 // sem limite — era 10s (cortava audio de voz)
 const SILENCE_THRESHOLD = 0.015 // RMS absoluto para detectVoiceRange (auto-trim)
 const SILENCE_DETECT_WINDOW = 40 // ms - janela fina para detectar silencios com precisao
 const MIN_SILENCE_TO_CUT = 120 // ms - silencio minimo para marcar (mais sensivel)

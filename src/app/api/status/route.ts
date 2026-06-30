@@ -55,14 +55,8 @@ export async function GET() {
       checks.audioServer = { ok: false, message: 'AUDIO_SERVER_URL não configurada no Vercel' }
     }
 
-    // 3. HuggingFace Space
-    const hfUrl = process.env.HF_SPACE_URL || 'https://k2-fsa-omnivoice.hf.space'
-    try {
-      const res = await fetch(hfUrl, { signal: AbortSignal.timeout(10000) })
-      checks.hfSpace = { ok: res.ok, message: `${hfUrl} - ${res.ok ? 'Online' : `Status ${res.status}`}` }
-    } catch {
-      checks.hfSpace = { ok: false, message: `${hfUrl} - NÃO RESPONDE` }
-    }
+    // 3. HuggingFace Space — removido (space morto/404, nao usado)
+    checks.hfSpace = { ok: false, message: 'HF Space removido do sistema' }
 
     // 4. Variations with/without audio
     try {

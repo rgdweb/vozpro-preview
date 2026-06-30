@@ -38,7 +38,6 @@ import { uploadToAudioServer } from '@/lib/audio-server'
 
 export const maxDuration = 60
 
-const HF_SPACE_URL = process.env.HF_SPACE_URL || 'https://k2-fsa-omnivoice.hf.space'
 const GPU_DIRECT_URL = process.env.GPU_DIRECT_URL || 'http://10.99.0.2:7860'
 
 /**
@@ -89,37 +88,15 @@ export async function POST(req: NextRequest) {
     const audioServerResult = await uploadToAudioServer(file, uniqueName, 'ref')
     console.log('[UploadVoice] Saved to audio server:', audioServerResult.url)
 
-    // Step 2: Upload the file to the Gradio Space's upload endpoint
-    const uploadForm = new FormData()
-    uploadForm.append('files', file)
-
-    let hfPath = ''
-    try {
-      const uploadRes = await fetch(`${HF_SPACE_URL}/gradio_api/upload`, {
-        method: 'POST',
-        body: uploadForm,
-      })
-
-      if (uploadRes.ok) {
-        const uploadData = await uploadRes.json()
-        if (Array.isArray(uploadData) && uploadData.length > 0) {
-          hfPath = uploadData[0]
-          console.log('[UploadVoice] Also uploaded to HF Space:', hfPath)
-        }
-      } else {
-        const errText = await uploadRes.text()
-        console.error('[UploadVoice] HF upload error:', uploadRes.status, errText)
-      }
-    } catch (err) {
-      console.error('[UploadVoice] HF upload failed, will re-upload on generate:', err)
-    }
+    // HF Space upload removido — space morto (404), causava timeout desnecessario.
+    // Upload fica so no PHP server (fonte de verdade) + AutoASR no GPU.
 
     // Step 3: Auto-transcrever o áudio usando GPU ASR (Whisper)
     const refText = await autoTranscribe(audioServerResult.url)
 
-    // Return success with both URLs + transcription
+    // Return success with PHP URL + transcription
     return NextResponse.json({
-      path: hfPath,                                // HF Space path (temporary, may expire)
+      path: '',                                     // HF Space removido (vazio)
       serverUrl: audioServerResult.url,            // PHP hosting URL (permanent)
       filename: audioServerResult.filename,        // filename on server (for deletion)
       url: audioServerResult.url,                  // permanent URL for reference

@@ -6,7 +6,7 @@ import { transcribeFromUrl } from '@/lib/asr-transcriber'
 
 export const maxDuration = 120
 
-const HF_SPACE_URL = process.env.HF_SPACE_URL || 'https://k2-fsa-omnivoice.hf.space'
+// HF Space removido — space morto (404), causava timeout desnecessario
 
 /**
  * POST /api/admin/voices/bulk-upload
@@ -65,26 +65,9 @@ export async function POST(req: NextRequest) {
 
         const audioServerResult = await uploadToAudioServer(file, uniqueName, 'ref')
 
-        // 2. Upload para HuggingFace Space (opcional, melhora performance)
-        let hfPath = ''
-        try {
-          const uploadForm = new FormData()
-          uploadForm.append('files', file)
-          const uploadRes = await fetch(`${HF_SPACE_URL}/gradio_api/upload`, {
-            method: 'POST',
-            body: uploadForm,
-          })
-          if (uploadRes.ok) {
-            const uploadData = await uploadRes.json()
-            if (Array.isArray(uploadData) && uploadData.length > 0) {
-              hfPath = uploadData[0]
-            }
-          }
-        } catch {
-          // HF upload falhou, não é crítico — será re-uploaded na geração
-        }
+        // HF Space upload removido — space morto (404). Upload fica so no PHP server.
 
-        // 3. Criar Voice no banco
+        // 2. Criar Voice no banco
         const voice = await db.voice.create({
           data: {
             name: baseName,
@@ -98,7 +81,7 @@ export async function POST(req: NextRequest) {
           },
         })
 
-        // 4. Auto-transcrever o áudio para preencher refText
+        // 3. Auto-transcrever o áudio para preencher refText
         // 🛡️ Sem refText, o F5-TTS gera áudio "falando em línguas"
         let refText = ''
         try {
@@ -112,13 +95,13 @@ export async function POST(req: NextRequest) {
           console.warn(`[BulkUpload] Transcrição falhou para ${baseName}`)
         }
 
-        // 5. Criar VoiceVariation com o áudio e refText
+        // 4. Criar VoiceVariation com o áudio e refText
         await db.voiceVariation.create({
           data: {
             voiceId: voice.id,
             label: 'Padrão',
             emoji: '',
-            refAudioPath: hfPath,
+            refAudioPath: '',                               // HF Space removido (vazio)
             refAudioServerUrl: audioServerResult.url,
             refAudioFilename: audioServerResult.filename,
             refAudioName: file.name,

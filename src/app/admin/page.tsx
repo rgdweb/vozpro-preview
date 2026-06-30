@@ -1732,7 +1732,12 @@ export default function AdminDashboard() {
         const transcribeUrl = variation.refAudioServerUrl || variation.refAudioPath
         if (transcribeUrl) {
           // Transcrever em background (não bloqueia o editor)
-          handleTranscribeAudio(transcribeUrl)
+          autoTranscribeAudio(transcribeUrl).then(transcribed => {
+            if (transcribed) {
+              setVariationForm(prev => prev ? { ...prev, refText: transcribed } : prev)
+              toast.success('Transcrição automática: ' + transcribed.substring(0, 50) + (transcribed.length > 50 ? '...' : ''))
+            }
+          }).catch(() => { /* falha silenciosa — não bloqueia edição */ })
         }
       }
     } catch (err) {

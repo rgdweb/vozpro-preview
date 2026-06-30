@@ -938,7 +938,9 @@ async def native_generate(request):
             chunk_kw = dict(kw)
             chunk_kw["text"] = chunk_text.strip()
             
-            if voice_mode == 'clone' and ref_audio_array is not None:
+            # Só adicionar ref_audio se NAO tiver voice_clone_prompt
+            # (voice_clone_prompt já contém o ref_audio processado)
+            if voice_mode == 'clone' and ref_audio_array is not None and 'voice_clone_prompt' not in kw:
                 chunk_kw["ref_audio"] = (ref_audio_array, SAMPLE_RATE)
             
             chunk_label = f" [{chunk_idx+1}/{len(text_chunks)}]" if len(text_chunks) > 1 else ""

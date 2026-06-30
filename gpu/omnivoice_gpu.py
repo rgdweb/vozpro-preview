@@ -594,6 +594,14 @@ async def asr_transcribe(request):
                 tensor_audio = resampler(tensor_audio)
                 audio_array = tensor_audio.squeeze(0).detach().numpy()
 
+            # Truncar para 30s antes de transcrever (limite do Whisper)
+            # Whisper crasha com >3000 mel features (>30s) com ValueError
+            MAX_ASR_SECONDS = 30
+            max_asr_samples = SAMPLE_RATE * MAX_ASR_SECONDS
+            if len(audio_array) > max_asr_samples:
+                audio_array = audio_array[:max_asr_samples]
+                print(f"[ASR] Truncado para {MAX_ASR_SECONDS}s (era {info.duration:.1f}s) — limite Whisper")
+
             # Transcrever usando o modelo OmniVoice (Whisper-large-v3-turbo)
             loop = asyncio.get_event_loop()
             transcription = await loop.run_in_executor(
@@ -863,11 +871,18 @@ async def native_generate(request):
                 try:
                     if _model is not None and hasattr(_model, 'transcribe'):
                         print("[AutoASR] ref_text vazio → transcrevendo com model.transcribe()...")
+                        # Truncar para 30s APENAS para transcrição (limite Whisper)
+                        # O áudio que vai pro modelo na geração continua INTEIRO, cru
+                        MAX_ASR_SECONDS = 30
+                        asr_audio = ref_audio_array
+                        if len(ref_audio_array) > SAMPLE_RATE * MAX_ASR_SECONDS:
+                            asr_audio = ref_audio_array[:SAMPLE_RATE * MAX_ASR_SECONDS]
+                            print(f"[AutoASR] Truncado para {MAX_ASR_SECONDS}s para transcrição (áudio original mantido integro para geração)")
                         asr_start = time.time()
                         loop = asyncio.get_event_loop()
                         asr_text = await loop.run_in_executor(
                             None,
-                            lambda: _model.transcribe((ref_audio_array, SAMPLE_RATE))
+                            lambda: _model.transcribe((asr_audio, SAMPLE_RATE))
                         )
                         asr_elapsed = time.time() - asr_start
                         asr_str = str(asr_text).strip() if asr_text else ''

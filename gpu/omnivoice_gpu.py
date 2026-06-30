@@ -858,52 +858,62 @@ async def native_generate(request):
         # _ref_text inicializado para evitar NameError em modos nao-clone
         _ref_text = None
 
-        # Voice clone — MANDA TUDO CRU pro OmniVoice
-        # EXCECAO: AutoASR com model.transcribe() quando ref_text vazio
-        # O Whisper INTERNO da geracao alucina (gera 70s de audio com COVID etc)
-        # O model.transcribe() dedicado roda separado e NAO alucina
+        # Voice clone — USA create_voice_clone_prompt como o demo oficial
+        # O demo oficial do k2-fsa usa model.create_voice_clone_prompt() que:
+        #   - Trunca áudio >20s em silêncio automaticamente
+        #   - Remove silêncio (inicio/meio/fim)
+        #   - Transcreve o áudio PROCESSADO (não original) se ref_text vazio
+        #   - Não crasha em áudios longos (lida internamente)
+        # Antes passávamos ref_audio direto + AutoASR manual — crashava em >30s
         if voice_mode == 'clone' and ref_audio_array is not None:
             _ref_text = ref_text.strip() if ref_text and ref_text.strip() else None
 
-            # AutoASR: transcrever com model.transcribe() quando ref_text vazio
-            # PROVADO pelos logs: sem ref_text → 70s alucinacao; com ref_text → 29s correto
-            if not _ref_text:
-                try:
-                    if _model is not None and hasattr(_model, 'transcribe'):
-                        print("[AutoASR] ref_text vazio → transcrevendo com model.transcribe()...")
-                        # Truncar para 30s APENAS para transcrição (limite Whisper)
-                        # O áudio que vai pro modelo na geração continua INTEIRO, cru
+            try:
+                # create_voice_clone_prompt aceita (waveform, sr) ou path
+                # waveform deve ser torch.Tensor ou np.ndarray
+                import torch as _torch
+                wav_tensor = _torch.from_numpy(ref_audio_array.astype(np.float32))
+                if wav_tensor.ndim == 1:
+                    wav_tensor = wav_tensor.unsqueeze(0)  # (1, samples) — mono
+
+                print(f"[Native] Criando voice_clone_prompt (ref_text={'sim' if _ref_text else 'auto-transcribe'})...")
+                vcp_start = time.time()
+                loop = asyncio.get_event_loop()
+                voice_clone_prompt = await loop.run_in_executor(
+                    None,
+                    lambda: _model.create_voice_clone_prompt(
+                        ref_audio=(wav_tensor, SAMPLE_RATE),
+                        ref_text=_ref_text,
+                    )
+                )
+                vcp_elapsed = time.time() - vcp_start
+                kw["voice_clone_prompt"] = voice_clone_prompt
+                print(f"[Native] voice_clone_prompt criado em {vcp_elapsed:.1f}s (demo oficial pattern)")
+            except Exception as e:
+                # Fallback: passar ref_audio direto (método antigo)
+                print(f"[Native] create_voice_clone_prompt falhou ({e}) — usando fallback ref_audio direto")
+                kw["ref_audio"] = (ref_audio_array, SAMPLE_RATE)
+                if _ref_text:
+                    kw["ref_text"] = _ref_text
+                # AutoASR fallback se ref_text vazio
+                if not _ref_text and _model is not None and hasattr(_model, 'transcribe'):
+                    try:
                         MAX_ASR_SECONDS = 30
-                        asr_audio = ref_audio_array
-                        if len(ref_audio_array) > SAMPLE_RATE * MAX_ASR_SECONDS:
-                            asr_audio = ref_audio_array[:SAMPLE_RATE * MAX_ASR_SECONDS]
-                            print(f"[AutoASR] Truncado para {MAX_ASR_SECONDS}s para transcrição (áudio original mantido integro para geração)")
-                        asr_start = time.time()
+                        asr_audio = ref_audio_array[:SAMPLE_RATE * MAX_ASR_SECONDS] if len(ref_audio_array) > SAMPLE_RATE * MAX_ASR_SECONDS else ref_audio_array
+                        print(f"[AutoASR] fallback: transcrevendo {len(asr_audio)/SAMPLE_RATE:.1f}s...")
                         loop = asyncio.get_event_loop()
                         asr_text = await loop.run_in_executor(
                             None,
                             lambda: _model.transcribe((asr_audio, SAMPLE_RATE))
                         )
-                        asr_elapsed = time.time() - asr_start
                         asr_str = str(asr_text).strip() if asr_text else ''
                         if asr_str and len(asr_str) > 5:
-                            _ref_text = asr_str
-                            print(f"[AutoASR] OK em {asr_elapsed:.1f}s: '{asr_str[:80]}{'...' if len(asr_str) > 80 else ''}'")
-                        else:
-                            print(f"[AutoASR] Whisper retornou vazio — gerando SEM ref_text")
-                    else:
-                        print("[AutoASR] Modelo sem transcribe() — gerando SEM ref_text")
-                except Exception as e:
-                    print(f"[AutoASR] Falha: {e} — gerando SEM ref_text")
+                            kw["ref_text"] = asr_str
+                            print(f"[AutoASR] fallback OK: '{asr_str[:80]}...'")
+                    except Exception as asr_err:
+                        print(f"[AutoASR] fallback falhou: {asr_err}")
 
-            kw["ref_audio"] = (ref_audio_array, SAMPLE_RATE)
-            if _ref_text:
-                kw["ref_text"] = _ref_text
-                print(f"[Native] Clone: ref_audio + ref_text ('{_ref_text[:50]}{'...' if len(_ref_text) > 50 else ''}')")
-            else:
-                print(f"[Native] Clone: ref_audio SEM ref_text (fallback)")
-
-            # instruct passado direto do frontend/admin — sem auto-deteccao
+            # instruct passado direto do frontend/admin
             if instruct and instruct.strip():
                 kw["instruct"] = instruct.strip()
         elif voice_mode == 'auto':

@@ -661,7 +661,7 @@ async def native_generate(request):
         speed = 1.0 if speed is None else float(speed)
 
         num_step = body.get("num_step", None)
-        num_step = 16 if num_step is None else int(num_step)  # 16 = mais rapido (era 32)
+        num_step = 32 if num_step is None else int(num_step)
 
         guidance_scale = body.get("guidance_scale", None)
         guidance_scale = 2.0 if guidance_scale is None else float(guidance_scale)

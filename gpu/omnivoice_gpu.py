@@ -661,7 +661,7 @@ async def native_generate(request):
         speed = 1.0 if speed is None else float(speed)
 
         num_step = body.get("num_step", None)
-        num_step = 32 if num_step is None else int(num_step)
+        num_step = 16 if num_step is None else int(num_step)  # 16 = mais rapido (era 32)
 
         guidance_scale = body.get("guidance_scale", None)
         guidance_scale = 2.0 if guidance_scale is None else float(guidance_scale)
@@ -887,6 +887,11 @@ async def native_generate(request):
                     )
                 )
                 vcp_elapsed = time.time() - vcp_start
+                # Remover ref_text e ref_audio do kw — voice_clone_prompt já contem tudo
+                # Sem isso o modelo avisa: "Both voice_clone_prompt and ref_text/ref_audio
+                # are provided. ref_text/ref_audio will be ignored." (trabalho inutil)
+                kw.pop("ref_text", None)
+                kw.pop("ref_audio", None)
                 kw["voice_clone_prompt"] = voice_clone_prompt
                 print(f"[Native] voice_clone_prompt criado em {vcp_elapsed:.1f}s (demo oficial pattern)")
             except Exception as e:

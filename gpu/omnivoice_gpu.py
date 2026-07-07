@@ -348,8 +348,9 @@ def _master_audio(audio_array, sr):
             PeakLimiter(threshold_db=-0.3, release_ms=50),
         ])
         
-        # pedalboard espera float32 (channels, samples)
-        result_board = board(result.astype(np.float32), sr)
+        # pedalboard espera float32 (channels, samples) — adicionar dim de canal
+        audio_with_channel = result.astype(np.float32).reshape(1, -1)  # (1, samples) mono
+        result_board = board(audio_with_channel, sr)
         
         # Se retornou stereo, pegar mono
         if len(result_board.shape) > 1:
@@ -364,10 +365,12 @@ def _master_audio(audio_array, sr):
         result = np.tanh(result / threshold) * threshold
         print(f"[Master] soft clip fallback OK (pedalboard nao instalado)")
     except Exception as e:
-        # Fallback: soft clip simples
+        # Fallback: soft clip simples — mostrar erro real
+        import traceback
         threshold = 0.95
         result = np.tanh(result / threshold) * threshold
-        print(f"[Master] pedalboard falhou ({e}), soft clip fallback OK")
+        print(f"[Master] pedalboard falhou ({type(e).__name__}: {e}), soft clip fallback OK")
+        traceback.print_exc()
     
     return result.astype(np.float32)
 

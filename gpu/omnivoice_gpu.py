@@ -341,15 +341,11 @@ def _master_audio(audio_array, sr):
     
     # 3. Compressao suave + limiter via pedalboard
     try:
-        import sys as _sys
-        print(f"[Master] Python: {_sys.executable}")
-        import pedalboard as _pb_check
-        print(f"[Master] pedalboard version: {_pb_check.__version__} em {_pb_check.__file__}")
-        from pedalboard import Pedalboard, Compressor, PeakLimiter
+        from pedalboard import Pedalboard, Compressor, Limiter
         
         board = Pedalboard([
             Compressor(threshold_db=-15, ratio=3.0, attack_ms=8, release_ms=80),
-            PeakLimiter(threshold_db=-0.3, release_ms=50),
+            Limiter(threshold_db=-0.3, release_ms=50),
         ])
         
         # pedalboard espera float32 (channels, samples) — adicionar dim de canal
@@ -365,12 +361,9 @@ def _master_audio(audio_array, sr):
         print(f"[Master] pedalboard OK (compressor + limiter)")
     except ImportError as e:
         # Fallback: soft clip simples
-        import sys as _sys
         threshold = 0.95
         result = np.tanh(result / threshold) * threshold
-        print(f"[Master] soft clip fallback OK (pedalboard nao instalado)")
-        print(f"[Master] Python: {_sys.executable}")
-        print(f"[Master] ImportError: {e}")
+        print(f"[Master] soft clip fallback OK (pedalboard nao instalado): {e}")
     except Exception as e:
         # Fallback: soft clip simples — mostrar erro real
         import traceback
